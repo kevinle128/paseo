@@ -72,6 +72,7 @@ import {
   type StartupBlocker,
 } from "@/navigation/host-runtime-bootstrap";
 import { registerWorkspaceRouteNavigationRef } from "@/navigation/workspace-route-navigation";
+import { useSettingsRouteEntry } from "@/navigation/settings-presentation";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { AgentNavigationListener } from "@/desktop/agent-navigation";
@@ -83,6 +84,7 @@ import { getDesktopHost } from "@/desktop/host";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
+import { DaemonOutdatedCalloutSource } from "@/components/daemon-outdated-callout-source";
 import { useActiveWorktreeNewAction } from "@/hooks/use-active-worktree-new-action";
 import { useGlobalNewWorkspaceAction } from "@/hooks/use-global-new-workspace-action";
 import { useLatchedBoolean } from "@/hooks/use-latched-boolean";
@@ -485,6 +487,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
         <DownloadToast />
         <RosettaCalloutSource />
         <UpdateCalloutSource />
+        <DaemonOutdatedCalloutSource />
         <LegacyAgentSkillsMigration />
         <WorktreeSetupCalloutSource />
         <CommandCenterRootActions />
@@ -759,6 +762,7 @@ function OpenProjectListener() {
 }
 
 function AppWithSidebar({ children }: { children: ReactNode }) {
+  useSettingsRouteEntry();
   const pathname = usePathname();
   const hosts = useHosts();
   const storeReady = useStoreReady();
