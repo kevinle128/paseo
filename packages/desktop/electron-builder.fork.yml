@@ -1,0 +1,20 @@
+# Fork build overlay. Extends the upstream config so upstream merges stay clean.
+extends: ./electron-builder.yml
+extraMetadata:
+  # Read by src/features/fork-update-config.ts to pick the updater behavior.
+  paseoFork:
+    macUpdateMode: notify
+    feedBaseUrl: https://s3.ap-southeast-1.wasabisys.com/game-mobile-registry/paseo-desktop
+# A list replaces the base github entry; a plain object would be merged into it
+# and keep its owner and repo keys, which the generic provider rejects.
+publish:
+  - provider: generic
+    url: https://s3.ap-southeast-1.wasabisys.com/game-mobile-registry/paseo-desktop
+    # The app always requests the "latest" channel from this feed, so the
+    # manifests must be named latest*.yml whatever prerelease id the version has.
+    channel: latest
+mac:
+  identity: "-"
+  notarize: false
+win:
+  verifyUpdateCodeSignature: false

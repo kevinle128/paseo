@@ -26,6 +26,7 @@ export interface RuntimeUpdateInfo {
   releaseNotes?: unknown;
   releaseDate?: unknown;
   rolloutHours?: unknown;
+  files?: unknown;
 }
 
 export interface RuntimeUpdateCheckResult {
