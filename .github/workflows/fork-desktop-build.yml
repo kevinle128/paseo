@@ -1,0 +1,486 @@
+name: Fork Desktop Build
+
+# Builds the desktop app on GitHub-hosted runners and publishes it to the fork's
+# object storage. Only the fork runs this; the tag prefix `mf-desktop-v` matches
+# none of the tag triggers of the upstream workflows (`v*`, `desktop-v*`,
+# `app-v*`, `android-v*`, ...), so a release here never starts them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.14.0-mf.3 or 0.14.0-beta.1.mf.3. Empty derives it from the desktop package version and the run number."
+        required: false
+        default: ""
+        type: string
+      ref:
+        description: "Branch, tag or SHA to build. Empty builds the ref the workflow was started from."
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.14.0-mf.3 or 0.14.0-beta.1.mf.3. Empty derives it from the desktop package version and the run number."
+        required: false
+        default: ""
+        type: string
+      ref:
+        description: "Branch, tag or SHA to build. Empty builds the caller's ref."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: fork-desktop-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORK_REPOSITORY: kevinle128/paseo
+  DESKTOP_PACKAGE_PATH: packages/desktop
+  WASABI_ENDPOINT: https://s3.ap-southeast-1.wasabisys.com
+  WASABI_BUCKET: game-mobile-registry
+  WASABI_PREFIX: paseo-desktop
+
+jobs:
+  setup:
+    if: github.repository == 'kevinle128/paseo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Check publish secrets
+        env:
+          WASABI_ACCESS_KEY_ID: ${{ secrets.WASABI_ACCESS_KEY_ID }}
+          WASABI_SECRET_ACCESS_KEY: ${{ secrets.WASABI_SECRET_ACCESS_KEY }}
+        run: |
+          missing=()
+          [[ -n "$WASABI_ACCESS_KEY_ID" ]] || missing+=(WASABI_ACCESS_KEY_ID)
+          [[ -n "$WASABI_SECRET_ACCESS_KEY" ]] || missing+=(WASABI_SECRET_ACCESS_KEY)
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing repository secrets: ${missing[*]}. Add them under Settings > Secrets and variables > Actions, or pass them with 'secrets: inherit' when calling this workflow."
+            exit 1
+          fi
+
+      - name: Check the updater feed matches the upload location
+        run: |
+          feed="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}"
+          if ! grep -Fq "url: ${feed}" "${DESKTOP_PACKAGE_PATH}/electron-builder.fork.yml"; then
+            echo "::error::${DESKTOP_PACKAGE_PATH}/electron-builder.fork.yml does not publish to ${feed}"
+            exit 1
+          fi
+
+      - name: Resolve version and tag
+        id: resolve
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT_VERSION"
+          if [[ -z "$version" ]]; then
+            base="$(node -p "require('./${DESKTOP_PACKAGE_PATH}/package.json').version")"
+            if [[ "$base" == *-* ]]; then
+              version="${base}.mf.${GITHUB_RUN_NUMBER}"
+            else
+              version="${base}-mf.${GITHUB_RUN_NUMBER}"
+            fi
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+\.mf\.[0-9]+|-mf\.[0-9]+)$ ]]; then
+            echo "::error::Version '$version' must look like X.Y.Z-mf.N or X.Y.Z-beta.K.mf.N"
+            exit 1
+          fi
+          tag="mf-desktop-v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null; then
+            echo "::error::Tag ${tag} already exists. Choose another version."
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building ${version} from $(git rev-parse HEAD)"
+
+  build-macos:
+    needs: [setup]
+    if: github.repository == 'kevinle128/paseo'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            electron_arch: arm64
+            node_heap_mb: 4096
+          - runner: macos-15-intel
+            electron_arch: x64
+            node_heap_mb: 8192
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      DESKTOP_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.setup.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop package version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          packageJson.version = process.env.DESKTOP_VERSION;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+      # No Developer ID: the fork config signs ad hoc and skips notarization.
+      - name: Build desktop app
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PASEO_DESKTOP_SMOKE: "1"
+          PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
+          # Metro's jest workers OOM on the generated ws-outbound.aot.js validator,
+          # the last module in the web bundle. Node's default heap is sized from
+          # runner RAM, which is not enough on the Intel runner.
+          NODE_OPTIONS: --max-old-space-size=${{ matrix.node_heap_mb }}
+        run: |
+          set -euo pipefail
+          npm run build:desktop -- --config electron-builder.fork.yml --publish never --mac --${{ matrix.electron_arch }}
+
+      - name: Upload packaged smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-smoke-macos-${{ matrix.electron_arch }}
+          path: ${{ runner.temp }}/desktop-smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-desktop-macos-${{ matrix.electron_arch }}
+          path: |
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.dmg
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.zip
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-manifest-macos-${{ matrix.electron_arch }}
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 3
+
+  build-windows:
+    needs: [setup]
+    if: github.repository == 'kevinle128/paseo'
+    permissions:
+      contents: read
+      packages: read
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      DESKTOP_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.setup.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop package version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          packageJson.version = process.env.DESKTOP_VERSION;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+      # Unsigned: the fork config turns off update signature verification.
+      - name: Build desktop app
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PASEO_DESKTOP_SMOKE: "1"
+          PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
+        run: |
+          set -euo pipefail
+          npm run build:desktop -- --config electron-builder.fork.yml --publish never --win --x64
+
+      - name: Upload packaged smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-smoke-windows-x64
+          path: ${{ runner.temp }}/desktop-smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-desktop-windows-x64
+          path: |
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.exe
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.zip
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-manifest-windows-x64
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/latest.yml
+          if-no-files-found: error
+          retention-days: 3
+
+  build-linux:
+    needs: [setup]
+    if: github.repository == 'kevinle128/paseo'
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      DESKTOP_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.setup.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop package version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          packageJson.version = process.env.DESKTOP_VERSION;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+      - name: Install Linux smoke display and rpm tooling
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth rpm
+
+      - name: Build desktop app
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PASEO_DESKTOP_SMOKE: "1"
+          PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
+        run: |
+          set -euo pipefail
+          npm run build:desktop -- --config electron-builder.fork.yml --publish never --linux --x64
+
+      - name: Upload packaged smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-smoke-linux-x64
+          path: ${{ runner.temp }}/desktop-smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-desktop-linux-x64
+          path: |
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.AppImage
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.deb
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.rpm
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.tar.gz
+            ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-manifest-linux-x64
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 3
+
+  # Runs only when every platform built, so a feed never names a missing
+  # installer. Versioned files go up first and the feed manifests last, so a
+  # client never sees a manifest before the files it points at.
+  publish:
+    needs: [setup, build-macos, build-windows, build-linux]
+    if: github.repository == 'kevinle128/paseo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: read
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
+      RELEASE_TAG: ${{ needs.setup.outputs.tag }}
+      SOURCE_SHA: ${{ needs.setup.outputs.sha }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.WASABI_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WASABI_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ap-southeast-1
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            package.json
+            package-lock.json
+            scripts
+          ref: ${{ needs.setup.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fork-desktop-*
+          path: release
+          merge-multiple: true
+
+      - name: Download manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fork-manifest-*
+          path: manifests
+
+      - name: Build feed manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p merged feed
+          node scripts/merge-mac-manifest.mjs \
+            manifests/fork-manifest-macos-arm64/latest-mac.yml \
+            manifests/fork-manifest-macos-x64/latest-mac.yml \
+            merged/latest-mac.yml > /dev/null
+          cp manifests/fork-manifest-windows-x64/latest.yml merged/latest.yml
+          cp manifests/fork-manifest-linux-x64/latest-linux.yml merged/latest-linux.yml
+          for name in latest-mac.yml latest.yml latest-linux.yml; do
+            node scripts/fork-desktop-manifest.mjs "merged/${name}" "$VERSION" release "feed/${name}"
+          done
+          ls -la release feed
+
+      - name: Upload installers to Wasabi
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${VERSION}/"
+          if [[ -n "$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT")" ]]; then
+            echo "::error::${target} already has files. Choose another version."
+            exit 1
+          fi
+          aws s3 cp release "$target" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          uploaded="$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT" | wc -l | tr -d ' ')"
+          expected="$(find release -type f | wc -l | tr -d ' ')"
+          if [[ "$uploaded" != "$expected" ]]; then
+            echo "::error::Uploaded ${uploaded} files, expected ${expected}"
+            exit 1
+          fi
+
+      - name: Publish update manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in latest-mac.yml latest.yml latest-linux.yml; do
+            aws s3 cp "feed/${name}" "s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${name}" \
+              --endpoint-url "$WASABI_ENDPOINT" \
+              --content-type "text/yaml" \
+              --cache-control "no-cache" \
+              --only-show-errors
+          done
+
+      - name: Create tag and GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          feed="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}"
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "Paseo desktop ${VERSION}" \
+            --notes "Fork desktop build ${VERSION} from ${SOURCE_SHA}. Primary download location: ${feed}/${VERSION}/" \
+            --prerelease \
+            release/* feed/latest-mac.yml feed/latest.yml feed/latest-linux.yml
