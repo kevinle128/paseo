@@ -10,6 +10,7 @@ import {
   type LastWorkspaceSelectionStorage,
 } from "@/stores/last-workspace-selection";
 import {
+  focusWorkspaceCell as focusWorkspaceCellPure,
   navigateToLastWorkspace as navigateToLastWorkspacePure,
   navigateToWorkspace as navigateToWorkspacePure,
   parseActiveWorkspaceSelection,
@@ -70,6 +71,10 @@ export function getIsLastWorkspaceSelectionHydrated(): boolean {
 
 export function navigateToWorkspace(input: NavigateToWorkspaceInput): string {
   return navigateToWorkspacePure(input, navigateDeps());
+}
+
+export function focusWorkspaceCell(input: { serverId: string; workspaceId: string }): string {
+  return focusWorkspaceCellPure(input, navigateDeps());
 }
 
 export function navigateToLastWorkspace(): boolean {

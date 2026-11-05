@@ -445,6 +445,10 @@ export const fr: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "Agrandir la cellule",
+      restore: "Restaurer la cellule",
+    },
     route: {
       loading: "Chargement de l’espace de travail…",
       connecting: "Connexion…",
@@ -1250,6 +1254,12 @@ export const fr: TranslationResources = {
     },
     pinned: {
       title: "Épinglés",
+      gridMode: {
+        label: "Disposition de la grille des épinglés",
+        normal: "Normal",
+        twoColumns: "2 colonnes",
+        threeColumns: "3 colonnes",
+      },
     },
     host: {
       noHost: "Aucun hôte",
@@ -2628,6 +2638,7 @@ export const fr: TranslationResources = {
         previousTab: "Onglet précédent",
         nextTab: "Onglet suivant",
         splitPaneRight: "Diviser le panneau vers la droite",
+        toggleCellMaximize: "Agrandir ou restaurer la cellule",
         splitPaneDown: "Diviser le panneau vers le bas",
         focusPaneLeft: "Activer le panneau de gauche",
         focusPaneRight: "Activer le panneau de droite",

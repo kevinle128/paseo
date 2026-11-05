@@ -9,6 +9,8 @@ import {
   shouldKeepWorkspaceDeckEntryMounted,
   WORKSPACE_DECK_INACTIVE_TTL_MS,
   WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
+  WORKSPACE_DECK_MAX_MOUNTED_GRID_CELLS,
+  resolveGridCellsToMount,
 } from "@/screens/workspace/workspace-deck-retention";
 
 function workspace(workspaceId: string, serverId = "server"): ActiveWorkspaceSelection {
@@ -217,5 +219,218 @@ describe("shouldKeepWorkspaceDeckEntryMounted", () => {
         workspaceExists: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("reconcileRetainedWorkspaceSelections with pinned grid cells", () => {
+  it("keeps pinned cells past the inactive TTL while the grid shows", () => {
+    const entries = reconcileRetainedWorkspaceSelections({
+      currentEntries: [retained("A", null), retained("P", 0)],
+      activeSelection: workspace("A"),
+      pinnedSelections: [workspace("A"), workspace("P")],
+      now: WORKSPACE_DECK_INACTIVE_TTL_MS * 3,
+    });
+
+    expect(entries).toEqual([retained("A", null), retained("P", null)]);
+  });
+
+  it("adds pinned cells the user never opened", () => {
+    const entries = reconcileRetainedWorkspaceSelections({
+      currentEntries: [retained("A", null)],
+      activeSelection: workspace("A"),
+      pinnedSelections: [workspace("A"), workspace("N1"), workspace("N2")],
+      now: 5,
+    });
+
+    expect(retainedWorkspaceIds(entries)).toEqual(["A", "N1", "N2"]);
+  });
+
+  it("does not cap pinned cells at the single-mode limit", () => {
+    const pinned = Array.from({ length: 12 }, (_, index) => workspace(`P${index}`));
+    const entries = reconcileRetainedWorkspaceSelections({
+      currentEntries: [],
+      activeSelection: pinned[0] ?? null,
+      pinnedSelections: pinned,
+      now: 5,
+    });
+
+    expect(entries).toHaveLength(12);
+  });
+
+  it("drops a cell that is unpinned once its TTL passes", () => {
+    const grid = reconcileRetainedWorkspaceSelections({
+      currentEntries: [retained("A", null)],
+      activeSelection: workspace("A"),
+      pinnedSelections: [workspace("A"), workspace("P")],
+      now: 0,
+    });
+    const afterUnpin = reconcileRetainedWorkspaceSelections({
+      currentEntries: grid,
+      activeSelection: workspace("A"),
+      pinnedSelections: [workspace("A")],
+      now: 10,
+    });
+    expect(retainedWorkspaceIds(afterUnpin)).toEqual(["A", "P"]);
+    expect(afterUnpin[1]?.inactiveSince).toBe(10);
+
+    const expired = reconcileRetainedWorkspaceSelections({
+      currentEntries: afterUnpin,
+      activeSelection: workspace("A"),
+      pinnedSelections: [workspace("A")],
+      now: 10 + WORKSPACE_DECK_INACTIVE_TTL_MS,
+    });
+    expect(retainedWorkspaceIds(expired)).toEqual(["A"]);
+  });
+
+  it("keeps all 12 entries in the reconcile that closes the grid, then lets the TTL remove extras", () => {
+    const pinned = Array.from({ length: 12 }, (_, index) => workspace(`P${index}`));
+    const gridEntries = reconcileRetainedWorkspaceSelections({
+      currentEntries: [],
+      activeSelection: pinned[0] ?? null,
+      pinnedSelections: pinned,
+      now: 0,
+    });
+
+    const afterClose = reconcileRetainedWorkspaceSelections({
+      currentEntries: gridEntries,
+      activeSelection: pinned[0] ?? null,
+      now: 100,
+    });
+    expect(afterClose).toHaveLength(12);
+
+    const afterOtherSwitch = reconcileRetainedWorkspaceSelections({
+      currentEntries: afterClose,
+      activeSelection: pinned[1] ?? null,
+      now: 200,
+    });
+    expect(afterOtherSwitch).toHaveLength(12);
+
+    const afterTtl = reconcileRetainedWorkspaceSelections({
+      currentEntries: afterOtherSwitch,
+      activeSelection: pinned[1] ?? null,
+      now: 100 + WORKSPACE_DECK_INACTIVE_TTL_MS,
+    });
+    expect(retainedWorkspaceIds(afterTtl)).toEqual(["P1", "P0"]);
+  });
+
+  it("does not drop unpinned retained entries when the grid opens", () => {
+    const entries = reconcileRetainedWorkspaceSelections({
+      currentEntries: [retained("A", null), retained("U", 1)],
+      activeSelection: workspace("A"),
+      pinnedSelections: Array.from({ length: 12 }, (_, index) =>
+        index === 0 ? workspace("A") : workspace(`P${index}`),
+      ),
+      now: 2,
+    });
+
+    expect(retainedWorkspaceIds(entries)).toContain("U");
+  });
+});
+
+describe("grid cell cap", () => {
+  const cells = Array.from({ length: 16 }, (_, index) => workspace(`P${index}`));
+  const key = (id: string) => `server:${id}`;
+
+  function states(
+    entries: Record<string, { presence: "focused" | "reduced" | "hidden"; distancePx: number }>,
+  ) {
+    return new Map(Object.entries(entries).map(([id, value]) => [key(id), value]));
+  }
+
+  it("mounts every cell while they fit under the cap", () => {
+    const mounted = resolveGridCellsToMount({
+      cells: cells.slice(0, 12),
+      cellStates: states({}),
+      maxMountedCells: WORKSPACE_DECK_MAX_MOUNTED_GRID_CELLS,
+    });
+    expect(mountedWorkspaceIds(mounted)).toHaveLength(12);
+  });
+
+  it("evicts hidden cells farthest from the viewport first", () => {
+    const hidden = Object.fromEntries(
+      cells
+        .slice(8)
+        .map((cell, index) => [
+          cell.workspaceId,
+          { presence: "hidden" as const, distancePx: (index + 1) * 100 },
+        ]),
+    );
+    const mounted = resolveGridCellsToMount({
+      cells,
+      cellStates: states({
+        ...Object.fromEntries(
+          cells
+            .slice(0, 8)
+            .map((cell) => [cell.workspaceId, { presence: "reduced", distancePx: 0 }]),
+        ),
+        ...hidden,
+      }),
+      maxMountedCells: 12,
+    });
+    expect(mountedWorkspaceIds(mounted)).toEqual([
+      ...cells.slice(0, 8).map((cell) => cell.workspaceId),
+      "P8",
+      "P9",
+      "P10",
+      "P11",
+    ]);
+  });
+
+  it("never evicts focused or reduced cells, so the cap is soft on screen", () => {
+    const onScreen = Object.fromEntries(
+      cells.map((cell, index) => [
+        cell.workspaceId,
+        { presence: index === 0 ? ("focused" as const) : ("reduced" as const), distancePx: 0 },
+      ]),
+    );
+    const mounted = resolveGridCellsToMount({
+      cells,
+      cellStates: states(onScreen),
+      maxMountedCells: 12,
+    });
+    expect(mounted).toHaveLength(16);
+  });
+
+  it("evicts only as many hidden cells as the cap requires", () => {
+    const mixed = Object.fromEntries(
+      cells.map((cell, index) => [
+        cell.workspaceId,
+        index < 10
+          ? { presence: "reduced" as const, distancePx: 0 }
+          : { presence: "hidden" as const, distancePx: index * 10 },
+      ]),
+    );
+    const mounted = resolveGridCellsToMount({
+      cells,
+      cellStates: states(mixed),
+      maxMountedCells: 12,
+    });
+    expect(mountedWorkspaceIds(mounted)).toEqual([
+      ...cells.slice(0, 10).map((cell) => cell.workspaceId),
+      "P10",
+      "P11",
+    ]);
+  });
+
+  it("drops an evicted cell from the retained entries and keeps the rest", () => {
+    const entries = reconcileRetainedWorkspaceSelections({
+      currentEntries: cells.map((cell) => ({ selection: cell, inactiveSince: null })),
+      activeSelection: cells[0],
+      pinnedSelections: cells,
+      gridCellStates: states(
+        Object.fromEntries(
+          cells.map((cell, index) => [
+            cell.workspaceId,
+            index < 4
+              ? { presence: "reduced" as const, distancePx: 0 }
+              : { presence: "hidden" as const, distancePx: index },
+          ]),
+        ),
+      ),
+      now: 1,
+    });
+    expect(retainedWorkspaceIds(entries)).toEqual(
+      cells.slice(0, 12).map((cell) => cell.workspaceId),
+    );
   });
 });

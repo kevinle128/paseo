@@ -127,6 +127,20 @@ export function navigateToWorkspace(
   return route;
 }
 
+/**
+ * Moves focus to a workspace route without opening tabs, revealing panels or picking the
+ * attention agent, so focusing a visible cell never changes what that workspace shows.
+ */
+export function focusWorkspaceCell(
+  input: { serverId: string; workspaceId: string },
+  deps: Pick<NavigateToWorkspaceDeps, "rememberLastWorkspace" | "navigateToRoute">,
+): string {
+  const route = buildHostWorkspaceRoute(input.serverId, input.workspaceId);
+  deps.rememberLastWorkspace({ serverId: input.serverId, workspaceId: input.workspaceId });
+  deps.navigateToRoute(route);
+  return route;
+}
+
 export function navigateToLastWorkspace(deps: NavigateToLastWorkspaceDeps): boolean {
   const selection = deps.getLastWorkspaceSelection();
   if (!selection) {

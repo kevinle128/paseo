@@ -31,7 +31,7 @@ interface PendingTerminalCreateInput {
 interface UseWorkspaceTerminalsInput {
   client: DaemonClient | null;
   isConnected: boolean;
-  isRouteFocused: boolean;
+  isWorkspacePresented: boolean;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   workspaceDirectory: string | null;
@@ -49,7 +49,7 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
   const {
     client,
     isConnected,
-    isRouteFocused,
+    isWorkspacePresented,
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
@@ -68,8 +68,9 @@ export function useWorkspaceTerminals(input: UseWorkspaceTerminalsInput) {
     null,
   );
   const canCreateNow = useMemo(
-    () => canCreateWorkspaceTerminal({ isRouteFocused, client, isConnected, workspaceDirectory }),
-    [isRouteFocused, client, isConnected, workspaceDirectory],
+    () =>
+      canCreateWorkspaceTerminal({ isWorkspacePresented, client, isConnected, workspaceDirectory }),
+    [isWorkspacePresented, client, isConnected, workspaceDirectory],
   );
   const queryKey = useMemo(
     () =>

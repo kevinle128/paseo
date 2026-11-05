@@ -336,6 +336,14 @@ export type ViewedTimelineStatus = "ready" | "pending" | "error" | "retrying";
 
 export interface ViewedTimelineUiBridge {
   replaceVisibleAgentIds(sourceId: string, agentIds: string[]): void;
+  /**
+   * The pinned grid parks a cell that is off screen. Its opened chats leave membership unless
+   * another source shows them, and a chat the cell shows again is back at once. The opened set is
+   * untouched: closing a tab still removes a chat for good.
+   */
+  suspendSource(sourceId: string, agentIds: string[]): void;
+  /** Returns the source's opened chats to membership; the regular catch-up brings them current. */
+  resumeSource(sourceId: string): void;
   subscribe(listener: () => void): () => void;
   getAgentTimelineStatus(agentId: string): ViewedTimelineStatus;
   getAgentTimelineError(agentId: string): string | null;
@@ -518,6 +526,10 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   // Membership then survives hiding, workspace switches, backgrounding and reconnect;
   // only closing the tab or ending the session takes it out.
   let openedAgentIds: string[] = [];
+  // Chats a parked source owns. They stay opened but are not demanded while parked.
+  const suspendedSources = new Map<string, string[]>();
+
+  const suspendedAgentIds = () => new Set([...suspendedSources.values()].flat());
 
   const visibleAgentIds = () => normalizeAgentIds([...sources.values()].flat());
 
@@ -828,7 +840,13 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   };
 
   const publishVisibleMembership = () => {
-    commitDesiredMembership(normalizeAgentIds([...openedAgentIds, ...visibleAgentIds()]));
+    const suspended = suspendedAgentIds();
+    commitDesiredMembership(
+      normalizeAgentIds([
+        ...openedAgentIds.filter((agentId) => !suspended.has(agentId)),
+        ...visibleAgentIds(),
+      ]),
+    );
   };
 
   return {
@@ -857,6 +875,23 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (normalized.length === 0) sources.delete(sourceId);
       else sources.set(sourceId, normalized);
       rememberOpenedAgentIds(normalized);
+      publishVisibleMembership();
+      startAcknowledgedCatchUps();
+    },
+    suspendSource(sourceId, agentIds) {
+      const normalized = normalizeAgentIds(agentIds);
+      const current = suspendedSources.get(sourceId);
+      if (normalized.length === 0) {
+        if (!current) return;
+        suspendedSources.delete(sourceId);
+      } else {
+        if (current && sameAgentIds(current, normalized)) return;
+        suspendedSources.set(sourceId, normalized);
+      }
+      publishVisibleMembership();
+    },
+    resumeSource(sourceId) {
+      if (!suspendedSources.delete(sourceId)) return;
       publishVisibleMembership();
       startAcknowledgedCatchUps();
     },
@@ -909,6 +944,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       membershipNeedsRetry = false;
       membershipRetryDelayMs = undefined;
       sources.clear();
+      suspendedSources.clear();
       membershipGeneration += 1;
       for (const agentId of desired) cancelCatchUp(agentId);
       desired = [];

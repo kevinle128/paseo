@@ -11,6 +11,7 @@ import {
   type TextRevealState,
   visibleRevealedText,
 } from "@/agent-stream/text-reveal";
+import { useStreamFidelity } from "@/pinned-grid/stream-fidelity-context";
 export type MarkdownPhase = "streaming" | "complete";
 
 /**
@@ -20,8 +21,12 @@ export type MarkdownPhase = "streaming" | "complete";
  * in that module and is tested there. This hook only owns the requestAnimationFrame
  * wiring, so the rendered behavior is covered end to end by
  * `packages/app/e2e/browser/agent-stream-smoothness.spec.ts`.
+ *
+ * A reduced pinned-grid cell is not paced: it takes the settle path and shows committed text
+ * whole, because a reveal needs a frame loop per cell. The store still holds the full text.
  */
 export function useRevealedText(text: string, phase: MarkdownPhase): string {
+  const paced = useStreamFidelity().fidelity === "full";
   const pacingSupported = isTextRevealPacingSupported();
   const stateRef = useRef<TextRevealState>(beginTextReveal(text));
   const [, forceRender] = useState(0);
@@ -29,6 +34,9 @@ export function useRevealedText(text: string, phase: MarkdownPhase): string {
   const lastFrameAtRef = useRef<number | null>(null);
 
   stateRef.current = retargetTextReveal(stateRef.current, text);
+  if (!paced) {
+    stateRef.current = completeTextReveal(stateRef.current);
+  }
 
   useEffect(() => {
     const settle = () => {
@@ -40,7 +48,7 @@ export function useRevealedText(text: string, phase: MarkdownPhase): string {
       }
     };
 
-    if (!pacingSupported || phase !== "streaming") {
+    if (!paced || !pacingSupported || phase !== "streaming") {
       settle();
       return;
     }
@@ -79,7 +87,7 @@ export function useRevealedText(text: string, phase: MarkdownPhase): string {
         frameRef.current = null;
       }
     };
-  }, [text, pacingSupported, phase]);
+  }, [text, paced, pacingSupported, phase]);
 
   return pacingSupported
     ? visibleRevealedText(stateRef.current, { streaming: phase === "streaming" })

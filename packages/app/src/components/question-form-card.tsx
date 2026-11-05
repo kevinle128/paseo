@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
 import { isWeb } from "@/constants/platform";
+import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
 import { EditingTextInput as TextInput } from "@/components/ui/text-input";
 import type { EditingTextInputHandle } from "@/components/ui/text-input/types";
 import { ScrollableCodeSurface } from "@/components/ui/scrollable-code-surface";
@@ -503,6 +504,13 @@ export function QuestionFormCard({
     handleSubmit();
   }, [activeQuestionAnswered, handleSubmit, isLastQuestion, isResponding, questions?.length]);
 
+  // Dismiss and the final Submit answer the permission request. In an unfocused grid cell the
+  // first press only focuses the cell. Moving to the next question changes nothing, so it is not
+  // guarded.
+  const guardedDeny = useGuardedCellPress(handleDeny);
+  const guardedPrimaryAction = useGuardedCellPress(handlePrimaryAction);
+  const handlePrimaryPress = isLastQuestion ? guardedPrimaryAction : handlePrimaryAction;
+
   const dismissButtonStyle = useCallback(
     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.actionButton,
@@ -634,7 +642,7 @@ export function QuestionFormCard({
       <View style={actionsContainerStyle}>
         <Pressable
           style={dismissButtonStyle}
-          onPress={handleDeny}
+          onPress={guardedDeny}
           disabled={isResponding}
           accessibilityRole="button"
           accessibilityLabel={dismissLabel}
@@ -652,7 +660,7 @@ export function QuestionFormCard({
 
         <Pressable
           style={submitButtonStyle}
-          onPress={handlePrimaryAction}
+          onPress={handlePrimaryPress}
           disabled={primaryDisabled}
           accessibilityRole="button"
           accessibilityLabel={primaryActionLabel}

@@ -1,30 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { useNavigation } from "expo-router/react-navigation";
-import { StyleSheet, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
-import { RetainedPanel } from "@/components/retained-panel";
-import {
-  type ActiveWorkspaceSelection,
-  useActiveWorkspaceSelection,
-} from "@/stores/navigation-active-workspace-store";
-import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
 import { useDirectoryDemand } from "@/hooks/use-directory-demand";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
-import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
+import { WorkspaceDeck } from "@/screens/workspace/workspace-deck";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
-import {
-  areRetainedWorkspaceSelectionListsEqual,
-  areWorkspaceSelectionsEqual,
-  getNextWorkspaceDeckExpirationDelay,
-  getWorkspaceSelectionKey,
-  orderWorkspaceSelectionsForStableRender,
-  reconcileRetainedWorkspaceSelections,
-  resolveWorkspaceDeckRetentionLimit,
-  type RetainedWorkspaceSelection,
-  resolveWorkspaceDeckEntries,
-  shouldKeepWorkspaceDeckEntryMounted,
-} from "@/screens/workspace/workspace-deck-retention";
 import {
   decodeWorkspaceIdFromPathSegment,
   parseWorkspaceOpenIntent,
@@ -35,8 +16,7 @@ import {
   stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit,
 } from "@/utils/host-route-browser";
 import { prepareWorkspaceTab } from "@/utils/prepare-workspace-tab";
-import { isNative, isWeb } from "@/constants/platform";
-import { RenderProfile } from "@/utils/render-profiler";
+import { isWeb } from "@/constants/platform";
 
 function getParamValue(value: string | string[] | undefined): string {
   if (typeof value === "string") {
@@ -145,130 +125,3 @@ function HostWorkspaceRouteContent() {
 
   return <WorkspaceDeck />;
 }
-
-function WorkspaceDeck() {
-  const activeSelection = useActiveWorkspaceSelection();
-  const [retainedSelections, setRetainedSelections] = useState<RetainedWorkspaceSelection[]>(() =>
-    activeSelection ? [{ selection: activeSelection, inactiveSince: null }] : [],
-  );
-  const unmountWorkspaceSelection = useCallback((selection: ActiveWorkspaceSelection) => {
-    setRetainedSelections((current) =>
-      current.filter((entry) => !areWorkspaceSelectionsEqual(entry.selection, selection)),
-    );
-  }, []);
-
-  const reconciliationNow = Date.now();
-  const nextRetainedSelections = useMemo(
-    () =>
-      reconcileRetainedWorkspaceSelections({
-        currentEntries: retainedSelections,
-        activeSelection,
-        now: reconciliationNow,
-        maxMountedWorkspaces: resolveWorkspaceDeckRetentionLimit({ isNative }),
-      }),
-    [activeSelection, reconciliationNow, retainedSelections],
-  );
-  const renderedSelections = useMemo(
-    () =>
-      orderWorkspaceSelectionsForStableRender(
-        nextRetainedSelections.map((entry) => entry.selection),
-      ),
-    [nextRetainedSelections],
-  );
-  const renderedEntries = useMemo(
-    () => resolveWorkspaceDeckEntries({ selections: renderedSelections, activeSelection }),
-    [activeSelection, renderedSelections],
-  );
-
-  useLayoutEffect(() => {
-    if (!areRetainedWorkspaceSelectionListsEqual(retainedSelections, nextRetainedSelections)) {
-      setRetainedSelections(nextRetainedSelections);
-    }
-  }, [nextRetainedSelections, retainedSelections]);
-
-  useEffect(() => {
-    const expirationDelay = getNextWorkspaceDeckExpirationDelay({
-      entries: nextRetainedSelections,
-      activeSelection,
-      now: reconciliationNow,
-    });
-    if (expirationDelay === null) {
-      return;
-    }
-    const timeout = setTimeout(() => {
-      setRetainedSelections((current) =>
-        reconcileRetainedWorkspaceSelections({
-          currentEntries: current,
-          activeSelection,
-          now: Date.now(),
-          maxMountedWorkspaces: resolveWorkspaceDeckRetentionLimit({ isNative }),
-        }),
-      );
-    }, expirationDelay + 1);
-    return () => clearTimeout(timeout);
-  }, [activeSelection, nextRetainedSelections, reconciliationNow]);
-
-  return (
-    <RenderProfile id="WorkspaceDeck">
-      <View style={styles.deck}>
-        {renderedEntries.map(({ selection, active }) => {
-          return (
-            <WorkspaceDeckEntry
-              key={getWorkspaceSelectionKey(selection)}
-              selection={selection}
-              active={active}
-              onUnmountInactive={unmountWorkspaceSelection}
-            />
-          );
-        })}
-      </View>
-    </RenderProfile>
-  );
-}
-
-function WorkspaceDeckEntry({
-  selection,
-  active,
-  onUnmountInactive,
-}: {
-  selection: ActiveWorkspaceSelection;
-  active: boolean;
-  onUnmountInactive: (selection: ActiveWorkspaceSelection) => void;
-}) {
-  const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
-  const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
-  const shouldKeepMounted = shouldKeepWorkspaceDeckEntryMounted({
-    isActive: active,
-    hasHydratedWorkspaces,
-    workspaceExists,
-  });
-
-  useEffect(() => {
-    if (!shouldKeepMounted) {
-      onUnmountInactive(selection);
-    }
-  }, [onUnmountInactive, selection, shouldKeepMounted]);
-
-  if (!shouldKeepMounted) {
-    return null;
-  }
-
-  return (
-    <RetainedPanel
-      active={active}
-      testID={`workspace-deck-entry-${selection.serverId}:${selection.workspaceId}`}
-    >
-      <WorkspaceScreen
-        serverId={selection.serverId}
-        workspaceId={selection.workspaceId}
-        isRouteFocused={active}
-      />
-    </RetainedPanel>
-  );
-}
-
-const styles = StyleSheet.create({
-  deck: {
-    flex: 1,
-  },
-});

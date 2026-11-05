@@ -441,6 +441,10 @@ export const ko: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "셀 최대화",
+      restore: "셀 복원",
+    },
     route: {
       loading: "워크스페이스 불러오는 중",
       connecting: "연결 중",
@@ -1227,6 +1231,12 @@ export const ko: TranslationResources = {
     },
     pinned: {
       title: "고정됨",
+      gridMode: {
+        label: "고정됨 그리드 레이아웃",
+        normal: "기본",
+        twoColumns: "2열",
+        threeColumns: "3열",
+      },
     },
     host: {
       noHost: "호스트 없음",
@@ -2584,6 +2594,7 @@ export const ko: TranslationResources = {
         previousTab: "이전 탭",
         nextTab: "다음 탭",
         splitPaneRight: "창을 오른쪽으로 분할",
+        toggleCellMaximize: "셀 최대화 또는 복원",
         splitPaneDown: "창을 아래로 분할",
         focusPaneLeft: "왼쪽 창에 포커스",
         focusPaneRight: "오른쪽 창에 포커스",

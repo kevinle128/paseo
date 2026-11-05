@@ -444,6 +444,10 @@ export const ptBR: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "Maximizar célula",
+      restore: "Restaurar célula",
+    },
     route: {
       loading: "Carregando workspace",
       connecting: "Conectando",
@@ -1246,6 +1250,12 @@ export const ptBR: TranslationResources = {
     },
     pinned: {
       title: "Fixados",
+      gridMode: {
+        label: "Layout da grade de fixados",
+        normal: "Normal",
+        twoColumns: "2 colunas",
+        threeColumns: "3 colunas",
+      },
     },
     host: {
       noHost: "Nenhum host",
@@ -2608,6 +2618,7 @@ export const ptBR: TranslationResources = {
         previousTab: "Aba anterior",
         nextTab: "Próxima aba",
         splitPaneRight: "Dividir painel à direita",
+        toggleCellMaximize: "Maximizar ou restaurar célula",
         splitPaneDown: "Dividir painel abaixo",
         focusPaneLeft: "Focar painel à esquerda",
         focusPaneRight: "Focar painel à direita",

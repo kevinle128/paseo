@@ -90,6 +90,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   hostBadge,
   leadingProjectName = null,
   leadingProjectIconDataUri = null,
+  projectBadgeName = null,
   serviceSummary = null,
   backdrop,
   isHovered,
@@ -105,6 +106,8 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
   leadingProjectIconDataUri?: string | null;
+  /** Pinned rows sit outside their project group, so they name the project in a badge. */
+  projectBadgeName?: string | null;
   serviceSummary?: WorkspaceServiceSummary | null;
   /** The row's current background, so the project status badge can knock out of it. */
   backdrop: SidebarSurfaceBackdrop;
@@ -159,6 +162,13 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             <Text style={workspaceBranchTextStyle} numberOfLines={1}>
               {workspaceLabel}
             </Text>
+            {projectBadgeName ? (
+              <View style={styles.projectBadge} testID="sidebar-workspace-project-badge">
+                <Text style={styles.projectBadgeText} numberOfLines={1}>
+                  {projectBadgeName}
+                </Text>
+              </View>
+            ) : null}
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
@@ -522,6 +532,23 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.76,
     flex: 1,
     minWidth: 0,
+  },
+  // The title is the only flexible item on the line, so a long title truncates before the
+  // badge or the trailing pin control lose any space.
+  projectBadge: {
+    flexShrink: 1,
+    maxWidth: "40%",
+    marginTop: 2,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.foreground,
+    paddingHorizontal: theme.spacing[1.5],
+    paddingVertical: 1,
+  },
+  projectBadgeText: {
+    color: theme.colors.surface0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    lineHeight: theme.fontSize.sm + 4,
   },
   workspaceBranchTextCreating: {
     opacity: 0.92,

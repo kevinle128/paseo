@@ -53,6 +53,7 @@ import type {
 import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useRevealedText } from "@/hooks/use-revealed-text";
+import { useFidelityGatedSelector } from "@/agent-stream/use-agent-stream-tail";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
@@ -104,6 +105,7 @@ import {
 } from "@/workspace/file-open";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
+import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
@@ -378,8 +380,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const transformTimelineItem = useInstalledTimelineTransform(resolvedServerId);
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
-    const sessionStreamHead = useSessionStore((state) =>
-      state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
+    const sessionStreamHead = useFidelityGatedSelector(
+      `head:${resolvedServerId}:${agentId}`,
+      (state) => state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
     );
     const streamHead = providedStreamHead ?? sessionStreamHead;
     const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
@@ -1637,6 +1640,10 @@ function PermissionRequestCard({
     [handleResponse],
   );
 
+  // In an unfocused grid cell the first press only focuses the cell, so a click aimed at the
+  // composer cannot approve a request that appeared under the pointer.
+  const guardedActionPress = useGuardedCellPress(handleActionPress);
+
   const optionsContainerStyle = useMemo(
     () => [
       permissionStyles.optionsContainer,
@@ -1687,7 +1694,7 @@ function PermissionRequestCard({
               isPrimary={isPrimary}
               Icon={Icon}
               testID={testID}
-              onPress={handleActionPress}
+              onPress={guardedActionPress}
             />
           );
         })}

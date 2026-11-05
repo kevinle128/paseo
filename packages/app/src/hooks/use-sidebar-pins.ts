@@ -5,7 +5,7 @@ import type {
   SidebarProjectEntry,
   SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
-import { applyStoredOrdering } from "@/hooks/sidebar-workspaces-view-model";
+import { orderPinnedWorkspaceKeys } from "@/pinned-grid/pinned-order";
 import { useSessionStore } from "@/stores/session-store";
 
 export interface PinnedSidebarKeys {
@@ -133,18 +133,20 @@ export function splitPinnedSidebarGroups(input: {
     unpinnedProjects.push(projectWithoutPinnedWorkspaces(project, pinnedWorkspaceKeySet));
   }
 
-  pinnedChats.sort((a, b) =>
-    (keys.pinnedAtByKey[b.workspaceKey] ?? "").localeCompare(
-      keys.pinnedAtByKey[a.workspaceKey] ?? "",
-    ),
+  const rankByKey = new Map<string, number>();
+  const pinnedAtByKey: Record<string, string> = {};
+  for (const key of keys.pinnedWorkspaceKeys) {
+    pinnedAtByKey[key] = keys.pinnedAtByKey[key] ?? "";
+  }
+  orderPinnedWorkspaceKeys({ pinnedAtByKey, pinnedWorkspaceOrder }).forEach((key, index) => {
+    rankByKey.set(key, index);
+  });
+  pinnedChats.sort(
+    (a, b) => (rankByKey.get(a.workspaceKey) ?? 0) - (rankByKey.get(b.workspaceKey) ?? 0),
   );
 
   return {
-    pinnedChats: applyStoredOrdering({
-      items: pinnedChats,
-      storedOrder: pinnedWorkspaceOrder,
-      getKey: (workspace) => workspace.workspaceKey,
-    }),
+    pinnedChats,
     unpinnedProjects,
   };
 }

@@ -16,6 +16,52 @@ const residentWebviewsByBrowserId = new Map<string, HTMLElement>();
 const residentSurfacesByBrowserId = new Map<string, HTMLElement>();
 const residentWebviewSizesByBrowserId = new Map<string, { width: number; height: number }>();
 
+interface PresentedBrowserWebview {
+  webview: HTMLElement;
+  anchor: HTMLElement;
+  clip: HTMLElement;
+  viewport: BrowserViewport;
+}
+
+// Webviews live on a fixed-position surface, so a scrolling container above their anchor does not
+// move them. The presented set lets a scroll signal place them again.
+const presentedBrowserWebviewsByBrowserId = new Map<string, PresentedBrowserWebview>();
+let viewportClipProvider: (() => BrowserViewportClipRect | null) | null = null;
+
+export interface BrowserViewportClipRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Clips every presented webview to this rect, such as the visible area of a scrolling grid.
+ * Pass null to remove the clip.
+ */
+export function setBrowserWebviewViewportClip(
+  provider: (() => BrowserViewportClipRect | null) | null,
+): void {
+  viewportClipProvider = provider;
+}
+
+/** Places every presented webview again after its anchor moved without resizing. */
+export function repositionPresentedBrowserWebviews(): void {
+  for (const [browserId, presented] of presentedBrowserWebviewsByBrowserId) {
+    if (!presented.webview.isConnected || !presented.anchor.isConnected) {
+      presentedBrowserWebviewsByBrowserId.delete(browserId);
+      continue;
+    }
+    presentBrowserWebview(
+      browserId,
+      presented.webview,
+      presented.anchor,
+      presented.clip,
+      presented.viewport,
+    );
+  }
+}
+
 interface BrowserWebviewElement extends HTMLElement {
   src: string;
   getWebContentsId(): number;
@@ -228,6 +274,7 @@ export function applyInactiveBrowserWebviewViewport(
   webview: HTMLElement,
   viewport: BrowserViewport,
 ): void {
+  presentedBrowserWebviewsByBrowserId.delete(trimNonEmpty(browserId) ?? browserId);
   if (viewport.mode === "fixed") {
     rememberBrowserWebviewSize({ browserId, width: viewport.width, height: viewport.height });
   }
@@ -255,16 +302,20 @@ export function presentBrowserWebview(
   }
   const anchorBounds = anchor.getBoundingClientRect();
   const clipBounds = clip.getBoundingClientRect();
-  const left = Math.max(anchorBounds.left, clipBounds.left);
-  const top = Math.max(anchorBounds.top, clipBounds.top);
+  const viewportClip = viewportClipProvider?.() ?? null;
+  const left = Math.max(anchorBounds.left, clipBounds.left, viewportClip?.left ?? -Infinity);
+  const top = Math.max(anchorBounds.top, clipBounds.top, viewportClip?.top ?? -Infinity);
   const right = Math.min(
     anchorBounds.left + anchorBounds.width,
     clipBounds.left + clipBounds.width,
+    viewportClip?.right ?? Infinity,
   );
   const bottom = Math.min(
     anchorBounds.top + anchorBounds.height,
     clipBounds.top + clipBounds.height,
+    viewportClip?.bottom ?? Infinity,
   );
+  presentedBrowserWebviewsByBrowserId.set(normalizedBrowserId, { webview, anchor, clip, viewport });
   const surfaceLeft = Math.ceil(left);
   const surfaceTop = Math.ceil(top);
   const surfaceRight = Math.floor(right);
@@ -392,6 +443,7 @@ export function releaseResidentBrowserWebview(browserId: string, webview: HTMLEl
     return;
   }
 
+  presentedBrowserWebviewsByBrowserId.delete(normalizedBrowserId);
   residentWebviewsByBrowserId.set(normalizedBrowserId, webview);
   applyResidentWebviewStyle(webview, normalizedBrowserId);
   const surface = getBrowserSurface(normalizedBrowserId, ownerDocument);
@@ -435,6 +487,7 @@ export function removeResidentBrowserWebview(browserId: string): void {
   residentWebviewsByBrowserId.delete(normalizedBrowserId);
   residentSurfacesByBrowserId.delete(normalizedBrowserId);
   residentWebviewSizesByBrowserId.delete(normalizedBrowserId);
+  presentedBrowserWebviewsByBrowserId.delete(normalizedBrowserId);
   resident?.remove();
   surface?.remove();
 }

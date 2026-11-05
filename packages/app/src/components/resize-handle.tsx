@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, type PointerEvent as RNPointerEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -19,6 +19,8 @@ export interface ResizeHandleProps {
   containerSize: number;
   onPreviewResizeSplit: (groupId: string, sizes: number[]) => void;
   onResizeSplit: (groupId: string, sizes: number[]) => void;
+  /** Double-click on the divider, for example to reset the split. Fine pointers only. */
+  onDoubleClick?: () => void;
 }
 
 interface PointerState {
@@ -45,6 +47,7 @@ export function ResizeHandle({
   containerSize,
   onPreviewResizeSplit,
   onResizeSplit,
+  onDoubleClick,
 }: ResizeHandleProps) {
   const { theme } = useUnistyles();
   const finePointer = useHasFinePointer();
@@ -52,9 +55,19 @@ export function ResizeHandle({
   const touchDragRef = useRef<ResizeHandleDrag | null>(null);
   const cursorBeforeDragRef = useRef<string | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hitAreaRef = useRef<View | null>(null);
   const [active, setActive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const highlighted = active || dragging;
+
+  useEffect(() => {
+    const node: unknown = hitAreaRef.current;
+    if (!onDoubleClick || typeof HTMLElement === "undefined" || !(node instanceof HTMLElement)) {
+      return undefined;
+    }
+    node.addEventListener("dblclick", onDoubleClick);
+    return () => node.removeEventListener("dblclick", onDoubleClick);
+  }, [finePointer, onDoubleClick]);
 
   const handlePointerDown = useCallback(
     (event: RNPointerEvent) => {
@@ -258,6 +271,7 @@ export function ResizeHandle({
       )}
       {finePointer ? (
         <View
+          ref={hitAreaRef}
           role="separator"
           aria-orientation={direction === "horizontal" ? "vertical" : "horizontal"}
           style={hitAreaStyle}

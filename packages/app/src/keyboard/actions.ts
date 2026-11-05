@@ -54,6 +54,7 @@ export type KeyboardActionId =
   | "workspace.archive"
   | "workspace.pin"
   | "view.toggle.focus"
+  | "workspace.cell.maximize.toggle"
   | "theme.cycle"
   | "message-input.action";
 

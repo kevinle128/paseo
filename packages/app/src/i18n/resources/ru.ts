@@ -444,6 +444,10 @@ export const ru: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "Развернуть ячейку",
+      restore: "Восстановить ячейку",
+    },
     route: {
       loading: "Загрузка рабочего пространства",
       connecting: "Подключение",
@@ -1238,6 +1242,12 @@ export const ru: TranslationResources = {
     },
     pinned: {
       title: "Закреплённые",
+      gridMode: {
+        label: "Раскладка сетки закреплённых",
+        normal: "Обычная",
+        twoColumns: "2 колонки",
+        threeColumns: "3 колонки",
+      },
     },
     host: {
       noHost: "Нет хоста",
@@ -2614,6 +2624,7 @@ export const ru: TranslationResources = {
         previousTab: "Предыдущая вкладка",
         nextTab: "Следующая вкладка",
         splitPaneRight: "Разделить панель справа",
+        toggleCellMaximize: "Развернуть или восстановить ячейку",
         splitPaneDown: "Разделить панель вниз",
         focusPaneLeft: "Перейти на панель слева",
         focusPaneRight: "Перейти на панель справа",

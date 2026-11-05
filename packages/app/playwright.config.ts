@@ -35,7 +35,9 @@ export default defineConfig({
     {
       name: "browser",
       testIgnore: ["**/*.real.spec.ts"],
-      use: { ...devices["Desktop Chrome"] },
+      // E2E_BROWSER_CHANNEL=chromium runs the full Chromium build (new headless), which can use the
+      // GPU; the default headless shell rasterizes in software.
+      use: { ...devices["Desktop Chrome"], channel: process.env.E2E_BROWSER_CHANNEL || undefined },
     },
     {
       name: "real-provider",

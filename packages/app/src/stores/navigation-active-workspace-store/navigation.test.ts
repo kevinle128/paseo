@@ -3,6 +3,7 @@ import type { ActiveWorkspaceSelection } from "@/stores/last-workspace-selection
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
 import {
+  focusWorkspaceCell,
   navigateToLastWorkspace,
   navigateToWorkspace,
   parseActiveWorkspaceSelection,
@@ -277,5 +278,39 @@ describe("workspace navigation", () => {
 
     expect(navigateToLastWorkspace(deps)).toBe(true);
     expect(navigations).toEqual(["/h/server-1/workspace/workspace-a"]);
+  });
+
+  it("focuses a cell by route only, never touching tabs or the attention agent", () => {
+    const workspace = { id: "workspace-a" } as WorkspaceDescriptor;
+    const agent = {
+      id: "agent-1",
+      workspaceId: "workspace-a",
+      requiresAttention: true,
+      attentionReason: "permission",
+    } as unknown as Agent;
+    const forbidden = (name: string) => () => {
+      throw new Error(`${name} must not be called`);
+    };
+    const { navigations, remembered } = createFakeDeps();
+    const route = focusWorkspaceCell(
+      { serverId: "server-1", workspaceId: "workspace-a" },
+      {
+        rememberLastWorkspace: (selection) => remembered.push(selection),
+        navigateToRoute: (next) => navigations.push(next),
+        // Extra deps a full navigate would use; a route-only focus must ignore them.
+        ...({
+          openTab: forbidden("openTab"),
+          deferOpenTab: forbidden("deferOpenTab"),
+          revealTab: forbidden("revealTab"),
+          revealWorkspace: forbidden("revealWorkspace"),
+          getSessionWorkspaces: () => new Map([[workspace.id, workspace]]),
+          getSessionAgents: () => [agent],
+        } as object),
+      },
+    );
+
+    expect(route).toBe("/h/server-1/workspace/workspace-a");
+    expect(navigations).toEqual([route]);
+    expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-a" }]);
   });
 });

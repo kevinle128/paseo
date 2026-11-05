@@ -445,6 +445,10 @@ export const ja: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "セルを最大化",
+      restore: "セルを元に戻す",
+    },
     route: {
       loading: "ワークスペースを読み込み中",
       connecting: "接続中",
@@ -1234,6 +1238,12 @@ export const ja: TranslationResources = {
     },
     pinned: {
       title: "固定済み",
+      gridMode: {
+        label: "固定済みグリッドのレイアウト",
+        normal: "通常",
+        twoColumns: "2 列",
+        threeColumns: "3 列",
+      },
     },
     host: {
       noHost: "ホストなし",
@@ -2593,6 +2603,7 @@ export const ja: TranslationResources = {
         previousTab: "前のタブ",
         nextTab: "次のタブ",
         splitPaneRight: "右にペインを分割",
+        toggleCellMaximize: "セルを最大化または元に戻す",
         splitPaneDown: "下にペインを分割",
         focusPaneLeft: "左のペインにフォーカス",
         focusPaneRight: "右のペインにフォーカス",

@@ -437,6 +437,10 @@ export const en = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "Maximize cell",
+      restore: "Restore cell",
+    },
     route: {
       loading: "Loading workspace",
       connecting: "Connecting",
@@ -1228,6 +1232,12 @@ export const en = {
     },
     pinned: {
       title: "Pinned",
+      gridMode: {
+        label: "Pinned grid layout",
+        normal: "Normal",
+        twoColumns: "2 columns",
+        threeColumns: "3 columns",
+      },
     },
     host: {
       noHost: "No host",
@@ -2694,6 +2704,7 @@ export const en = {
         previousTab: "Previous tab",
         nextTab: "Next tab",
         splitPaneRight: "Split pane right",
+        toggleCellMaximize: "Maximize or restore cell",
         splitPaneDown: "Split pane down",
         focusPaneLeft: "Focus pane left",
         focusPaneRight: "Focus pane right",

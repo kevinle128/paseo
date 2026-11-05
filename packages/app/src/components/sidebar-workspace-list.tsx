@@ -54,6 +54,8 @@ import {
 import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sections-store";
 import { useHostFeatureMap } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { PinnedGridModeControl } from "@/pinned-grid/pinned-grid-mode-control";
+import { useHasPinnedWorkspace } from "@/pinned-grid/use-pinned-workspace-selections";
 import { useProjectIcons } from "@/projects/icons";
 import {
   buildNewWorkspaceRoute,
@@ -1170,6 +1172,7 @@ function WorkspaceRowInner({
                 hostBadge={hostBadge}
                 leadingProjectName={leadingProjectName}
                 leadingProjectIconDataUri={leadingProjectIconDataUri}
+                projectBadgeName={isPinned ? leadingProjectName : null}
                 serviceSummary={serviceSummary}
                 backdrop={backdrop}
                 isHovered={isHovered}
@@ -2187,6 +2190,13 @@ function ProjectModeList({
   const selectionEnabled = isWorkspaceRoute;
   const activeWorkspaceSelection = useActiveWorkspaceSelection();
   const { pinnedChats, unpinnedProjects } = pinnedGroups;
+  // Sidebar filters can hide every pinned row while the pinned grid still shows them, so where the
+  // grid exists (the same gate as the mode control) the header follows the unfiltered pinned set.
+  // Elsewhere there is no control to keep reachable, so the header follows the visible rows.
+  const isCompactLayout = useIsCompactFormFactor();
+  const gridSupported = platformIsWeb && !isCompactLayout;
+  const hasUnfilteredPinnedWorkspace = useHasPinnedWorkspace(gridSupported);
+  const hasPinnedWorkspaces = hasUnfilteredPinnedWorkspace || pinnedChats.length > 0;
   const {
     visibleItems: visiblePinnedChats,
     expanded: pinnedChatsExpanded,
@@ -2463,14 +2473,16 @@ function ProjectModeList({
 
   const content = (
     <>
-      {pinnedChats.length > 0 ? (
+      {hasPinnedWorkspaces ? (
         <View style={styles.pinnedSection} testID="sidebar-pinned-section">
           <SidebarSectionHeader
             title={t("sidebar.pinned.title")}
             collapsed={pinnedCollapsed}
             onToggle={togglePinnedCollapsed}
             testID="sidebar-pinned-section-header"
-          />
+          >
+            <PinnedGridModeControl />
+          </SidebarSectionHeader>
           {pinnedCollapsed ? null : (
             <>
               <DraggableList

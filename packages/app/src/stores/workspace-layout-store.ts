@@ -127,7 +127,7 @@ export type WorkspaceTabDestination =
   | { kind: "pane"; paneId: string; host: "main" | "explorer"; tabId: string }
   | { kind: "sheet"; tabId: string };
 
-interface WorkspaceLayoutStore {
+export interface WorkspaceLayoutStore {
   panelRevisionByWorkspace: Record<string, Record<string, number>>;
   /** Published once by the app shell; callers never pass a form factor to open a tab. */
   layoutMode: WorkspaceLayoutMode;

@@ -445,6 +445,10 @@ export const es: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "Maximizar celda",
+      restore: "Restaurar celda",
+    },
     route: {
       loading: "Cargando espacio de trabajo",
       connecting: "Conectando",
@@ -1256,6 +1260,12 @@ export const es: TranslationResources = {
     },
     pinned: {
       title: "Anclados",
+      gridMode: {
+        label: "Diseño de la cuadrícula de anclados",
+        normal: "Normal",
+        twoColumns: "2 columnas",
+        threeColumns: "3 columnas",
+      },
     },
     host: {
       noHost: "Sin anfitrión",
@@ -2627,6 +2637,7 @@ export const es: TranslationResources = {
         previousTab: "Pestaña anterior",
         nextTab: "Pestaña siguiente",
         splitPaneRight: "Panel dividido a la derecha",
+        toggleCellMaximize: "Maximizar o restaurar celda",
         splitPaneDown: "Dividir panel hacia abajo",
         focusPaneLeft: "Panel de enfoque a la izquierda",
         focusPaneRight: "Panel de enfoque a la derecha",

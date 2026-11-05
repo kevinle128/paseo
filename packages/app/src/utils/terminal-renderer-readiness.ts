@@ -25,22 +25,23 @@ export function resolveTerminalStreamTarget(input: {
   terminalId: string;
   terminalStreamKey: string;
   rendererReadyStreamKey: string | null;
-  isWorkspaceFocused: boolean;
+  /** On screen, not owns-input: a terminal in a reduced grid cell stays live. */
+  isTerminalPresented: boolean;
 }): string | null {
-  return input.isWorkspaceFocused && input.rendererReadyStreamKey === input.terminalStreamKey
+  return input.isTerminalPresented && input.rendererReadyStreamKey === input.terminalStreamKey
     ? input.terminalId
     : null;
 }
 
 export function shouldShowTerminalLoadingOverlay(input: {
-  isWorkspaceFocused: boolean;
+  isTerminalPresented: boolean;
   hasStreamError: boolean;
   isAttaching: boolean;
   rendererReadyStreamKey: string | null;
   terminalStreamKey: string;
 }): boolean {
   return (
-    input.isWorkspaceFocused &&
+    input.isTerminalPresented &&
     !input.hasStreamError &&
     (input.isAttaching || input.rendererReadyStreamKey !== input.terminalStreamKey)
   );

@@ -8,6 +8,7 @@ import {
   type SegmentedControlSize,
 } from "@/components/ui/control-geometry";
 import { useContainedControlSize } from "@/components/ui/control-size";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Theme } from "@/styles/theme";
 
 type SegmentedControlIconRenderer = (props: { color: string; size: number }) => ReactNode;
@@ -17,6 +18,8 @@ export interface SegmentedControlOption<T extends string> {
   label: string;
   icon?: SegmentedControlIconRenderer;
   disabled?: boolean;
+  /** Shown on desktop hover; icon-only segments use it to name themselves. */
+  tooltip?: string;
   testID?: string;
 }
 
@@ -137,9 +140,10 @@ function SegmentItem<T extends string>({
     () => ({ selected: isSelected, disabled: option.disabled }),
     [isSelected, option.disabled],
   );
-  return (
+  const segment = (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={hideLabels ? option.label : undefined}
       accessibilityState={accessibilityState}
       aria-selected={isSelected}
       disabled={option.disabled}
@@ -160,6 +164,15 @@ function SegmentItem<T extends string>({
         </Text>
       )}
     </Pressable>
+  );
+  if (!option.tooltip) return segment;
+  return (
+    <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
+      <TooltipTrigger asChild>{segment}</TooltipTrigger>
+      <TooltipContent side="bottom" align="center" offset={8}>
+        <Text style={styles.tooltipText}>{option.tooltip}</Text>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -209,6 +222,10 @@ const styles = StyleSheet.create((theme) => {
     },
     segmentDisabled: {
       opacity: theme.opacity[50],
+    },
+    tooltipText: {
+      color: theme.colors.foreground,
+      fontSize: theme.fontSize.base,
     },
     iconContainer: {
       alignItems: "center",

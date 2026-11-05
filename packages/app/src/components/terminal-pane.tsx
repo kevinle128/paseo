@@ -2,6 +2,8 @@ import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
 import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import { isPresented } from "@/screens/workspace/workspace-presence";
+import { useWorkspacePresence } from "@/screens/workspace/workspace-presence-context";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -296,7 +298,10 @@ export function TerminalPane({
 
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
-  const isTerminalPresented = retainedPanelActive && isWorkspaceFocused;
+  // A workspace shown but not owning input (reduced) still renders its terminal and claims its own
+  // size. Only focus handling below is tied to the drilled `isWorkspaceFocused` (owns input).
+  const workspacePresence = useWorkspacePresence();
+  const isTerminalPresented = retainedPanelActive && isPresented(workspacePresence);
   const supportsTerminalRestoreModes = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-restore-modes"] === true,
   );
@@ -686,7 +691,7 @@ export function TerminalPane({
       terminalId,
       terminalStreamKey,
       rendererReadyStreamKey,
-      isWorkspaceFocused,
+      isTerminalPresented,
     });
     streamControllerRef.current?.setTerminal({
       terminalId: nextTerminalId,
@@ -694,7 +699,7 @@ export function TerminalPane({
   }, [
     client,
     isConnected,
-    isWorkspaceFocused,
+    isTerminalPresented,
     rendererReadyStreamKey,
     terminalId,
     terminalStreamKey,
@@ -1183,7 +1188,7 @@ export function TerminalPane({
     }
   };
   const showLoadingOverlay = shouldShowTerminalLoadingOverlay({
-    isWorkspaceFocused: isTerminalPresented,
+    isTerminalPresented,
     hasStreamError: Boolean(streamError),
     isAttaching,
     rendererReadyStreamKey,

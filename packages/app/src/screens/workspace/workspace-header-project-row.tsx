@@ -3,6 +3,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { HostBadge } from "@/hosts/host-badge";
 import { useHostBadges } from "@/hosts/use-host-badges";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 
 /**
  * Which project the workspace belongs to, and which machine it runs on.
@@ -23,15 +24,22 @@ export function WorkspaceHeaderProjectRow({
   serverId: string;
 }) {
   const isCompact = useIsCompactFormFactor();
-  const hostBadge = useHostBadges({ enabled: isCompact }).get(serverId) ?? null;
-  const showProject = isSubtitleDistinct || isCompact;
+  const gridCell = useWorkspaceGridCell();
+  // A grid cell has no project group above it, so its header always names the project and host.
+  const isGridCell = gridCell !== null;
+  const hostBadge = useHostBadges({ enabled: isCompact || isGridCell }).get(serverId) ?? null;
+  const showProject = isSubtitleDistinct || isCompact || isGridCell;
   if (!showProject && !hostBadge) {
     return null;
   }
   return (
     <View style={styles.row}>
       {showProject ? (
-        <Text testID="workspace-header-subtitle" style={styles.project} numberOfLines={1}>
+        <Text
+          testID="workspace-header-subtitle"
+          style={gridCell?.showProjectBadge ? styles.projectBadge : styles.project}
+          numberOfLines={1}
+        >
           {subtitle}
         </Text>
       ) : null}
@@ -59,6 +67,17 @@ const styles = StyleSheet.create((theme) => ({
     },
     flexShrink: 1,
     minWidth: 0,
+  },
+  projectBadge: {
+    color: theme.colors.accentForeground,
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1.5],
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: "hidden",
   },
   separator: {
     color: theme.colors.foregroundExtraMuted,

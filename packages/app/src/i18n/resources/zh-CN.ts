@@ -440,6 +440,10 @@ export const zhCN: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "最大化单元格",
+      restore: "还原单元格",
+    },
     route: {
       loading: "正在加载 workspace",
       connecting: "正在连接",
@@ -1212,6 +1216,12 @@ export const zhCN: TranslationResources = {
     },
     pinned: {
       title: "已置顶",
+      gridMode: {
+        label: "置顶网格布局",
+        normal: "常规",
+        twoColumns: "2 列",
+        threeColumns: "3 列",
+      },
     },
     host: {
       noHost: "没有 Host",
@@ -2541,6 +2551,7 @@ export const zhCN: TranslationResources = {
         previousTab: "上一个标签",
         nextTab: "下一个标签",
         splitPaneRight: "向右拆分窗格",
+        toggleCellMaximize: "最大化或还原单元格",
         splitPaneDown: "向下拆分窗格",
         focusPaneLeft: "聚焦左侧窗格",
         focusPaneRight: "聚焦右侧窗格",

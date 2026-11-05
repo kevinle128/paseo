@@ -41,7 +41,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import invariant from "tiny-invariant";
-import { SidebarMenuToggle } from "@/components/headers/sidebar-menu-toggle";
+import {
+  GridCellMaximizeButton,
+  WorkspaceHeaderSidebarToggle,
+} from "@/pinned-grid/grid-cell-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { FloatingHeaderLayout } from "@/components/floating-header";
@@ -113,6 +116,13 @@ import type {
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import { normalizeWorkspaceTabTarget, workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
 import { useVisibleAgentIds } from "./visible-agent-ids";
+import {
+  isPresented,
+  ownsInput as presenceOwnsInput,
+  singlePresence,
+  type WorkspacePresence,
+} from "./workspace-presence";
+import { WorkspacePresenceProvider } from "./workspace-presence-context";
 import {
   getHostRuntimeStore,
   useHostRuntimeClient,
@@ -275,11 +285,11 @@ const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMut
 interface WorkspaceScreenProps {
   serverId: string;
   workspaceId: string;
-  isRouteFocused?: boolean;
+  presence?: WorkspacePresence;
 }
 
 type WorkspaceScreenContentProps = WorkspaceScreenProps & {
-  isRouteFocused: boolean;
+  presence: WorkspacePresence;
 };
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -300,7 +310,6 @@ function decodeSegment(value: string): string {
 
 function useSyncWorkspaceActiveBrowser(input: {
   workspaceLayout: WorkspaceLayout | null;
-  isRouteFocused: boolean;
   workspaceId: string;
 }) {
   const focusedBrowserId = useMemo(
@@ -344,7 +353,7 @@ function WorkspaceDocumentTitleEffect({
 interface MobileMountedTabSlotProps {
   tabDescriptor: WorkspaceTabDescriptor;
   isVisible: boolean;
-  isWorkspaceFocused: boolean;
+  ownsInput: boolean;
   isPaneFocused: boolean;
   paneId: string | null;
   onFocusPane: (paneId: string) => void;
@@ -357,7 +366,7 @@ interface MobileMountedTabSlotProps {
 const MobileMountedTabSlot = memo(function MobileMountedTabSlot({
   tabDescriptor,
   isVisible,
-  isWorkspaceFocused,
+  ownsInput,
   isPaneFocused,
   paneId,
   onFocusPane,
@@ -382,7 +391,7 @@ const MobileMountedTabSlot = memo(function MobileMountedTabSlot({
         <View style={styles.mobileMountedTabSlot} onStartShouldSetResponderCapture={handleTouch}>
           <WorkspacePaneContent
             content={content}
-            isWorkspaceFocused={isWorkspaceFocused}
+            isWorkspaceFocused={ownsInput}
             isPaneFocused={isPaneFocused}
           />
         </View>
@@ -421,13 +430,14 @@ function useStableTabDescriptorMap(tabDescriptors: WorkspaceTabDescriptor[]) {
 export const WorkspaceScreen = memo(function WorkspaceScreen({
   serverId,
   workspaceId,
-  isRouteFocused,
+  presence,
 }: WorkspaceScreenProps) {
   // Every reader of the panel registry renders inside the workspace screen, so it registers the
   // panels before any of them renders. A reader importing the registration instead would import
   // every panel, and the panels render readers.
   ensurePanelsRegistered();
   const navigationFocused = useIsFocused();
+  const resolvedPresence = presence ?? singlePresence(navigationFocused);
   useEffect(() => {
     traceInstant("paseo.workspace.mount", { serverId, workspaceId });
     return () => {
@@ -435,11 +445,13 @@ export const WorkspaceScreen = memo(function WorkspaceScreen({
     };
   }, [serverId, workspaceId]);
   return (
-    <WorkspaceScreenContent
-      serverId={serverId}
-      workspaceId={workspaceId}
-      isRouteFocused={isRouteFocused ?? navigationFocused}
-    />
+    <WorkspacePresenceProvider presence={resolvedPresence}>
+      <WorkspaceScreenContent
+        serverId={serverId}
+        workspaceId={workspaceId}
+        presence={resolvedPresence}
+      />
+    </WorkspacePresenceProvider>
   );
 });
 
@@ -550,7 +562,8 @@ interface RenderWorkspaceContentInput {
   hasLoadedTerminals: boolean;
   mountedFocusedPaneTabIds: string[];
   focusedPaneTabDescriptorMap: Map<string, WorkspaceTabDescriptor>;
-  isRouteFocused: boolean;
+  isWorkspacePresented: boolean;
+  ownsInput: boolean;
   focusedPaneId: string | null;
   paneFocusSuspended: boolean;
   onFocusPane: (paneId: string) => void;
@@ -568,7 +581,8 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
     hasLoadedTerminals,
     mountedFocusedPaneTabIds,
     focusedPaneTabDescriptorMap,
-    isRouteFocused,
+    isWorkspacePresented,
+    ownsInput,
     focusedPaneId,
     paneFocusSuspended,
     onFocusPane,
@@ -609,8 +623,8 @@ function renderWorkspaceContent(input: RenderWorkspaceContentInput): React.React
       <MobileMountedTabSlot
         key={tabId}
         tabDescriptor={tabDescriptor}
-        isVisible={isRouteFocused && tabId === activeTabDescriptor.tabId}
-        isWorkspaceFocused={isRouteFocused}
+        isVisible={isWorkspacePresented && tabId === activeTabDescriptor.tabId}
+        ownsInput={ownsInput}
         isPaneFocused={!paneFocusSuspended && tabId === activeTabDescriptor.tabId}
         paneId={focusedPaneId}
         onFocusPane={onFocusPane}
@@ -837,14 +851,14 @@ function WorkspaceDocumentTitleEffectSlot({
   tab,
   serverId,
   workspaceId,
-  isRouteFocused,
+  ownsInput,
 }: {
   tab: WorkspaceTabDescriptor | null;
   serverId: string;
   workspaceId: string;
-  isRouteFocused: boolean;
+  ownsInput: boolean;
 }) {
-  if (!isRouteFocused || !isWeb || !tab) {
+  if (!ownsInput || !isWeb || !tab) {
     return null;
   }
 
@@ -1021,11 +1035,11 @@ function useLastMainPane(input: {
   return lastMainPaneRef;
 }
 
-function WorkspaceScreenContent({
-  serverId,
-  workspaceId,
-  isRouteFocused,
-}: WorkspaceScreenContentProps) {
+function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceScreenContentProps) {
+  // Presented keeps data live for every workspace on screen. Only the one that owns input may
+  // claim keyboard handlers, the document title or the host-level focused agent and terminal.
+  const isWorkspacePresented = isPresented(presence);
+  const workspaceOwnsInput = presenceOwnsInput(presence);
   const { t } = useTranslation();
   const _insets = useSafeAreaInsets();
   const toast = useToast();
@@ -1056,12 +1070,12 @@ function WorkspaceScreenContent({
   // The focused workspace keeps its script status live even when no sidebar or viewed agent
   // timeline demands the directory. Retained, hidden workspaces release it.
   useEffect(() => {
-    if (!isRouteFocused || !normalizedServerId || !normalizedWorkspaceId) return;
+    if (!isWorkspacePresented || !normalizedServerId || !normalizedWorkspaceId) return;
     return getHostRuntimeStore().acquireScriptStatusDemand(
       normalizedServerId,
       normalizedWorkspaceId,
     );
-  }, [isRouteFocused, normalizedServerId, normalizedWorkspaceId]);
+  }, [isWorkspacePresented, normalizedServerId, normalizedWorkspaceId]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
@@ -1092,7 +1106,7 @@ function WorkspaceScreenContent({
 
   useEffect(() => {
     if (
-      !isRouteFocused ||
+      !isWorkspacePresented ||
       !isConnected ||
       !client ||
       !workspaceDirectory ||
@@ -1104,7 +1118,7 @@ function WorkspaceScreenContent({
   }, [
     client,
     isConnected,
-    isRouteFocused,
+    isWorkspacePresented,
     normalizedServerId,
     supportsProvidersSnapshot,
     workspaceDirectory,
@@ -1214,7 +1228,7 @@ function WorkspaceScreenContent({
   } = useWorkspaceTerminals({
     client,
     isConnected,
-    isRouteFocused,
+    isWorkspacePresented,
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
@@ -1232,7 +1246,7 @@ function WorkspaceScreenContent({
   const { checkoutQuery, isCheckoutStatusLoading } = useWorkspaceCheckoutStatus({
     client,
     isConnected,
-    isRouteFocused,
+    isWorkspacePresented,
     normalizedServerId,
     normalizedWorkspaceId,
     workspaceDirectory,
@@ -1272,7 +1286,7 @@ function WorkspaceScreenContent({
     workspaceKey: persistenceKey,
     serverId: normalizedServerId,
     cwd: workspaceDirectory,
-    workspaceActive: isRouteFocused,
+    workspaceActive: isWorkspacePresented,
     isGit: isGitCheckout,
     layoutMode,
     explorerOpen: isExplorerSidebarShowing,
@@ -1287,7 +1301,7 @@ function WorkspaceScreenContent({
     // Back dismisses the compact overlay only. On a wide native layout the
     // explorer is a tab, `showMobileAgent` has no rendered consumer, and
     // returning true would swallow Back with nothing to show for it.
-    if (!isRouteFocused || isWeb || !isMobile || !isExplorerSidebarShowing) {
+    if (!workspaceOwnsInput || isWeb || !isMobile || !isExplorerSidebarShowing) {
       return;
     }
 
@@ -1297,7 +1311,7 @@ function WorkspaceScreenContent({
     });
 
     return () => handler.remove();
-  }, [isExplorerSidebarShowing, isMobile, isRouteFocused, showMobileAgent]);
+  }, [isExplorerSidebarShowing, isMobile, workspaceOwnsInput, showMobileAgent]);
 
   const workspaceLayout = useWorkspaceLayoutStore((state) =>
     persistenceKey ? (state.layoutByWorkspace[persistenceKey] ?? null) : null,
@@ -1337,7 +1351,6 @@ function WorkspaceScreenContent({
   });
   useSyncWorkspaceActiveBrowser({
     workspaceLayout,
-    isRouteFocused,
     workspaceId: normalizedWorkspaceId,
   });
   const openWorkspaceTabInBackground = useCallback(
@@ -1423,7 +1436,7 @@ function WorkspaceScreenContent({
   const visibleAgentIds = useVisibleAgentIds({
     layout: workspaceLayout,
     tabs: uiTabs,
-    routeFocused: isRouteFocused,
+    routeFocused: isWorkspacePresented,
     focusedPaneOnly: syncFocusedPaneOnly,
     explorerPaneId: explorerSidebarPaneId,
     explorerVisible: isExplorerSidebarShowing,
@@ -1465,7 +1478,7 @@ function WorkspaceScreenContent({
   }, [focusedPaneTabState.activeTab]);
 
   useEffect(() => {
-    if (!isRouteFocused) {
+    if (!workspaceOwnsInput) {
       return;
     }
     setFocusedAgentId(normalizedServerId, focusedPaneAgentId);
@@ -1473,21 +1486,21 @@ function WorkspaceScreenContent({
   }, [
     focusedPaneAgentId,
     focusedPaneTerminalId,
-    isRouteFocused,
+    workspaceOwnsInput,
     normalizedServerId,
     setFocusedAgentId,
     setFocusedTerminalId,
   ]);
 
   useEffect(() => {
-    if (!isRouteFocused) {
+    if (!workspaceOwnsInput) {
       return;
     }
     return () => {
       setFocusedAgentId(normalizedServerId, null);
       setFocusedTerminalId(normalizedServerId, null);
     };
-  }, [isRouteFocused, normalizedServerId, setFocusedAgentId, setFocusedTerminalId]);
+  }, [workspaceOwnsInput, normalizedServerId, setFocusedAgentId, setFocusedTerminalId]);
 
   const openWorkspaceDraftTab = useCallback(
     function openWorkspaceDraftTab(input?: {
@@ -1518,7 +1531,7 @@ function WorkspaceScreenContent({
   );
 
   useLayoutEffect(() => {
-    if (!isRouteFocused) {
+    if (!isWorkspacePresented) {
       return;
     }
     if (!normalizedServerId || !normalizedWorkspaceId || !persistenceKey) {
@@ -1554,7 +1567,7 @@ function WorkspaceScreenContent({
     hasHydratedWorkspaceLayoutStore,
     pendingTerminalCreateInput,
     createTerminalMutation.isPending,
-    isRouteFocused,
+    isWorkspacePresented,
     normalizedServerId,
     normalizedWorkspaceId,
     pendingByDraftId,
@@ -1619,7 +1632,7 @@ function WorkspaceScreenContent({
   );
 
   useEffect(() => {
-    if (!isRouteFocused) {
+    if (!workspaceOwnsInput) {
       return;
     }
     if (!persistenceKey) {
@@ -1656,7 +1669,7 @@ function WorkspaceScreenContent({
   }, [
     claimFailedSetupSurface,
     hasSetupTab,
-    isRouteFocused,
+    workspaceOwnsInput,
     normalizedWorkspaceId,
     normalizedServerId,
     openWorkspaceTabInBackground,
@@ -2745,7 +2758,7 @@ function WorkspaceScreenContent({
 
   // Shared by every handler below: these actions only exist on a focused workspace route.
   const workspaceActionsEnabled = Boolean(
-    isRouteFocused && normalizedServerId && normalizedWorkspaceId,
+    workspaceOwnsInput && normalizedServerId && normalizedWorkspaceId,
   );
 
   useKeyboardActionHandler({
@@ -2910,11 +2923,11 @@ function WorkspaceScreenContent({
     [isMobile, canRenderDesktopPaneSplits],
   );
   useEffect(() => {
-    if (!isRouteFocused || isNative || typeof document === "undefined" || activeTabDescriptor) {
+    if (!workspaceOwnsInput || isNative || typeof document === "undefined" || activeTabDescriptor) {
       return;
     }
     document.title = "Workspace";
-  }, [activeTabDescriptor, isRouteFocused]);
+  }, [activeTabDescriptor, workspaceOwnsInput]);
   const buildPaneContentModel = useCallback(
     (input: {
       tab: WorkspaceTabDescriptor;
@@ -3069,13 +3082,13 @@ function WorkspaceScreenContent({
             workspaceKey: persistenceKey,
             serverId: normalizedServerId,
             workspaceId: normalizedWorkspaceId,
-            isWorkspaceFocused: isRouteFocused,
+            isWorkspaceFocused: workspaceOwnsInput,
             buildContent: buildSheetPaneContentModel,
           }
         : null,
     [
       buildSheetPaneContentModel,
-      isRouteFocused,
+      workspaceOwnsInput,
       normalizedServerId,
       normalizedWorkspaceId,
       persistenceKey,
@@ -3094,7 +3107,8 @@ function WorkspaceScreenContent({
     hasLoadedTerminals: terminalsQuery.isSuccess,
     mountedFocusedPaneTabIds,
     focusedPaneTabDescriptorMap,
-    isRouteFocused,
+    isWorkspacePresented,
+    ownsInput: workspaceOwnsInput,
     focusedPaneId,
     paneFocusSuspended,
     onFocusPane: handleFocusPane,
@@ -3316,7 +3330,7 @@ function WorkspaceScreenContent({
         <ScreenHeader
           left={
             <>
-              <SidebarMenuToggle />
+              <WorkspaceHeaderSidebarToggle />
               <WorkspaceHeaderTitleBar
                 isLoading={isWorkspaceHeaderLoading}
                 title={workspaceHeaderTitle}
@@ -3334,7 +3348,12 @@ function WorkspaceScreenContent({
               />
             </>
           }
-          right={headerRight}
+          right={
+            <>
+              {headerRight}
+              <GridCellMaximizeButton />
+            </>
+          }
         />
       ) : null,
     [
@@ -3481,7 +3500,7 @@ function WorkspaceScreenContent({
         workspaceKey={persistenceKey}
         normalizedServerId={normalizedServerId}
         normalizedWorkspaceId={normalizedWorkspaceId}
-        isWorkspaceFocused={isRouteFocused}
+        isWorkspaceFocused={workspaceOwnsInput}
         uiTabs={uiTabs}
         hoveredCloseTabKey={hoveredCloseTabKey}
         setHoveredCloseTabKey={setHoveredCloseTabKey}
@@ -3517,7 +3536,7 @@ function WorkspaceScreenContent({
     toggleFocusMode,
     normalizedServerId,
     normalizedWorkspaceId,
-    isRouteFocused,
+    workspaceOwnsInput,
     uiTabs,
     hoveredCloseTabKey,
     closingTabIds,
@@ -3579,7 +3598,7 @@ function WorkspaceScreenContent({
         <NewTabLauncherProvider value={newTabLauncher}>
           <WorkspaceDesktopTabsRow
             paneId={focusedPaneIdOrUndefined}
-            isFocused={isRouteFocused}
+            isFocused={workspaceOwnsInput}
             tabs={desktopTabRowItems}
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
@@ -3624,7 +3643,7 @@ function WorkspaceScreenContent({
         uiTabs={uiTabs}
         normalizedServerId={normalizedServerId}
         normalizedWorkspaceId={normalizedWorkspaceId}
-        isWorkspaceFocused={isRouteFocused}
+        isWorkspaceFocused={workspaceOwnsInput}
         closingTabIds={closingTabIds}
         hoveredCloseTabKey={hoveredCloseTabKey}
         setHoveredCloseTabKey={setHoveredCloseTabKey}
@@ -3649,7 +3668,7 @@ function WorkspaceScreenContent({
     return (
       <ExplorerFrame
         presentation={isMobile ? "overlay" : "dock"}
-        isWorkspaceActive={isRouteFocused}
+        isWorkspaceActive={isWorkspacePresented}
         persistenceKey={persistenceKey}
         containerWidth={workspaceViewportWidth}
         isOpen={isExplorerSidebarShowing && !desktopFocusModeEnabled}
@@ -3665,7 +3684,8 @@ function WorkspaceScreenContent({
     uiTabs,
     normalizedServerId,
     normalizedWorkspaceId,
-    isRouteFocused,
+    isWorkspacePresented,
+    workspaceOwnsInput,
     isExplorerSidebarShowing,
     closingTabIds,
     hoveredCloseTabKey,
@@ -3724,12 +3744,12 @@ function WorkspaceScreenContent({
     ],
   );
   useEffect(() => {
-    if (!isRouteFocused) markdownPathOpener.cancel();
+    if (!workspaceOwnsInput) markdownPathOpener.cancel();
     return () => markdownPathOpener.cancel();
-  }, [markdownPathOpener, isRouteFocused, activeTabId]);
+  }, [markdownPathOpener, workspaceOwnsInput, activeTabId]);
   const openMarkdownPath = useStableEvent(
     (target: InlinePathTarget, disposition: OpenFileDisposition) => {
-      if (isRouteFocused) void markdownPathOpener.open(target, disposition);
+      if (workspaceOwnsInput) void markdownPathOpener.open(target, disposition);
     },
   );
 
@@ -3740,7 +3760,7 @@ function WorkspaceScreenContent({
           tab={activeTabDescriptor}
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}
-          isRouteFocused={isRouteFocused}
+          ownsInput={workspaceOwnsInput}
         />
         <WorkspacePanelSurface
           onLayout={measureWorkspaceWidth}
@@ -3767,7 +3787,7 @@ function WorkspaceScreenContent({
           <FloatingPanelPortalHost name={workspaceFloatingPanelPortalHostName} />
         </WorkspacePanelSurface>
         <ImportSessionSheet
-          visible={isRouteFocused && isImportSheetVisible}
+          visible={workspaceOwnsInput && isImportSheetVisible}
           client={client}
           serverId={normalizedServerId}
           cwd={workspaceDirectory}
@@ -3777,7 +3797,7 @@ function WorkspaceScreenContent({
           onImported={navigateToImportedAgent}
         />
         <WorkspaceTabRenameModal
-          renamingTab={isRouteFocused ? renamingTab : null}
+          renamingTab={workspaceOwnsInput ? renamingTab : null}
           onSubmit={handleRenameModalSubmit}
           onClose={handleRenameModalClose}
         />

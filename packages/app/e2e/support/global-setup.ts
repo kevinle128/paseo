@@ -125,22 +125,39 @@ export async function waitForMetro(port: number, options: WaitForServerOptions):
   await waitForServer(port, options, probeMetro);
 }
 
+// E2E_METRO_BUNDLE=production serves the minified production bundle (no dev checks, production
+// React); "production-readable" keeps function names for CPU profiles. Unset serves the dev bundle.
+function metroBundleModeArgs(): string[] {
+  switch (process.env.E2E_METRO_BUNDLE) {
+    case "production":
+      return ["--no-dev", "--minify"];
+    case "production-readable":
+      return ["--no-dev"];
+    default:
+      return [];
+  }
+}
+
 function startMetro(port: number, buffer: ReturnType<typeof createLineBuffer>): ChildProcess {
   const appDir = path.resolve(__dirname, "../..");
   const expoCli = require.resolve("expo/bin/cli");
   // Spawns Node directly to bypass Windows .cmd shim execution restrictions without shell: true.
-  const child = spawn(process.execPath, [expoCli, "start", "--web", "--port", String(port)], {
-    cwd: appDir,
-    env: {
-      ...process.env,
-      BROWSER: "none",
-      // Automation never opens native DevTools or installs its desktop shell.
-      EXPO_UNSTABLE_HEADLESS: "1",
-      ...(process.env.E2E_DESKTOP_RUNTIME === "1" ? { PASEO_WEB_PLATFORM: "electron" } : {}),
+  const child = spawn(
+    process.execPath,
+    [expoCli, "start", "--web", "--port", String(port), ...metroBundleModeArgs()],
+    {
+      cwd: appDir,
+      env: {
+        ...process.env,
+        BROWSER: "none",
+        // Automation never opens native DevTools or installs its desktop shell.
+        EXPO_UNSTABLE_HEADLESS: "1",
+        ...(process.env.E2E_DESKTOP_RUNTIME === "1" ? { PASEO_WEB_PLATFORM: "electron" } : {}),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
     },
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-  });
+  );
   const log = (chunk: Buffer, stream: "stdout" | "stderr") => {
     for (const line of chunk.toString().split("\n").filter(Boolean)) {
       buffer.add(`[${stream}] ${line}`);

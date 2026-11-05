@@ -9,7 +9,7 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 interface UseWorkspaceCheckoutStatusInput {
   client: ReturnType<typeof useHostRuntimeClient>;
   isConnected: boolean;
-  isRouteFocused: boolean;
+  isWorkspacePresented: boolean;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   workspaceDirectory: string | null;
@@ -20,12 +20,12 @@ export function useWorkspaceCheckoutStatus(input: UseWorkspaceCheckoutStatusInpu
   const isCheckoutQueryEnabled = useMemo(
     () =>
       canCreateWorkspaceTerminal({
-        isRouteFocused: input.isRouteFocused,
+        isWorkspacePresented: input.isWorkspacePresented,
         client: input.client,
         isConnected: input.isConnected,
         workspaceDirectory: input.workspaceDirectory,
       }),
-    [input.client, input.isConnected, input.isRouteFocused, input.workspaceDirectory],
+    [input.client, input.isConnected, input.isWorkspacePresented, input.workspaceDirectory],
   );
   const checkoutQuery = useQuery({
     queryKey: checkoutStatusQueryKey(

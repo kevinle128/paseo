@@ -440,6 +440,10 @@ export const ar: TranslationResources = {
     },
   },
   workspace: {
+    gridCell: {
+      maximize: "تكبير الخلية",
+      restore: "استعادة الخلية",
+    },
     route: {
       loading: "جارٍ تحميل مساحة العمل",
       connecting: "الاتصال",
@@ -1220,6 +1224,12 @@ export const ar: TranslationResources = {
     },
     pinned: {
       title: "المثبتة",
+      gridMode: {
+        label: "تخطيط شبكة المثبتة",
+        normal: "عادي",
+        twoColumns: "عمودان",
+        threeColumns: "3 أعمدة",
+      },
     },
     host: {
       noHost: "لا مضيف",
@@ -2606,6 +2616,7 @@ export const ar: TranslationResources = {
         previousTab: "علامة التبويب السابقة",
         nextTab: "علامة التبويب التالية",
         splitPaneRight: "تقسيم الجزء الأيمن",
+        toggleCellMaximize: "تكبير الخلية أو استعادتها",
         splitPaneDown: "تقسيم الجزء لأسفل",
         focusPaneLeft: "جزء التركيز على اليسار",
         focusPaneRight: "جزء التركيز إلى اليمين",

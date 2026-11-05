@@ -10,6 +10,8 @@ import {
   rememberBrowserWebviewSize,
   releaseResidentBrowserWebview,
   removeResidentBrowserWebview,
+  repositionPresentedBrowserWebviews,
+  setBrowserWebviewViewportClip,
   resizeResidentBrowserWebview,
   takeResidentBrowserWebview,
 } from "./resident-webviews";
@@ -161,6 +163,50 @@ describe("resident browser webviews", () => {
       mode: "responsive",
     });
     expect(webview.parentElement).toBe(permanentParent);
+  });
+
+  it("places a presented webview again after its anchor scrolls and clips it to a scrolling grid", () => {
+    const webview = ensureTestBrowser({
+      browserId: "browser-grid-scroll",
+      workspaceId: "workspace-grid-scroll",
+      url: "https://example.com",
+    });
+    if (!webview?.parentElement) {
+      throw new Error("Expected resident browser surface");
+    }
+    const anchor = document.createElement("div");
+    const clip = document.createElement("div");
+    document.body.append(anchor, clip);
+    let anchorTop = 100;
+    Object.defineProperty(anchor, "getBoundingClientRect", {
+      value: () => ({ left: 400, top: anchorTop, width: 500, height: 300 }),
+    });
+    Object.defineProperty(clip, "getBoundingClientRect", {
+      value: () => ({ left: 400, top: anchorTop, width: 500, height: 300 }),
+    });
+    setBrowserWebviewViewportClip(() => ({ left: 320, top: 40, right: 1280, bottom: 360 }));
+
+    presentBrowserWebview("browser-grid-scroll", webview, anchor, clip, { mode: "responsive" });
+    expect(webview.parentElement.style.top).toBe("100px");
+    expect(webview.parentElement.style.height).toBe("260px");
+
+    anchorTop = 20;
+    repositionPresentedBrowserWebviews();
+
+    expect(webview.parentElement.style.top).toBe("40px");
+    expect(webview.parentElement.style.height).toBe("280px");
+
+    setBrowserWebviewViewportClip(null);
+    repositionPresentedBrowserWebviews();
+    expect(webview.parentElement.style.top).toBe("20px");
+    expect(webview.parentElement.style.height).toBe("300px");
+
+    releaseResidentBrowserWebview("browser-grid-scroll", webview);
+    anchorTop = 500;
+    repositionPresentedBrowserWebviews();
+    expectParkedSurface(webview.parentElement);
+    anchor.remove();
+    clip.remove();
   });
 
   it("clips an oversized fixed viewport to its pane without resizing the webview", () => {

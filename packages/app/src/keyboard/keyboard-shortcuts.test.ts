@@ -136,6 +136,26 @@ interface HelpSectionCase {
 describe("keyboard-shortcuts", () => {
   const matchingCases: MatchingShortcutCase[] = [
     {
+      name: "matches Cmd+Shift+Enter to maximize a grid cell while typing in the composer",
+      event: { key: "Enter", code: "Enter", metaKey: true, shiftKey: true },
+      context: { isMac: true, focusScope: "message-input" },
+      action: "workspace.cell.maximize.toggle",
+    },
+    {
+      name: "matches Ctrl+Shift+Enter to maximize a grid cell outside the composer",
+      event: { key: "Enter", code: "Enter", ctrlKey: true, shiftKey: true },
+      context: { isMac: false, focusScope: "other" },
+      action: "workspace.cell.maximize.toggle",
+    },
+    {
+      name: "keeps Escape as interrupt agent so restoring a cell never cancels a run",
+      event: { key: "Escape", code: "Escape" },
+      context: { focusScope: "message-input" },
+      action: "agent.interrupt",
+      preventDefault: false,
+      stopPropagation: false,
+    },
+    {
       name: "matches Cmd+O to open project",
       event: { key: "o", code: "KeyO", metaKey: true },
       context: { isMac: true },

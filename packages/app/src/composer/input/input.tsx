@@ -65,6 +65,8 @@ import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useComposerHeight } from "./height";
 import { ComposerInputPresentation } from "./presentation";
+import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
+import { useGridComposerDensity } from "./use-grid-composer-density";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
 import type { NativePastedFile } from "@/composer/native-pasted-image";
 import {
@@ -217,6 +219,8 @@ const MIN_INPUT_HEIGHT_MOBILE = 30;
 const MIN_INPUT_HEIGHT_DESKTOP = 46;
 const DEFAULT_MAX_INPUT_HEIGHT = 160;
 const MAX_INPUT_VIEWPORT_RATIO = 0.5;
+const MINIMAL_INPUT_HEIGHT = 22;
+const MINIMAL_SEND_ICON_SIZE = 13;
 const MIN_INPUT_HEIGHT = isWeb ? MIN_INPUT_HEIGHT_DESKTOP : MIN_INPUT_HEIGHT_MOBILE;
 type WebTextInputKeyPressEvent = NativeSyntheticEvent<
   TextInputKeyPressEventData & {
@@ -388,22 +392,25 @@ function SendButtonContent({
   submitIcon,
   submitLabel,
   buttonIconSize,
+  muted = false,
 }: {
   isSubmitLoading: boolean;
   submitIcon: "arrow" | "return";
   submitLabel: string | undefined;
   buttonIconSize: number;
+  muted?: boolean;
 }) {
+  const iconMapping = muted ? iconForegroundMutedMapping : iconAccentForegroundMapping;
   if (isSubmitLoading) {
-    return <ThemedLoadingSpinner size="small" uniProps={iconAccentForegroundMapping} />;
+    return <ThemedLoadingSpinner size="small" uniProps={iconMapping} />;
   }
   if (submitLabel) {
     return <Text style={styles.sendButtonLabel}>{submitLabel}</Text>;
   }
   if (submitIcon === "return") {
-    return <ThemedCornerDownLeft size={buttonIconSize} uniProps={iconAccentForegroundMapping} />;
+    return <ThemedCornerDownLeft size={buttonIconSize} uniProps={iconMapping} />;
   }
-  return <ThemedArrowUp size={buttonIconSize} uniProps={iconAccentForegroundMapping} />;
+  return <ThemedArrowUp size={buttonIconSize} uniProps={iconMapping} />;
 }
 
 interface DesktopKeyPressContext {
@@ -799,7 +806,9 @@ function SendButtonTooltip({
   buttonIconSize,
   sendKeys,
   sendTooltipLabel,
+  muted,
 }: {
+  muted?: boolean;
   shouldShow: boolean;
   canPressLoadingButton: boolean;
   onSubmitLoadingPress: (() => void) | undefined;
@@ -835,6 +844,7 @@ function SendButtonTooltip({
           submitIcon={submitIcon}
           submitLabel={submitLabel}
           buttonIconSize={buttonIconSize}
+          muted={muted}
         />
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
@@ -1298,6 +1308,15 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const textInputRef = useRef<ComposerTextInputHandle | null>(null);
     const isInputFocusedRef = useRef(false);
     const focusIntentRef = useRef(false);
+    const focusTextInput = useCallback(() => textInputRef.current?.focus(), []);
+    const density = useGridComposerDensity({
+      rootRef,
+      inputFocused: isInputFocused,
+      hasDraft: hasLiveText,
+      hasAttachments: attachments.length > 0 || Boolean(hasExternalContent),
+      focusInput: focusTextInput,
+    });
+    const isMinimal = density === "minimal";
     const valueRef = useRef(value);
     const selectionRef = useRef({ start: value.length, end: value.length });
     const paneFocusedRef = useRef(isPaneFocused);
@@ -1370,7 +1389,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const composerHeight = useComposerHeight({
       getText: getLiveText,
       textareaRef: webTextareaRef,
-      minHeight: MIN_INPUT_HEIGHT,
+      minHeight: isMinimal ? MINIMAL_INPUT_HEIGHT : MIN_INPUT_HEIGHT,
       maxHeight: maxInputHeight,
       onRenderedLinesChange: setRenderedLines,
       presentationKey: isFullscreen,
@@ -1921,9 +1940,17 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         isCompact && !isFullscreen && styles.inputWrapperCompact,
         readOnly && styles.inputWrapperReadOnly,
         inputWrapperStyle,
+        isMinimal && styles.inputWrapperMinimal,
         { opacity: surfacePresentation.input.opacity },
       ],
-      [inputWrapperStyle, isCompact, isFullscreen, readOnly, surfacePresentation.input.opacity],
+      [
+        inputWrapperStyle,
+        isCompact,
+        isFullscreen,
+        isMinimal,
+        readOnly,
+        surfacePresentation.input.opacity,
+      ],
     );
     // `withUnistyles` maps this component's `style` into a `.hash > *` child
     // rule, which ties on specificity with react-native-web's own
@@ -1936,8 +1963,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         mode.isMonospace && styles.textInputMonospace,
         isFullscreen ? styles.fullscreenTextInput : composerHeightStyle,
         isCompact && !isFullscreen && styles.compactTextInput,
+        isMinimal && styles.minimalTextInput,
       ],
-      [composerHeightStyle, mode.isMonospace, isFullscreen, isCompact],
+      [composerHeightStyle, mode.isMonospace, isFullscreen, isCompact, isMinimal],
     );
     // Static content has no textarea to mirror, so it grows with its own text
     // instead of the measured input height.
@@ -1989,6 +2017,50 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       ),
       [isDictating, isRealtimeVoiceForCurrentAgent, voice?.isMuted, buttonIconSize],
     );
+
+    // The slim line of a grid cell shows one small send glyph. The line is only slim while the
+    // composer has nothing to send, so the button is disabled and the glyph is visual: pressing the
+    // line focuses the input and expands the composer, and sending happens from the full composer.
+    // The press still goes through the cell guard so a send enabled here (`allowEmptySubmit`)
+    // could not fire on the click that only focused the cell.
+    const guardedDefaultSendAction = useGuardedCellPress(handleDefaultSendAction);
+    const isMinimalSendDisabled =
+      isSendButtonDisabled ||
+      !(
+        allowEmptySubmit ||
+        hasSendableComposerContent({ hasText: hasLiveText, attachments, hasExternalContent })
+      );
+    const minimalSendStyle = useMemo(
+      () => [
+        styles.sendButton,
+        styles.sendButtonMinimal,
+        isMinimalSendDisabled && styles.sendButtonMinimalIdle,
+      ],
+      [isMinimalSendDisabled],
+    );
+    const minimalSend = isMinimal ? (
+      <View style={styles.minimalSendSlot} pointerEvents="box-none">
+        <SendButtonTooltip
+          shouldShow
+          canPressLoadingButton={false}
+          onSubmitLoadingPress={undefined}
+          onDefaultSendAction={guardedDefaultSendAction}
+          onLongPressSend={handleLongPressSend}
+          isSendButtonDisabled={isMinimalSendDisabled}
+          submitAccessibilityLabel={submitAccessibilityLabel}
+          submitAccessibilityHint={submitAccessibilityHint}
+          sendButtonCombinedStyle={minimalSendStyle}
+          isSubmitLoading={isSubmitLoading}
+          submitIcon={submitIcon}
+          submitLabel={undefined}
+          muted={isMinimalSendDisabled}
+          submitButtonTestID="composer-minimal-send"
+          buttonIconSize={MINIMAL_SEND_ICON_SIZE}
+          sendKeys={resolveSendKeys(sendShortcut)}
+          sendTooltipLabel={sendTooltipLabel}
+        />
+      </View>
+    ) : null;
 
     const sendButton = useMemo(
       () => (
@@ -2067,7 +2139,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             fullscreen={isFullscreen}
             compact={isCompact}
             onRenderedLinesChange={setRenderedLines}
-            focusHintVisible={!isFullscreen && isWeb && !isInputFocused && !value}
+            focusHintVisible={!isFullscreen && !isMinimal && isWeb && !isInputFocused && !value}
             focusInputKeys={focusInputKeys}
             focusHintLabel={t("composer.input.focusHint", {
               shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
@@ -2076,6 +2148,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         </RenderProfile>
       ),
       [
+        isMinimal,
         readOnly,
         textReplacement,
         assignTextInput,
@@ -2105,7 +2178,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
     const toolbar = useMemo(
       () => (
-        <View style={styles.buttonRow}>
+        <View style={isMinimal ? styles.buttonRowHidden : styles.buttonRow}>
           {/* Toolbar left: attachment button + agent controls */}
           <View style={styles.leftButtonGroup}>
             <AttachmentDropdown
@@ -2162,6 +2235,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         dictationToggleKeys,
         rightContent,
         sendButton,
+        isMinimal,
       ],
     );
     const voiceOverlay = useMemo(
@@ -2221,6 +2295,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           autoFocusKey={autoFocusKey}
           textInputRef={textInputRef}
         />
+        {minimalSend}
         <ComposerInputPresentation
           fullscreen={isFullscreen}
           sendIconSize={buttonIconSize}
@@ -2284,6 +2359,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
           transitionTimingFunction: "ease-in-out",
         }
       : {}),
+  },
+  // The slim line of a composer in an idle grid cell. The toolbar stays mounted but hidden.
+  inputWrapperMinimal: {
+    gap: 0,
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
   },
   // Lifts the composer off the chat it sits under on phones.
   inputWrapperCompact: {
@@ -2357,6 +2439,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "space-between",
     marginHorizontal: -6,
   },
+  buttonRowHidden: {
+    display: "none",
+  },
   leftButtonGroup: {
     minWidth: 0,
     flexShrink: 1,
@@ -2403,6 +2488,24 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
     marginLeft: theme.spacing[1],
   },
+  sendButtonMinimal: {
+    width: 24,
+    height: 24,
+    marginLeft: 0,
+  },
+  sendButtonMinimalIdle: {
+    backgroundColor: theme.colors.surface3,
+  },
+  // Sits over the right end of the slim line; the text input reserves the room.
+  minimalSendSlot: {
+    position: "absolute",
+    right: theme.spacing[2],
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    zIndex: 1,
+  },
+  minimalTextInput: { paddingRight: 32 },
   sendButtonLabeled: {
     width: "auto",
     minWidth: 28,

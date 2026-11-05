@@ -1190,3 +1190,104 @@ test("disposing a view releases its pending observation before bootstrap complet
   await Promise.resolve();
   world.expectNoPendingFetch();
 });
+
+test("a suspended source drops its opened chats from membership and resume restores them with a catch-up", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a"]);
+  world.sync.replaceVisibleAgentIds("cell-b", ["agent-b"]);
+  world.sync.setConnected(true);
+  const initial = await world.nextMembership();
+  initial.succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+  expect(initial.agentIds).toEqual(["agent-a", "agent-b"]);
+
+  // The cell hides: its pane stops declaring chats, then the grid suspends the source.
+  world.sync.replaceVisibleAgentIds("cell-a", []);
+  world.sync.suspendSource("cell-a", ["agent-a"]);
+  const suspended = await world.nextMembership();
+  suspended.succeed();
+  expect(suspended.agentIds).toEqual(["agent-b"]);
+
+  world.cursors.set("agent-a", { epoch: "epoch-agent-a", endSeq: 7 });
+  world.sync.resumeSource("cell-a");
+  const resumed = await world.nextMembership();
+  resumed.succeed();
+  expect(resumed.agentIds).toEqual(["agent-a", "agent-b"]);
+  const catchUp = await world.nextFetch("agent-a");
+  expect(catchUp.request).toMatchObject({ direction: "after", cursor: { seq: 7 } });
+  catchUp.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+  world.sync.dispose();
+});
+
+test("suspending a source keeps a chat that another source shows", async () => {
+  const world = new TimelineWorld();
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a"]);
+  world.sync.replaceVisibleAgentIds("cell-b", ["agent-a", "agent-b"]);
+  world.sync.setConnected(true);
+  const initial = await world.nextMembership();
+  initial.succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+
+  world.sync.replaceVisibleAgentIds("cell-a", []);
+  world.sync.suspendSource("cell-a", ["agent-a"]);
+  world.expectNoPendingMembership();
+  world.sync.dispose();
+});
+
+test("a suspension leaves the opened set intact and a visible chat always stays", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+
+  world.sync.replaceVisibleAgentIds("cell-a", []);
+  world.sync.suspendSource("cell-a", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+
+  // Showing the chat again wins over the suspension, so the chat is back before any resume.
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a"]);
+  const shown = await world.nextMembership();
+  shown.succeed();
+  expect(shown.agentIds).toEqual(["agent-a"]);
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
+test("closing a tab while its source is suspended removes the chat for good", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a", "agent-b"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+
+  world.sync.replaceVisibleAgentIds("cell-a", []);
+  world.sync.suspendSource("cell-a", ["agent-a", "agent-b"]);
+  (await world.nextMembership()).succeed();
+
+  world.sync.replaceOpenTabAgentIds(["agent-b"]);
+  world.expectNoPendingMembership();
+  world.sync.resumeSource("cell-a");
+  const resumed = await world.nextMembership();
+  resumed.succeed();
+  expect(resumed.agentIds).toEqual(["agent-b"]);
+  (await world.nextFetch("agent-b")).respond({ hasNewer: false });
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("resuming a source that is not suspended changes nothing", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("cell-a", ["agent-a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("agent-a")).respond({ hasNewer: false });
+  world.sync.resumeSource("cell-a");
+  world.expectNoPendingMembership();
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});

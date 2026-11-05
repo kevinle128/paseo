@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n as testI18n } from "@/i18n/i18next";
 import type { PendingPermission } from "@/types/shared";
 import { QuestionFormCard } from "./question-form-card";
+import { createPointerFocusClaim } from "@/pinned-grid/cell-press-guard";
+import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 
 // Load translations so controls expose their real accessible names.
 void testI18n;
@@ -53,19 +55,22 @@ function buildPermission(question: Record<string, unknown>): PendingPermission {
   };
 }
 
-function mountCard(question: Record<string, unknown>) {
+function mountCard(question: Record<string, unknown>, cell: WorkspaceGridCell | null = null) {
   const onRespond = vi.fn<(response: AgentPermissionResponse) => void>();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const card = (
+    <QuestionFormCard
+      permission={buildPermission(question)}
+      onRespond={onRespond}
+      isResponding={false}
+      responseError={null}
+    />
+  );
   act(() =>
     root.render(
-      <QuestionFormCard
-        permission={buildPermission(question)}
-        onRespond={onRespond}
-        isResponding={false}
-        responseError={null}
-      />,
+      cell ? <WorkspaceGridCellProvider value={cell}>{card}</WorkspaceGridCellProvider> : card,
     ),
   );
   mounted.push({ root, container });
@@ -84,13 +89,14 @@ function mountCard(question: Record<string, unknown>) {
       input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
     });
   };
+  const dismiss = () => act(() => view.getByRole("button", { name: "Dismiss" }).click());
   const submit = () => act(() => view.getByRole("button", { name: "Submit" }).click());
   const submittedAnswers = (): Record<string, string> => {
     const response = onRespond.mock.calls[0]?.[0];
     if (!response || response.behavior !== "allow") throw new Error("card did not submit");
     return (response.updatedInput as { answers: Record<string, string> }).answers;
   };
-  return { check, type, otherInput, submit, submittedAnswers };
+  return { check, type, otherInput, submit, dismiss, submittedAnswers, onRespond };
 }
 
 const multiSelectQuestion = {
@@ -152,5 +158,57 @@ describe("QuestionFormCard other answers", () => {
     expect(card.otherInput().value).toBe("");
     card.submit();
     expect(card.submittedAnswers()).toEqual({ Provider: "Codex" });
+  });
+});
+
+function gridCell(overrides: Partial<WorkspaceGridCell> = {}): WorkspaceGridCell {
+  return {
+    isFocused: false,
+    isMaximized: false,
+    showProjectBadge: true,
+    toggleMaximize: vi.fn(),
+    focusCell: vi.fn(),
+    pointerFocusClaim: createPointerFocusClaim(),
+    ...overrides,
+  };
+}
+
+describe("QuestionFormCard in a pinned grid cell", () => {
+  it("only focuses an unfocused cell on the first Submit press, then submits", () => {
+    const cell = gridCell({ isFocused: false });
+    const card = mountCard(singleSelectQuestion, cell);
+    card.check("Codex");
+
+    card.submit();
+    expect(card.onRespond).not.toHaveBeenCalled();
+    expect(cell.focusCell).toHaveBeenCalledTimes(1);
+
+    cell.isFocused = true;
+    card.submit();
+    expect(card.onRespond).toHaveBeenCalledTimes(1);
+  });
+
+  it("only focuses an unfocused cell on the first Dismiss press, then dismisses", () => {
+    const cell = gridCell({ isFocused: false });
+    const card = mountCard(singleSelectQuestion, cell);
+
+    card.dismiss();
+    expect(card.onRespond).not.toHaveBeenCalled();
+    expect(cell.focusCell).toHaveBeenCalledTimes(1);
+
+    cell.isFocused = true;
+    card.dismiss();
+    expect(card.onRespond).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits and dismisses on the first press outside a grid cell", () => {
+    const submitCard = mountCard(singleSelectQuestion);
+    submitCard.check("Codex");
+    submitCard.submit();
+    expect(submitCard.onRespond).toHaveBeenCalledTimes(1);
+
+    const dismissCard = mountCard(singleSelectQuestion);
+    dismissCard.dismiss();
+    expect(dismissCard.onRespond).toHaveBeenCalledTimes(1);
   });
 });

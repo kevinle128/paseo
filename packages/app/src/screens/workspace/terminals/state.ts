@@ -16,13 +16,13 @@ export function buildTerminalsQueryKey(
 }
 
 export function canCreateWorkspaceTerminal(input: {
-  isRouteFocused: boolean;
+  isWorkspacePresented: boolean;
   client: unknown;
   isConnected: boolean;
   workspaceDirectory: string | null;
 }): boolean {
   return Boolean(
-    input.isRouteFocused && input.client && input.isConnected && input.workspaceDirectory,
+    input.isWorkspacePresented && input.client && input.isConnected && input.workspaceDirectory,
   );
 }
 

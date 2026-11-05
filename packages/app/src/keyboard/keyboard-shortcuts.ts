@@ -193,7 +193,13 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "workspace-pane-move-tab-down",
     "workspace-pane-close",
   ],
-  layout: ["toggle-left-sidebar", "toggle-right-sidebar", "toggle-both-sidebars", "toggle-focus"],
+  layout: [
+    "toggle-left-sidebar",
+    "toggle-right-sidebar",
+    "toggle-both-sidebars",
+    "toggle-focus",
+    "toggle-cell-maximize",
+  ],
   "agent-input": [
     "focus-message-input",
     "cycle-agent-mode",
@@ -241,6 +247,7 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "toggle-both-sidebars": "settings.shortcuts.help.toggleBothSidebars",
   "toggle-settings": "settings.shortcuts.help.toggleSettings",
   "toggle-focus": "settings.shortcuts.help.toggleFocusMode",
+  "toggle-cell-maximize": "settings.shortcuts.help.toggleCellMaximize",
   "cycle-theme": "settings.shortcuts.help.cycleTheme",
   "focus-message-input": "settings.shortcuts.help.focusMessageInput",
   "cycle-agent-mode": "settings.shortcuts.help.cycleAgentMode",
@@ -1021,6 +1028,31 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "toggle-focus",
       section: "layout",
       label: "Toggle focus mode",
+    },
+  },
+
+  // --- Maximize or restore a pinned grid cell ---
+  // Esc stays "Interrupt agent", so restoring a cell never cancels a running agent.
+  {
+    id: "workspace-cell-maximize-toggle-cmd-shift-enter-mac",
+    action: "workspace.cell.maximize.toggle",
+    combo: "Cmd+Shift+Enter",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "toggle-cell-maximize",
+      section: "layout",
+      label: "Maximize or restore cell",
+    },
+  },
+  {
+    id: "workspace-cell-maximize-toggle-ctrl-shift-enter-non-mac",
+    action: "workspace.cell.maximize.toggle",
+    combo: "Ctrl+Shift+Enter",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "toggle-cell-maximize",
+      section: "layout",
+      label: "Maximize or restore cell",
     },
   },
 

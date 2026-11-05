@@ -5,6 +5,11 @@ import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import type { AppLanguage } from "@/i18n/locales";
 import type { SidebarNavPreference } from "@/sidebar-nav/model";
 import {
+  DEFAULT_PINNED_GRID_PREFERENCES,
+  PinnedGridPreferencesSchema,
+  type PinnedGridPreferences,
+} from "@/pinned-grid/preferences";
+import {
   DEFAULT_USAGE_PREFERENCES,
   UsagePreferencesSchema,
   type UsagePreferences,
@@ -102,6 +107,8 @@ export interface AppSettings {
   sidebarFooterItems: SidebarNavPreference[];
   /** How usage reads and which windows the sidebar summary shows. */
   usage: UsagePreferences;
+  /** Pinned workspace grid mode and track sizes, per device. */
+  pinnedGrid: PinnedGridPreferences;
   autoExpandReasoning: boolean;
   chatDisplay: ChatDisplay;
   chatOutlineEnabled: boolean;
@@ -159,6 +166,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sidebarNavItems: [],
   sidebarFooterItems: [],
   usage: DEFAULT_USAGE_PREFERENCES,
+  pinnedGrid: DEFAULT_PINNED_GRID_PREFERENCES,
   autoExpandReasoning: false,
   chatDisplay: "collapseTurns",
   chatOutlineEnabled: true,
@@ -256,6 +264,7 @@ const StoredAppSettingsSchema = z
     sidebarNavItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     sidebarFooterItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     usage: UsagePreferencesSchema,
+    pinnedGrid: PinnedGridPreferencesSchema,
     autoExpandReasoning: z.boolean().catch(false),
     chatDisplay: z.enum(["full", "collapseToolCalls", "collapseTurns"]).optional().catch("full"),
     // COMPAT(toolCallDetailLevel): replaced by chatDisplay in v0.13, remove after 2027-04-24.
