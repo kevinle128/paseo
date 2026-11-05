@@ -93,6 +93,7 @@ describe("fork versions", () => {
     expect(gt("0.14.0-mf.10", "0.14.0-mf.9")).toBe(true);
     expect(gt("0.14.0-beta.1.mf.2", "0.14.0-beta.1.mf.1")).toBe(true);
     expect(gt("0.14.0-beta.1.mf.1", "0.14.0-beta.1")).toBe(true);
+    expect(gt("0.14.0-mf.1", "0.14.0-beta.1.mf.9")).toBe(true);
     expect(gt("0.14.1-mf.1", "0.14.0-mf.9")).toBe(true);
     expect(lt("0.14.0-mf.5", "0.14.0")).toBe(true);
   });
