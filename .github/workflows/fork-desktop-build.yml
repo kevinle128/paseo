@@ -39,7 +39,6 @@ permissions:
   contents: read
 
 env:
-  FORK_REPOSITORY: kevinle128/paseo
   DESKTOP_PACKAGE_PATH: packages/desktop
   WASABI_ENDPOINT: https://s3.ap-southeast-1.wasabisys.com
   WASABI_BUCKET: game-mobile-registry
