@@ -31,7 +31,7 @@ export function prepareForkManifest({ manifestPath, version, availableFiles }) {
   const prefixed = (name) => `${version}/${name}`;
   const output = {
     ...manifest,
-    files: files.map((file) => ({ ...file, url: prefixed(file.url) })),
+    files: files.map((file) => Object.assign({}, file, { url: prefixed(file.url) })),
   };
   if (typeof manifest.path === "string") {
     output.path = prefixed(manifest.path);
