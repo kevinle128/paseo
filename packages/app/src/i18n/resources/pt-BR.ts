@@ -1502,6 +1502,7 @@ export const ptBR: TranslationResources = {
         availableWithLastChecked:
           "Há uma atualização do app pronta para instalar. Última verificação às {{time}}.",
         installed: "Atualização do app instalada. Reinicialização obrigatória.",
+        downloadOpened: "Download aberto. Substitua o Paseo em Aplicativos e reinicie.",
         failed: "Falha ao atualizar o app.",
         idle: "O status de atualização ainda não foi verificado.",
       },

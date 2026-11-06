@@ -1488,6 +1488,8 @@ export const ja: TranslationResources = {
         available: "アプリの更新をインストールできます。",
         availableWithLastChecked: "アプリの更新をインストールできます。最終確認: {{time}}。",
         installed: "アプリの更新がインストールされました。再起動が必要です。",
+        downloadOpened:
+          "ダウンロードを開きました。アプリケーション内のPaseoを置き換えてから再起動してください。",
         failed: "アプリの更新に失敗しました。",
         idle: "更新ステータスはまだ確認されていません。",
       },

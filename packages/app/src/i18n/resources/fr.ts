@@ -1506,6 +1506,8 @@ export const fr: TranslationResources = {
         availableWithLastChecked:
           "Une mise à jour de l’application est prête à être installée. Dernière vérification à {{time}}.",
         installed: "Mise à jour de l’application installée. Redémarrage requis.",
+        downloadOpened:
+          "Téléchargement ouvert. Remplacez Paseo dans Applications, puis redémarrez.",
         failed: "Échec de la mise à jour de l’application.",
         idle: "Les mises à jour n’ont pas encore été vérifiées.",
       },

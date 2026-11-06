@@ -1498,6 +1498,7 @@ export const en = {
         available: "An app update is ready to install.",
         availableWithLastChecked: "An app update is ready to install. Last checked at {{time}}.",
         installed: "App update installed. Restart required.",
+        downloadOpened: "Download opened. Replace Paseo in Applications, then restart.",
         failed: "Failed to update app.",
         idle: "Update status has not been checked yet.",
       },

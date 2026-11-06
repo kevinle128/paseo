@@ -19,6 +19,8 @@ export interface AppUpdateInstallResult {
   installed: boolean;
   version: string | null;
   message: string;
+  // Set when the update was handed to the user as a download instead of being installed.
+  downloadOpened?: boolean;
 }
 
 export interface RuntimeUpdateInfo {

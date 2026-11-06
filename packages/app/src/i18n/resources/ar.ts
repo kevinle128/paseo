@@ -1473,6 +1473,7 @@ export const ar: TranslationResources = {
         available: "تحديث التطبيق جاهز للتثبيت.",
         availableWithLastChecked: "تحديث التطبيق جاهز للتثبيت. آخر فحص في {{time}}.",
         installed: "تم تثبيت تحديث التطبيق. إعادة التشغيل مطلوبة.",
+        downloadOpened: "تم فتح التنزيل. استبدل Paseo في التطبيقات ثم أعد التشغيل.",
         failed: "فشل في تحديث التطبيق.",
         idle: "لم يتم التحقق من حالة التحديث بعد.",
       },

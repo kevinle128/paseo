@@ -184,6 +184,7 @@ describe("createNotifyOnlyUpdateService", () => {
     });
     expect(openExternal).toHaveBeenCalledWith(`${FEED}/0.14.0-mf.2/Paseo-0.14.0-mf.2-arm64.dmg`);
     expect(result.installed).toBe(false);
+    expect(result.downloadOpened).toBe(true);
     expect(service.downloadAndInstallUpdate).not.toHaveBeenCalled();
   });
 

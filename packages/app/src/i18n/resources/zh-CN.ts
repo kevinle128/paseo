@@ -1460,6 +1460,7 @@ export const zhCN: TranslationResources = {
         available: "有 app 更新可安装。",
         availableWithLastChecked: "有 app 更新可安装。上次检查时间：{{time}}。",
         installed: "App 更新已安装。需要重启。",
+        downloadOpened: "已打开下载。请在“应用程序”中替换 Paseo，然后重启。",
         failed: "App 更新失败。",
         idle: "尚未检查更新状态。",
       },

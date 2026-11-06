@@ -1482,6 +1482,7 @@ export const ko: TranslationResources = {
         availableWithLastChecked:
           "앱 업데이트를 설치할 준비가 되었습니다. {{time}}에서 마지막으로 확인했습니다.",
         installed: "앱 업데이트가 설치되었습니다. 재시작이 필요합니다.",
+        downloadOpened: "다운로드를 열었습니다. 응용 프로그램의 Paseo를 교체한 뒤 재시작하세요.",
         failed: "앱을 업데이트하지 못했습니다.",
         idle: "업데이트 상태를 아직 확인하지 않았습니다.",
       },

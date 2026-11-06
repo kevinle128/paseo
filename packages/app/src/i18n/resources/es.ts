@@ -1512,6 +1512,7 @@ export const es: TranslationResources = {
         availableWithLastChecked:
           "Una actualización de la aplicación está lista para instalarse. Última comprobación a las {{time}}.",
         installed: "Actualización de la aplicación instalada. Se requiere reinicio.",
+        downloadOpened: "Descarga abierta. Reemplaza Paseo en Aplicaciones y reinicia.",
         failed: "No se pudo actualizar la aplicación.",
         idle: "El estado de la actualización aún no se ha comprobado.",
       },

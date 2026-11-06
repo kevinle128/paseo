@@ -104,6 +104,7 @@ export function createNotifyOnlyUpdateService(deps: NotifyOnlyUpdateDeps): AppUp
         installed: false,
         version: input.currentVersion,
         message: `Opened the ${check.latestVersion} download. Install it by replacing Paseo in Applications.`,
+        downloadOpened: true,
       };
     },
 
