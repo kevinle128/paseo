@@ -1,0 +1,251 @@
+name: Fork Upstream Sync
+
+# Merges getpaseo/paseo main into the fork's main every day, checks the result,
+# builds the desktop app and reports through Buzz. Only the fork runs this.
+
+on:
+  schedule:
+    # 20:17 UTC is 03:17 in Asia/Saigon.
+    - cron: "17 20 * * *"
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Build even when upstream has nothing new and the fork has no unreleased commit."
+        required: false
+        default: false
+        type: boolean
+
+# Two syncs must never overlap: both would merge and push main.
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_URL: https://github.com/getpaseo/paseo.git
+  # CI does not use the CUDA execution provider, and the onnxruntime-node
+  # postinstall download from NuGet is large enough to make npm ci flaky.
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+jobs:
+  sync:
+    if: github.repository == 'kevinle128/paseo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: read
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      merged_sha: ${{ steps.push.outputs.sha }}
+      upstream_range: ${{ steps.merge.outputs.range }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream
+        id: merge
+        env:
+          FORCE_BUILD: ${{ inputs.force_build }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream main
+
+          new_upstream="$(git rev-parse --short=9 upstream/main)"
+          old_upstream="$(git rev-parse --short=9 "$(git merge-base HEAD upstream/main)")"
+          count="$(git rev-list --count HEAD..upstream/main)"
+          if [[ "$count" == "0" ]]; then
+            range="no new upstream commits (at ${new_upstream})"
+          else
+            range="${old_upstream}..${new_upstream} (${count} commits)"
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+
+          # Any commit after the last published tag is unreleased, including a
+          # merge that was pushed earlier and whose build failed.
+          last_tag="$(git tag -l 'mf-desktop-v*' --sort=-creatordate | head -n 1)"
+          if [[ -z "$last_tag" ]]; then
+            unreleased=1
+          else
+            unreleased="$(git rev-list --count "${last_tag}..HEAD")"
+          fi
+
+          if [[ "$count" == "0" && "$unreleased" == "0" && "$FORCE_BUILD" != "true" ]]; then
+            echo "No changes: upstream has nothing new and ${last_tag} is the fork head."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          if [[ "$count" == "0" ]]; then
+            echo "Upstream is already merged; building the fork head."
+            exit 0
+          fi
+
+          if git merge --no-edit upstream/main; then
+            exit 0
+          fi
+          files="$(git diff --name-only --diff-filter=U)"
+          git merge --abort
+          {
+            echo "conflict=true"
+            echo "conflict_files<<CONFLICT_EOF"
+            echo "$files"
+            echo "CONFLICT_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "::error::Merge conflict in: $(echo "$files" | tr '\n' ' ')"
+          exit 1
+
+      - name: Notify sync blocked
+        if: ${{ failure() && steps.merge.outputs.conflict == 'true' }}
+        uses: ./.github/actions/buzz-notify
+        with:
+          event_type: sync.blocked
+          content: |
+            Paseo fork sync blocked: merging upstream ${{ steps.merge.outputs.range }} conflicts in these files:
+            ${{ steps.merge.outputs.conflict_files }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          idempotency_key: ${{ github.run_id }}-${{ github.run_attempt }}-sync-blocked
+          callback_url: ${{ secrets.BUZZ_APP_CALLBACK_URL }}
+          app_secret: ${{ secrets.BUZZ_APP_SECRET }}
+          ts_oauth_client_id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts_oauth_secret: ${{ secrets.TS_OAUTH_SECRET }}
+
+      - name: Setup Node
+        if: steps.merge.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install dependencies
+        id: install
+        if: steps.merge.outputs.changed == 'true'
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Typecheck reads the generated declarations of the workspace packages.
+      - name: Build server stack
+        id: build_server
+        if: steps.merge.outputs.changed == 'true'
+        run: npm run build:server
+
+      - name: Typecheck
+        id: typecheck
+        if: steps.merge.outputs.changed == 'true'
+        run: npm run typecheck
+
+      - name: Lint
+        id: lint
+        if: steps.merge.outputs.changed == 'true'
+        run: npm run lint
+
+      - name: Push main
+        id: push
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Find failed stage
+        id: stage
+        if: ${{ failure() && steps.merge.outputs.conflict != 'true' }}
+        env:
+          MERGE: ${{ steps.merge.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          BUILD_SERVER: ${{ steps.build_server.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          PUSH: ${{ steps.push.outcome }}
+        run: |
+          stage=setup
+          [[ "$MERGE" == "failure" ]] && stage=merge
+          [[ "$INSTALL" == "failure" ]] && stage=install
+          [[ "$BUILD_SERVER" == "failure" ]] && stage=build:server
+          [[ "$TYPECHECK" == "failure" ]] && stage=typecheck
+          [[ "$LINT" == "failure" ]] && stage=lint
+          [[ "$PUSH" == "failure" ]] && stage=push
+          echo "name=${stage}" >> "$GITHUB_OUTPUT"
+
+      - name: Notify sync failed
+        if: ${{ failure() && steps.merge.outputs.conflict != 'true' }}
+        uses: ./.github/actions/buzz-notify
+        with:
+          event_type: sync.failed
+          content: "Paseo fork sync failed: ${{ steps.stage.outputs.name }}. Upstream ${{ steps.merge.outputs.range }}. Nothing was pushed. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          idempotency_key: ${{ github.run_id }}-${{ github.run_attempt }}-sync-failed
+          callback_url: ${{ secrets.BUZZ_APP_CALLBACK_URL }}
+          app_secret: ${{ secrets.BUZZ_APP_SECRET }}
+          ts_oauth_client_id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts_oauth_secret: ${{ secrets.TS_OAUTH_SECRET }}
+
+  build:
+    needs: sync
+    if: ${{ github.repository == 'kevinle128/paseo' && needs.sync.outputs.changed == 'true' }}
+    permissions:
+      contents: write
+      packages: read
+    uses: ./.github/workflows/fork-desktop-build.yml
+    with:
+      ref: ${{ needs.sync.outputs.merged_sha }}
+    secrets: inherit
+
+  notify:
+    needs: [sync, build]
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && needs.sync.result == 'success' && needs.sync.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Compose message
+        id: compose
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          VERSION: ${{ needs.build.outputs.version }}
+          LINKS: ${{ needs.build.outputs.download_links }}
+          RANGE: ${{ needs.sync.outputs.upstream_range }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            event=release.published
+            key=release-published
+            text="Paseo fork ${VERSION} is ready"$'\n'"Upstream: ${RANGE}"$'\n'"${LINKS}"$'\n'"macOS: download and replace Paseo in Applications."
+          else
+            event=build.failed
+            key=build-failed
+            text="Paseo fork build failed (${BUILD_RESULT}). Upstream: ${RANGE}. Run: ${RUN_URL}"
+          fi
+          {
+            echo "event=${event}"
+            echo "key=${key}"
+            echo "text<<TEXT_EOF"
+            echo "$text"
+            echo "TEXT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Buzz
+        uses: ./.github/actions/buzz-notify
+        with:
+          event_type: ${{ steps.compose.outputs.event }}
+          content: ${{ steps.compose.outputs.text }}
+          idempotency_key: ${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.compose.outputs.key }}
+          callback_url: ${{ secrets.BUZZ_APP_CALLBACK_URL }}
+          app_secret: ${{ secrets.BUZZ_APP_SECRET }}
+          ts_oauth_client_id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts_oauth_secret: ${{ secrets.TS_OAUTH_SECRET }}

@@ -18,6 +18,11 @@ on:
         required: false
         default: ""
         type: string
+      notify:
+        description: "Send a Buzz message when the build finishes or fails."
+        required: false
+        default: true
+        type: boolean
   workflow_call:
     inputs:
       version:
@@ -30,6 +35,21 @@ on:
         required: false
         default: ""
         type: string
+      notify:
+        description: "Send a Buzz message when the build finishes or fails. Callers normally send their own."
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      version:
+        description: Published version, for example 0.14.0-mf.3.
+        value: ${{ jobs.publish.outputs.version }}
+      download_base_url:
+        description: Public directory that holds this version's installers.
+        value: ${{ jobs.publish.outputs.download_base_url }}
+      download_links:
+        description: Markdown list of installer links, one per line.
+        value: ${{ jobs.publish.outputs.download_links }}
 
 concurrency:
   group: fork-desktop-build
@@ -382,6 +402,10 @@ jobs:
     permissions:
       contents: write
       packages: read
+    outputs:
+      version: ${{ needs.setup.outputs.version }}
+      download_base_url: ${{ steps.links.outputs.base_url }}
+      download_links: ${{ steps.links.outputs.links }}
     env:
       VERSION: ${{ needs.setup.outputs.version }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
@@ -471,6 +495,33 @@ jobs:
               --only-show-errors
           done
 
+      # Names come from the files that were uploaded, so the links cannot drift
+      # from the artifact name templates.
+      - name: Collect download links
+        id: links
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}/${VERSION}"
+          {
+            echo "base_url=${base}"
+            echo "links<<LINKS_EOF"
+            for file in release/*.dmg release/*.exe release/*.AppImage release/*.deb; do
+              [[ -f "$file" ]] || continue
+              name="$(basename "$file")"
+              case "$name" in
+                *-arm64.dmg) label="macOS arm64 DMG" ;;
+                *-x64.dmg) label="macOS x64 DMG" ;;
+                *.exe) label="Windows installer" ;;
+                *.AppImage) label="Linux AppImage" ;;
+                *.deb) label="Linux deb" ;;
+                *) label="$name" ;;
+              esac
+              echo "- ${label}: ${base}/${name}"
+            done
+            echo "LINKS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create tag and GitHub release
         shell: bash
         run: |
@@ -483,3 +534,51 @@ jobs:
             --notes "Fork desktop build ${VERSION} from ${SOURCE_SHA}. Primary download location: ${feed}/${VERSION}/" \
             --prerelease \
             release/* feed/latest-mac.yml feed/latest.yml feed/latest-linux.yml
+
+  # Manual runs report their own result; a calling workflow reports its own.
+  notify:
+    needs: [setup, publish]
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && inputs.notify && needs.setup.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Compose message
+        id: compose
+        env:
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          LINKS: ${{ needs.publish.outputs.download_links }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$PUBLISH_RESULT" == "success" ]]; then
+            event=release.published
+            key=build-published
+            text="Paseo fork ${VERSION} is ready"$'\n'"${LINKS}"$'\n'"macOS: download and replace Paseo in Applications."
+          else
+            event=build.failed
+            key=build-failed
+            text="Paseo fork desktop build failed ${VERSION:+(${VERSION}) }- ${RUN_URL}"
+          fi
+          {
+            echo "event=${event}"
+            echo "key=${key}"
+            echo "text<<TEXT_EOF"
+            echo "$text"
+            echo "TEXT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Buzz
+        uses: ./.github/actions/buzz-notify
+        with:
+          event_type: ${{ steps.compose.outputs.event }}
+          content: ${{ steps.compose.outputs.text }}
+          idempotency_key: ${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.compose.outputs.key }}
+          callback_url: ${{ secrets.BUZZ_APP_CALLBACK_URL }}
+          app_secret: ${{ secrets.BUZZ_APP_SECRET }}
+          ts_oauth_client_id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts_oauth_secret: ${{ secrets.TS_OAUTH_SECRET }}
