@@ -41,6 +41,7 @@ export function deriveDormantCellState(
       pendingPermissionCount: agent.pendingPermissionCount,
       requiresAttention: agent.requiresAttention,
       attentionReason: agent.attentionReason,
+      backgroundWork: agent.backgroundWork,
     });
     if (getWorkspaceStateBucketPriority(bucket) < getWorkspaceStateBucketPriority(best)) {
       best = bucket;

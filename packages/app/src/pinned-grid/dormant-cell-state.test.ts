@@ -39,7 +39,15 @@ describe("deriveDormantCellState", () => {
   it("ranks failed over running over attention over done", () => {
     expect(
       deriveDormantCellState(
-        [agent({ id: "a", status: "running" }), agent({ id: "b", status: "error" })],
+        [
+          agent({ id: "a", status: "running" }),
+          agent({
+            id: "b",
+            status: "error",
+            requiresAttention: true,
+            attentionReason: "error",
+          }),
+        ],
         "ws",
       ).bucket,
     ).toBe("failed");
@@ -52,6 +60,16 @@ describe("deriveDormantCellState", () => {
     expect(deriveDormantCellState([agent({ id: "a", requiresAttention: true })], "ws").bucket).toBe(
       "attention",
     );
+  });
+
+  it("stops reading an error as failed once the user has seen it", () => {
+    expect(deriveDormantCellState([agent({ id: "a", status: "error" })], "ws").bucket).toBe("done");
+  });
+
+  it("counts background work as running", () => {
+    expect(
+      deriveDormantCellState([agent({ id: "a", backgroundWork: { count: 1 } })], "ws").bucket,
+    ).toBe("running");
   });
 
   it("counts an open turn as running", () => {

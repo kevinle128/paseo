@@ -33,6 +33,7 @@ function* dormantAgentsOf(agents: ReadonlyMap<string, Agent>): Generator<Dormant
       pendingPermissionCount: agent.pendingPermissions.length,
       requiresAttention: agent.requiresAttention,
       attentionReason: agent.attentionReason,
+      backgroundWork: agent.backgroundWork,
     };
   }
 }

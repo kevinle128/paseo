@@ -464,7 +464,12 @@ export function TerminalPane({
     }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
 
-  useKeyboardFocusSurface("terminal", isTerminalPresented && isPaneFocused && terminalId != null);
+  // Keyboard routing follows input ownership: a reduced grid cell still presents its terminal but
+  // must not declare the terminal surface.
+  useKeyboardFocusSurface(
+    "terminal",
+    retainedPanelActive && isWorkspaceFocused && isPaneFocused && terminalId != null,
+  );
 
   useEffect(() => {
     const canRequest = canRequestFocusClaim({
