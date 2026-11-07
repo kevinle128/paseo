@@ -219,6 +219,59 @@ test.describe("Pinned grid reorder", () => {
     }
   });
 
+  test("a sidebar press on a pinned row scrolls its cell into view and keeps the active tab", async ({
+    page,
+  }) => {
+    const serverId = getServerId();
+    const pinned: Seeded[] = [];
+    await page.setViewportSize({ width: 1500, height: 700 });
+    try {
+      for (let index = 0; index < 6; index += 1) {
+        pinned.push(await seedWorkspace({ repoPrefix: `grid-sidebar-press-${index}-` }));
+      }
+      await openGrid(page, serverId, pinned);
+      const target = pinned[5];
+      const targetCell = cellLocator(page, serverId, target.workspaceId);
+      const deck = page.getByTestId("workspace-deck");
+      const activeTab = targetCell.locator('[data-testid^="workspace-tab-"][aria-selected="true"]');
+      const scrollDeckTo = (top: number | "end") =>
+        deck.evaluate((node, value) => {
+          if (node instanceof HTMLElement) {
+            node.scrollTop = value === "end" ? node.scrollHeight : value;
+          }
+        }, top);
+
+      // Read the target's active tab while it shows, then scroll it off screen.
+      await scrollDeckTo("end");
+      await expect(activeTab.first()).toBeVisible({ timeout: 30_000 });
+      const tabBefore = await activeTab.first().getAttribute("data-testid");
+      await scrollDeckTo(0);
+      await expect.poll(() => readDeckScrollTop(page)).toBe(0);
+      const deckBox = await box(deck);
+      expect((await box(targetCell)).y, "target starts below the viewport").toBeGreaterThan(
+        deckBox.y + deckBox.height,
+      );
+
+      await page
+        .locator(`[data-testid="sidebar-workspace-row-${serverId}:${target.workspaceId}"]:visible`)
+        .first()
+        .click();
+
+      await expect(targetCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
+      await expect.poll(() => readDeckScrollTop(page)).toBeGreaterThan(0);
+      await expect
+        .poll(async () => {
+          const cellBox = await box(targetCell);
+          const viewport = await box(deck);
+          return cellBox.y >= viewport.y - 1 && cellBox.y < viewport.y + viewport.height;
+        })
+        .toBe(true);
+      await expect(activeTab.first()).toHaveAttribute("data-testid", tabBefore ?? "");
+    } finally {
+      for (const workspace of pinned) await workspace.cleanup();
+    }
+  });
+
   test("auto-scrolls at the bottom and top edges", async ({ page }) => {
     const serverId = getServerId();
     const pinned: Seeded[] = [];
