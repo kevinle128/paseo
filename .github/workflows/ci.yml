@@ -153,6 +153,9 @@ jobs:
       - name: Verify dependency patch recovery
         run: node --test scripts/postinstall-patches.test.mjs
 
+      - name: Verify fork desktop manifest checks
+        run: node --test scripts/fork-desktop-manifest.test.mjs
+
       - name: Build server stack
         run: npm run build:server
 
