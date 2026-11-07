@@ -142,7 +142,15 @@ test("noise filter drops test, ci, docs, chore, style, build, merge and version 
   ]) {
     assert.equal(isNoiseSubject(subject), true, subject);
   }
-  for (const subject of ["feat: a", "fix(x): b", "refactor: c", "perf: d", "Add a thing", "feat(app): x", "fix(cli): y"]) {
+  for (const subject of [
+    "feat: a",
+    "fix(x): b",
+    "refactor: c",
+    "perf: d",
+    "Add a thing",
+    "feat(app): x",
+    "fix(cli): y",
+  ]) {
     assert.equal(isNoiseSubject(subject), false, subject);
   }
   assert.equal(commitKind("feat(x): a"), "feat");
