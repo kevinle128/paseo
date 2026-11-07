@@ -4,7 +4,7 @@ import { isWeb } from "@/constants/platform";
 import { useWorkspaceGridCell } from "./grid-cell-context";
 
 // Controls the header double-click must leave alone, so a double-click on a button does nothing.
-const HEADER_INTERACTIVE_SELECTOR =
+export const HEADER_INTERACTIVE_SELECTOR =
   'button, a, input, textarea, select, [role="button"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
 
 /**

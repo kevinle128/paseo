@@ -9,6 +9,8 @@ export interface WorkspaceGridCell {
   toggleMaximize: () => void;
   focusCell: () => void;
   pointerFocusClaim: PointerFocusClaim;
+  /** Starts a header drag from a pointer-down. Null when the cell cannot be reordered. */
+  beginHeaderDrag?: ((event: PointerEvent) => void) | null;
 }
 
 // Null in Normal mode, so every consumer renders exactly what it rendered before the grid existed.
