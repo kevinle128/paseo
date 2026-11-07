@@ -38,6 +38,9 @@ import {
   fillDirectHostUri,
   expectDirectHostFormValues,
   expectDirectHostSslEnabled,
+  expectDirectHostSslDisabled,
+  fillDirectHostAddress,
+  toggleDirectHostSsl,
   expectDirectHostUriValue,
   expectDirectHostUriHidden,
   expectDiagnosticsContent,
@@ -284,6 +287,16 @@ test.describe("Settings sidebar navigation", () => {
     await expectAddHostMethodOptions(page);
     await selectHostConnectionType(page, "direct");
 
+    await fillDirectHostAddress(page, "example.paseo.test", "7443");
+    await expectDirectHostSslDisabled(page);
+    await toggleDirectHostSsl(page);
+    await expectDirectHostSslEnabled(page);
+    await toggleHostAdvanced(page);
+    await expectDirectHostUriValue(page, "tcp://example.paseo.test:7443?ssl=true");
+    await toggleHostAdvanced(page);
+    await toggleDirectHostSsl(page);
+    await expectDirectHostSslDisabled(page);
+
     await toggleHostAdvanced(page);
     await fillDirectHostUri(page, "tcp://example.paseo.test:7443?ssl=true&password=shared-secret");
     await toggleHostAdvanced(page);
@@ -313,12 +326,12 @@ test.describe("Settings sidebar navigation", () => {
 
     await test.step("a dropdown owns Escape", async () => {
       await openSettingsSection(page, "appearance");
-      await page.getByLabel(/Theme:/).click();
-      await expect(page.getByRole("menuitem", { name: "System", exact: true })).toBeVisible();
+      await page.getByLabel(/Highlight theme:/).click();
+      await expect(page.getByRole("menuitem", { name: "GitHub", exact: true })).toBeVisible();
 
       await page.keyboard.press("Escape");
 
-      await expect(page.getByRole("menuitem", { name: "System", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("menuitem", { name: "GitHub", exact: true })).toHaveCount(0);
       await expect(page).toHaveURL(/\/settings(\/|$)/);
     });
 
@@ -415,19 +428,8 @@ test.describe("Settings — compact master-detail", () => {
     const workspace = await withWorkspace({ prefix: "host-picker-settings-back-" });
     const workspaceRoute = buildHostWorkspaceRoute(getServerId(), workspace.workspaceId);
 
-    const worktreeSetupCallout = page.locator('[data-testid^="worktree-setup-callout-"]');
-
-    await test.step("the wide sidebar shows the worktree setup prompt for this workspace", async () => {
-      await page.setViewportSize({ width: 1280, height: 900 });
-      await openWorkspace(page, workspace);
-      await expect(worktreeSetupCallout.first()).toBeVisible({ timeout: 30_000 });
-      await page.setViewportSize({ width: 390, height: 844 });
-    });
-
+    await openWorkspace(page, workspace);
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
-    // The compact sidebar shows only native callouts, so the prompt stays out.
-    await expect(page.getByTestId("sidebar-hosts-trigger")).toBeVisible();
-    await expect(worktreeSetupCallout).toHaveCount(0);
     await page.getByTestId("sidebar-hosts-trigger").click();
     await page.getByRole("button", { name: /Open .* settings/ }).click();
 

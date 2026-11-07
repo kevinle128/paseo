@@ -64,7 +64,7 @@ export function PinnedGridModeControl() {
       options={options}
       value={preferences.mode}
       onValueChange={handleValueChange}
-      size="xs"
+      size="sm"
       hideLabels
       testID="sidebar-pinned-grid-mode"
     />
