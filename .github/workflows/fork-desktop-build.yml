@@ -722,7 +722,6 @@ jobs:
         env:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           VERSION: ${{ needs.setup.outputs.version }}
-          LINKS: ${{ needs.publish.outputs.download_links }}
           CHANGELOG: ${{ needs.publish.outputs.changelog }}
           RELEASE_URL: ${{ needs.publish.outputs.release_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -735,7 +734,7 @@ jobs:
             if [[ -n "$CHANGELOG" ]]; then
               text+=$'\n\n'"${CHANGELOG}"
             fi
-            text+=$'\n\n'"${LINKS}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."$'\n'"Trang release: ${RELEASE_URL}"
+            text+=$'\n\n'"Tải về: ${RELEASE_URL}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."
           else
             event=build.failed
             key=build-failed

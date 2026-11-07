@@ -279,7 +279,6 @@ jobs:
         env:
           BUILD_RESULT: ${{ needs.build.result }}
           VERSION: ${{ needs.build.outputs.version }}
-          LINKS: ${{ needs.build.outputs.download_links }}
           CHANGELOG: ${{ needs.build.outputs.changelog }}
           RELEASE_URL: ${{ needs.build.outputs.release_url }}
           RANGE: ${{ needs.sync.outputs.upstream_range }}
@@ -293,7 +292,7 @@ jobs:
             if [[ -n "$CHANGELOG" ]]; then
               text+=$'\n\n'"${CHANGELOG}"
             fi
-            text+=$'\n\n'"${LINKS}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."$'\n'"Trang release: ${RELEASE_URL}"
+            text+=$'\n\n'"Tải về: ${RELEASE_URL}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."
           else
             event=build.failed
             key=build-failed
