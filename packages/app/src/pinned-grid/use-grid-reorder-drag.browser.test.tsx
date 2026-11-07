@@ -2,6 +2,7 @@ import React from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import {
   KeyboardActionDispatcherProvider,
   useKeyboardActionDispatcher,
@@ -30,6 +31,7 @@ interface Harness {
   dispatchInterrupt: () => boolean;
   rerender: (props: Partial<HarnessProps>) => void;
   calls: ReturnType<typeof makeCalls>;
+  composerInterrupt: ReturnType<typeof vi.fn<() => boolean>>;
 }
 
 interface HarnessProps {
@@ -63,8 +65,18 @@ function setup(initial: HarnessProps = { enabled: true, cellKeys: ["a", "b", "c"
   let latest: GridReorderDrag | null = null;
   let dispatcher: ReturnType<typeof useKeyboardActionDispatcher> | null = null;
   const deckRef = { current: deck as never };
+  // Stands in for the focused composer's interrupt handler (priority 200).
+  const composerInterrupt = vi.fn<() => boolean>(() => true);
 
   function Probe(props: HarnessProps) {
+    useKeyboardActionHandler({
+      handlerId: "test-composer-interrupt",
+      actions: ["agent.interrupt"] as const,
+      enabled: true,
+      priority: 200,
+      isActive: () => true,
+      handle: composerInterrupt,
+    });
     dispatcher = useKeyboardActionDispatcher();
     latest = useGridReorderDrag({
       deckRef,
@@ -94,6 +106,7 @@ function setup(initial: HarnessProps = { enabled: true, cellKeys: ["a", "b", "c"
     frame,
     deck,
     calls,
+    composerInterrupt,
     drag: () => latest as GridReorderDrag,
     dispatchInterrupt: () =>
       dispatcher!.dispatch({ id: "agent.interrupt", scope: "message-input" }),
@@ -287,9 +300,11 @@ describe("useGridReorderDrag", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("cancels the drag on Escape and lets Escape through outside a drag", () => {
+  it("cancels the drag on Escape ahead of a competing priority-200 handler", () => {
     const h = use();
-    expect(h.dispatchInterrupt()).toBe(false);
+    expect(h.dispatchInterrupt()).toBe(true);
+    expect(h.composerInterrupt).toHaveBeenCalledTimes(1);
+    h.composerInterrupt.mockClear();
     press(h, 10, 10);
     move(40, 20);
     let handled = false;
@@ -297,9 +312,56 @@ describe("useGridReorderDrag", () => {
       handled = h.dispatchInterrupt();
     });
     expect(handled).toBe(true);
+    expect(h.composerInterrupt).not.toHaveBeenCalled();
     expect(h.calls.onCommit).not.toHaveBeenCalled();
     expect(h.calls.onPreview).toHaveBeenLastCalledWith(null);
-    expect(h.dispatchInterrupt()).toBe(false);
+    expect(h.dispatchInterrupt()).toBe(true);
+    expect(h.composerInterrupt).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels on Escape before a focused terminal-like element sees the key", () => {
+    const h = use();
+    const terminal = document.createElement("textarea");
+    terminal.className = "xterm-helper-textarea";
+    h.container.append(terminal);
+    const reached = vi.fn();
+    terminal.addEventListener("keydown", reached);
+    terminal.focus();
+    press(h, 10, 10);
+    move(40, 20);
+    const escape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    flushSync(() => {
+      terminal.dispatchEvent(escape);
+    });
+    expect(reached).not.toHaveBeenCalled();
+    expect(escape.defaultPrevented).toBe(true);
+    expect(h.calls.onCommit).not.toHaveBeenCalled();
+    expect(h.calls.onPreview).toHaveBeenLastCalledWith(null);
+    expect(h.frame.style.transform).toBe("");
+    expect(h.drag().draggedKey).toBeNull();
+  });
+
+  it("leaves Escape alone outside a drag and for other keys during one", () => {
+    const h = use();
+    const terminal = document.createElement("textarea");
+    h.container.append(terminal);
+    const reached = vi.fn();
+    terminal.addEventListener("keydown", reached);
+    terminal.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    expect(reached).toHaveBeenCalledTimes(1);
+    press(h, 10, 10);
+    move(40, 20);
+    terminal.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }),
+    );
+    expect(reached).toHaveBeenCalledTimes(2);
+    expect(h.drag().draggedKey).toBe("a");
   });
 
   it("auto-scrolls near both edges and reports each frame", async () => {

@@ -14,6 +14,8 @@ import {
 
 // Above the composer's `agent.interrupt` handler (200 while its input is focused), so Escape ends
 // the drag instead of interrupting the agent. A tie would go to the handler registered last.
+// A focused terminal never reaches that action (its focus scope is excluded), so a window-level
+// capture listener also cancels the drag before the terminal sees the key.
 const DRAG_CANCEL_PRIORITY = 300;
 
 export interface GridReorderDragInput {
@@ -165,9 +167,19 @@ export function useGridReorderDrag(input: GridReorderDragInput): GridReorderDrag
         // The pointer already ended; the window listeners still deliver the rest of the gesture.
       }
       session.node.addEventListener("lostpointercapture", cancel);
+      const cancelOnEscape = (keyEvent: KeyboardEvent) => {
+        if (keyEvent.key !== "Escape") {
+          return;
+        }
+        keyEvent.preventDefault();
+        keyEvent.stopPropagation();
+        cancel();
+      };
+      window.addEventListener("keydown", cancelOnEscape, true);
       const previousDispose = session.dispose;
       session.dispose = () => {
         session.node.removeEventListener("lostpointercapture", cancel);
+        window.removeEventListener("keydown", cancelOnEscape, true);
         previousDispose();
       };
       setDraggedKey(session.key);
