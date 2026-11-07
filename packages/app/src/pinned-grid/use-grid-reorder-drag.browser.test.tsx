@@ -259,6 +259,7 @@ describe("useGridReorderDrag", () => {
     expect(h.calls.onCommit).not.toHaveBeenCalled();
     expect(h.calls.onPreview).toHaveBeenLastCalledWith(null);
     expect(h.frame.style.transform).toBe("");
+    expect(document.body.style.cursor).toBe("");
     expect(document.body.style.userSelect).toBe("");
     expect(h.drag().draggedKey).toBeNull();
   });
@@ -362,6 +363,18 @@ describe("useGridReorderDrag", () => {
     );
     expect(reached).toHaveBeenCalledTimes(2);
     expect(h.drag().draggedKey).toBe("a");
+  });
+
+  it("cancels on unmount without a commit", () => {
+    const h = use();
+    press(h, 10, 10);
+    move(40, 20);
+    flushSync(() => h.root.unmount());
+    expect(h.calls.onCommit).not.toHaveBeenCalled();
+    expect(h.calls.onPreview).toHaveBeenLastCalledWith(null);
+    expect(h.frame.style.transform).toBe("");
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
   });
 
   it("auto-scrolls near both edges and reports each frame", async () => {
