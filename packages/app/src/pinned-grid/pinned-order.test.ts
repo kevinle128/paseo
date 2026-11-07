@@ -77,6 +77,21 @@ describe("orderPinnedWorkspaceKeys with the recency rule", () => {
   });
 });
 
+describe("recency rule ties", () => {
+  it("breaks equal pin times by key ascending, whatever the input order", () => {
+    const at = "2026-01-01T00:00:00Z";
+    const forward = { a: at, b: at, c: at };
+    const reversed = { c: at, b: at, a: at };
+    const expected = ["a", "b", "c"];
+    for (const pinnedAtByKey of [forward, reversed]) {
+      expect(orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder: [], rule: "recency" })).toEqual(
+        expected,
+      );
+      expect(buildPinnedOrderSeed({ pinnedAtByKey, storedOrder: [] })).toEqual(expected);
+    }
+  });
+});
+
 describe("orderPinnedWorkspaceKeys with the append rule", () => {
   const rule = "append" as const;
 

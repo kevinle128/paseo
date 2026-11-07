@@ -38,9 +38,15 @@ export function orderPinnedWorkspaceKeys(input: {
   return orderByRecency(pinnedAtByKey, storedOrder);
 }
 
+// Equal pin times must still give one order, whatever order the session map lists them in.
+function compareKeys(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 function orderByRecency(pinnedAtByKey: Record<string, string>, storedOrder: string[]): string[] {
-  const byRecency = Object.keys(pinnedAtByKey).sort((a, b) =>
-    (pinnedAtByKey[b] ?? "").localeCompare(pinnedAtByKey[a] ?? ""),
+  const byRecency = Object.keys(pinnedAtByKey).sort(
+    (a, b) => (pinnedAtByKey[b] ?? "").localeCompare(pinnedAtByKey[a] ?? "") || compareKeys(a, b),
   );
   return applyStoredOrdering({ items: byRecency, storedOrder, getKey: (key) => key });
 }
@@ -58,9 +64,7 @@ function orderAppend(pinnedAtByKey: Record<string, string>, storedOrder: string[
     .filter((key) => !placed.has(key))
     .sort((a, b) => {
       const byTime = (pinnedAtByKey[a] ?? "").localeCompare(pinnedAtByKey[b] ?? "");
-      if (byTime !== 0) return byTime;
-      if (a === b) return 0;
-      return a < b ? -1 : 1;
+      return byTime !== 0 ? byTime : compareKeys(a, b);
     });
   return [...ordered, ...rest];
 }
