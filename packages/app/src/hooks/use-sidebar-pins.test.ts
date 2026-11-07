@@ -39,7 +39,8 @@ describe("splitPinnedSidebarGroups", () => {
         pinnedWorkspaceKeys: ["w1"],
         pinnedAtByKey: { w1: "2026-01-01T00:00:00Z" },
       },
-      pinnedWorkspaceOrder: [],
+      storedOrder: [],
+      rule: "recency",
     });
     expect(result.pinnedChats).toHaveLength(1);
     expect(result.unpinnedProjects).toEqual([{ ...projects[0], workspaces: [] }]);
@@ -50,7 +51,8 @@ describe("splitPinnedSidebarGroups", () => {
     const result = splitPinnedSidebarGroups({
       projects,
       keys: { pinnedWorkspaceKeys: [], pinnedAtByKey: {} },
-      pinnedWorkspaceOrder: [],
+      storedOrder: [],
+      rule: "recency",
     });
     expect(result.unpinnedProjects).toHaveLength(1);
   });
@@ -63,7 +65,8 @@ describe("splitPinnedSidebarGroups", () => {
         pinnedWorkspaceKeys: ["w1"],
         pinnedAtByKey: { w1: "2026-01-01T00:00:00Z" },
       },
-      pinnedWorkspaceOrder: [],
+      storedOrder: [],
+      rule: "recency",
     });
     expect(result.pinnedChats.map((w) => w.workspaceKey)).toEqual(["w1"]);
     expect(result.unpinnedProjects[0]?.workspaces.map((w) => w.workspaceKey)).toEqual(["w2"]);
@@ -80,7 +83,8 @@ describe("splitPinnedSidebarGroups", () => {
           newer: "2026-02-01T00:00:00Z",
         },
       },
-      pinnedWorkspaceOrder: [],
+      storedOrder: [],
+      rule: "recency",
     });
 
     expect(result.pinnedChats.map((workspace) => workspace.workspaceKey)).toEqual([
@@ -101,13 +105,37 @@ describe("splitPinnedSidebarGroups", () => {
           new: "2026-03-01T00:00:00Z",
         },
       },
-      pinnedWorkspaceOrder: ["older", "newer"],
+      storedOrder: ["older", "newer"],
+      rule: "recency",
     });
 
     expect(result.pinnedChats.map((workspace) => workspace.workspaceKey)).toEqual([
       "new",
       "older",
       "newer",
+    ]);
+  });
+
+  it("a newly pinned chat goes last with the append rule", () => {
+    const projects = [project("p1", [placement("older"), placement("newer"), placement("new")])];
+    const result = splitPinnedSidebarGroups({
+      projects,
+      keys: {
+        pinnedWorkspaceKeys: ["older", "newer", "new"],
+        pinnedAtByKey: {
+          older: "2026-01-01T00:00:00Z",
+          newer: "2026-02-01T00:00:00Z",
+          new: "2026-03-01T00:00:00Z",
+        },
+      },
+      storedOrder: ["newer", "older"],
+      rule: "append",
+    });
+
+    expect(result.pinnedChats.map((workspace) => workspace.workspaceKey)).toEqual([
+      "newer",
+      "older",
+      "new",
     ]);
   });
 });

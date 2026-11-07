@@ -5,7 +5,7 @@ import type {
   SidebarProjectEntry,
   SidebarWorkspacePlacement,
 } from "@/hooks/use-sidebar-workspaces-list";
-import { orderPinnedWorkspaceKeys } from "@/pinned-grid/pinned-order";
+import { orderPinnedWorkspaceKeys, type PinnedOrderRule } from "@/pinned-grid/pinned-order";
 import { useSessionStore } from "@/stores/session-store";
 
 export interface PinnedSidebarKeys {
@@ -16,7 +16,7 @@ export interface PinnedSidebarKeys {
 
 export interface PinnedSidebarGroups {
   // Individually pinned chats, hoisted into the Pinned section and removed from their
-  // project below. Most recently pinned first.
+  // project below, in the shared pinned order.
   pinnedChats: SidebarWorkspacePlacement[];
   // Everything else, with pinned chats removed. Feeds the draggable project list.
   unpinnedProjects: SidebarProjectEntry[];
@@ -110,13 +110,14 @@ export function usePinnedSidebarKeys(projects: SidebarProjectEntry[]): PinnedSid
 }
 
 // Splits the sidebar into a dedicated Pinned section (chats) and the regular list below.
-// Pinned chats are ordered most-recently-pinned first.
+// Pinned chats follow the shared pinned order (see orderPinnedWorkspaceKeys).
 export function splitPinnedSidebarGroups(input: {
   projects: SidebarProjectEntry[];
   keys: PinnedSidebarKeys;
-  pinnedWorkspaceOrder: string[];
+  storedOrder: string[];
+  rule: PinnedOrderRule;
 }): PinnedSidebarGroups {
-  const { projects, keys, pinnedWorkspaceOrder } = input;
+  const { projects, keys, storedOrder, rule } = input;
   if (keys.pinnedWorkspaceKeys.length === 0) {
     return { pinnedChats: [], unpinnedProjects: projects };
   }
@@ -138,7 +139,7 @@ export function splitPinnedSidebarGroups(input: {
   for (const key of keys.pinnedWorkspaceKeys) {
     pinnedAtByKey[key] = keys.pinnedAtByKey[key] ?? "";
   }
-  orderPinnedWorkspaceKeys({ pinnedAtByKey, pinnedWorkspaceOrder }).forEach((key, index) => {
+  orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder, rule }).forEach((key, index) => {
     rankByKey.set(key, index);
   });
   pinnedChats.sort(

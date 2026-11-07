@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearAsyncStorageStub } from "../../test-stubs/async-storage";
 import {
   computeSidebarOrderUpdates,
   type SidebarProjectEntry,
@@ -143,4 +145,58 @@ it("preserves spaces in saved workspace scopes and identities", () => {
     migrateSidebarOrderState({ workspaceOrderByProject: { "project ": ["host:b ", "host:a "] } })
       .workspaceOrderByProject,
   ).toEqual({ "project ": ["host:b ", "host:a "] });
+});
+
+describe("pinned workspace order key removal", () => {
+  beforeEach(() => {
+    useSidebarOrderStore.setState({ pinnedWorkspaceOrder: ["a", "b", "c"] });
+  });
+
+  it("removes only the given key", () => {
+    useSidebarOrderStore.getState().removePinnedWorkspaceKey("b");
+
+    expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toEqual(["a", "c"]);
+  });
+
+  it("removes several keys at once", () => {
+    useSidebarOrderStore.getState().removePinnedWorkspaceKeys(["a", "c", "missing"]);
+
+    expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toEqual(["b"]);
+  });
+
+  it("keeps the same state when nothing is removed", () => {
+    const before = useSidebarOrderStore.getState().pinnedWorkspaceOrder;
+
+    useSidebarOrderStore.getState().removePinnedWorkspaceKey("missing");
+    useSidebarOrderStore.getState().removePinnedWorkspaceKeys([]);
+
+    expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toBe(before);
+  });
+});
+
+describe("sidebar order persisted shape", () => {
+  beforeEach(() => {
+    clearAsyncStorageStub();
+  });
+
+  it("rehydrates a version 3 blob through the validated storage", async () => {
+    await AsyncStorage.setItem(
+      "sidebar-project-workspace-order",
+      JSON.stringify({
+        state: {
+          projectOrder: ["p1"],
+          pinnedWorkspaceOrder: ["h:a", "h:b"],
+          workspaceOrderByProject: { p1: ["h:c"] },
+        },
+        version: 3,
+      }),
+    );
+
+    await useSidebarOrderStore.persist.rehydrate();
+
+    const state = useSidebarOrderStore.getState();
+    expect(state.projectOrder).toEqual(["p1"]);
+    expect(state.pinnedWorkspaceOrder).toEqual(["h:a", "h:b"]);
+    expect(state.workspaceOrderByProject).toEqual({ p1: ["h:c"] });
+  });
 });

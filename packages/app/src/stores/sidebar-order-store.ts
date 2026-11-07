@@ -12,6 +12,8 @@ interface SidebarOrderStoreState {
   setProjectOrder: (keys: string[]) => void;
   getPinnedWorkspaceOrder: () => string[];
   setPinnedWorkspaceOrder: (keys: string[]) => void;
+  removePinnedWorkspaceKey: (key: string) => void;
+  removePinnedWorkspaceKeys: (keys: string[]) => void;
   getWorkspaceOrder: (projectViewKey: string) => string[];
   setWorkspaceOrder: (projectViewKey: string, keys: string[]) => void;
 }
@@ -163,6 +165,17 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
       getPinnedWorkspaceOrder: () => get().pinnedWorkspaceOrder,
       setPinnedWorkspaceOrder: (keys) => {
         set({ pinnedWorkspaceOrder: dedupeKeys(keys) });
+      },
+      removePinnedWorkspaceKey: (key) => {
+        get().removePinnedWorkspaceKeys([key]);
+      },
+      removePinnedWorkspaceKeys: (keys) => {
+        const removed = new Set(keys);
+        const current = get().pinnedWorkspaceOrder;
+        const next = current.filter((key) => !removed.has(key));
+        if (next.length !== current.length) {
+          set({ pinnedWorkspaceOrder: next });
+        }
       },
       getWorkspaceOrder: (projectViewKey) => {
         if (!projectViewKey.trim()) return [];

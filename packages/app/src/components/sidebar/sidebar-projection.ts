@@ -5,6 +5,7 @@ import {
   type PinnedSidebarGroups,
   type PinnedSidebarKeys,
 } from "@/hooks/use-sidebar-pins";
+import type { PinnedOrderRule } from "@/pinned-grid/pinned-order";
 import type {
   SidebarProjectEntry,
   SidebarWorkspaceEntry,
@@ -40,6 +41,7 @@ export interface SidebarProjectionInput {
   projects: SidebarProjectEntry[];
   pinnedKeys: PinnedSidebarKeys;
   pinnedWorkspaceOrder: string[];
+  pinnedOrderRule: PinnedOrderRule;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   projectNamesByViewKey: Map<string, string>;
   groupMode: SidebarGroupMode;
@@ -53,7 +55,8 @@ export function buildSidebarProjection(input: SidebarProjectionInput): SidebarPr
   const pinnedGroups = splitPinnedSidebarGroups({
     projects: input.projects,
     keys: input.pinnedKeys,
-    pinnedWorkspaceOrder: input.pinnedWorkspaceOrder,
+    storedOrder: input.pinnedWorkspaceOrder,
+    rule: input.pinnedOrderRule,
   });
   const pinnedWorkspaceKeys = new Set(input.pinnedKeys.pinnedWorkspaceKeys);
   const unpinnedWorkspaces = Array.from(input.workspaceEntriesByKey.values()).filter(

@@ -5,9 +5,11 @@ import {
   type SessionState,
   type WorkspaceDescriptor,
 } from "@/stores/session-store";
+import { isWeb } from "@/constants/platform";
+import { usePinnedOrderSeedStore } from "@/stores/pinned-order-seed-store";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { orderPinnedWorkspaceKeys } from "./pinned-order";
+import { orderPinnedWorkspaceKeys, resolvePinnedOrderRule } from "./pinned-order";
 
 interface PinnedEntry {
   serverId: string;
@@ -85,7 +87,9 @@ export function usePinnedWorkspaceSelections(): ActiveWorkspaceSelection[] {
     (state) => selectPinnedEntries(state.sessions),
     arePinnedEntriesEqual,
   );
-  const pinnedWorkspaceOrder = useSidebarOrderStore((state) => state.pinnedWorkspaceOrder);
+  const storedOrder = useSidebarOrderStore((state) => state.pinnedWorkspaceOrder);
+  const seeded = usePinnedOrderSeedStore((state) => state.seeded);
+  const rule = resolvePinnedOrderRule({ isWeb, seeded });
 
   return useMemo(() => {
     const selectionByKey = new Map<string, ActiveWorkspaceSelection>();
@@ -95,9 +99,9 @@ export function usePinnedWorkspaceSelections(): ActiveWorkspaceSelection[] {
       selectionByKey.set(key, { serverId, workspaceId });
       pinnedAtByKey[key] = pinnedAt;
     }
-    return orderPinnedWorkspaceKeys({ pinnedAtByKey, pinnedWorkspaceOrder }).flatMap((key) => {
+    return orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder, rule }).flatMap((key) => {
       const selection = selectionByKey.get(key);
       return selection ? [selection] : [];
     });
-  }, [entries, pinnedWorkspaceOrder]);
+  }, [entries, storedOrder, rule]);
 }
