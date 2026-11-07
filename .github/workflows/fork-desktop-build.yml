@@ -721,15 +721,15 @@ jobs:
           if [[ "$PUBLISH_RESULT" == "success" ]]; then
             event=release.published
             key=build-published
-            text="Paseo fork ${VERSION} is ready"
+            text="🚀 Paseo fork ${VERSION} đã sẵn sàng"
             if [[ -n "$CHANGELOG" ]]; then
               text+=$'\n\n'"${CHANGELOG}"
             fi
-            text+=$'\n\n'"${LINKS}"$'\n'"Windows and Linux AppImage builds update themselves. macOS: download the DMG and replace Paseo in Applications."$'\n'"Release: ${RELEASE_URL}"
+            text+=$'\n\n'"${LINKS}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."$'\n'"Trang release: ${RELEASE_URL}"
           else
             event=build.failed
             key=build-failed
-            text="Paseo fork desktop build failed ${VERSION:+(${VERSION}) }- ${RUN_URL}"
+            text="❌ Build Paseo fork thất bại ${VERSION:+(${VERSION}) }- ${RUN_URL}"
           fi
           delimiter="TEXT_$(openssl rand -hex 8)"
           {
