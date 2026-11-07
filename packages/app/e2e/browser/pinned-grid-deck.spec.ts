@@ -202,7 +202,7 @@ test.describe("Pinned grid in the workspace deck", () => {
     const workspaces = [first, second, third];
 
     try {
-      // Pinned one after the other, so the cell order is first, second, third.
+      // Cells run from the most recently pinned, so the cell order is third, second, first.
       for (const workspace of workspaces) {
         await workspace.client.setWorkspacePinned(workspace.workspaceId, true);
       }
@@ -226,31 +226,31 @@ test.describe("Pinned grid in the workspace deck", () => {
       // The focused middle cell leaves the grid: the grid stays and the next cell takes focus.
       await second.client.setWorkspacePinned(second.workspaceId, false);
       await expect(cellLocator(page, serverId, second.workspaceId)).toHaveCount(0);
-      await expect(cellLocator(page, serverId, first.workspaceId)).toBeVisible();
       await expect(cellLocator(page, serverId, third.workspaceId)).toBeVisible();
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, third.workspaceId));
-      await expect(
-        cellLocator(page, serverId, third.workspaceId).getByTestId("pinned-grid-focus-ring"),
-      ).toHaveCount(1);
+      await expect(cellLocator(page, serverId, first.workspaceId)).toBeVisible();
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, first.workspaceId));
       await expect(
         cellLocator(page, serverId, first.workspaceId).getByTestId("pinned-grid-focus-ring"),
+      ).toHaveCount(1);
+      await expect(
+        cellLocator(page, serverId, third.workspaceId).getByTestId("pinned-grid-focus-ring"),
       ).toHaveCount(0);
       await expectEntriesKeepMarks(page, {
-        [entryId(first.workspaceId)]: "grid",
         [entryId(third.workspaceId)]: "grid",
+        [entryId(first.workspaceId)]: "grid",
       });
 
       // The last cell has no cell after it, so focus goes to the one before.
-      await third.client.setWorkspacePinned(third.workspaceId, false);
-      await expect(cellLocator(page, serverId, third.workspaceId)).toHaveCount(0);
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, first.workspaceId));
-      await expect(cellLocator(page, serverId, first.workspaceId)).toBeVisible();
-
-      // No pinned workspace is left, so the workspace shows alone.
       await first.client.setWorkspacePinned(first.workspaceId, false);
       await expect(cellLocator(page, serverId, first.workspaceId)).toHaveCount(0);
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, first.workspaceId));
-      await expectEntriesKeepMarks(page, { [entryId(first.workspaceId)]: "grid" });
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, third.workspaceId));
+      await expect(cellLocator(page, serverId, third.workspaceId)).toBeVisible();
+
+      // No pinned workspace is left, so the workspace shows alone.
+      await third.client.setWorkspacePinned(third.workspaceId, false);
+      await expect(cellLocator(page, serverId, third.workspaceId)).toHaveCount(0);
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, third.workspaceId));
+      await expectEntriesKeepMarks(page, { [entryId(third.workspaceId)]: "grid" });
     } finally {
       for (const workspace of workspaces.toReversed()) {
         await workspace.cleanup();
