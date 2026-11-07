@@ -31,9 +31,14 @@ vi.mock("electron", () => electronMock);
 vi.mock("electron-updater", () => ({ autoUpdater: autoUpdaterMock }));
 
 const realPlatform = process.platform;
+const realArch = process.arch;
 let appDir: string;
 
-async function loadUpdater(options: { fork: boolean; platform: NodeJS.Platform }) {
+async function loadUpdater(options: {
+  fork: boolean;
+  platform: NodeJS.Platform;
+  arch?: NodeJS.Architecture;
+}) {
   await writeFile(
     path.join(appDir, "package.json"),
     JSON.stringify(
@@ -47,6 +52,7 @@ async function loadUpdater(options: { fork: boolean; platform: NodeJS.Platform }
   );
   electronMock.app.getAppPath.mockReturnValue(appDir);
   Object.defineProperty(process, "platform", { value: options.platform });
+  Object.defineProperty(process, "arch", { value: options.arch ?? "arm64" });
   vi.resetModules();
   return import("./auto-updater");
 }
@@ -71,6 +77,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   Object.defineProperty(process, "platform", { value: realPlatform });
+  Object.defineProperty(process, "arch", { value: realArch });
   await rm(appDir, { recursive: true, force: true });
 });
 
