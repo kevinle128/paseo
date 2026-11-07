@@ -1,7 +1,12 @@
 import { isWeb } from "@/constants/platform";
 import { usePinnedOrderSeedStore } from "@/stores/pinned-order-seed-store";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
-import { buildPinnedOrderSeed, resolvePinnedOrderPrune } from "./pinned-order";
+import {
+  buildPinnedOrderSeed,
+  resolvePinnedOrderPrune,
+  shouldSeedPinnedOrder,
+  type PinnedOrderSeedHosts,
+} from "./pinned-order";
 
 // A write made before a store rehydrates is lost when the stored state is merged in.
 function storesReady(): boolean {
@@ -14,12 +19,16 @@ function storesReady(): boolean {
  * Freezes the order the user sees today into the stored order, then sets the flag that switches
  * web to the append rule. Only this function sets the flag. If the app stops between the two
  * writes, the next call computes the same list because the recency rule returns a full stored
- * order unchanged.
+ * order unchanged. Does nothing while a registered host has no loaded directory, so the seed
+ * never runs on a partial pin list.
  */
-export function seedPinnedWorkspaceOrder(pinnedAtByKey: Record<string, string>): void {
+export function seedPinnedWorkspaceOrder(
+  pinnedAtByKey: Record<string, string>,
+  hosts: PinnedOrderSeedHosts,
+): void {
   if (!isWeb || !storesReady()) return;
   const seedStore = usePinnedOrderSeedStore.getState();
-  if (seedStore.seeded) return;
+  if (!shouldSeedPinnedOrder({ seeded: seedStore.seeded, ...hosts })) return;
   const orderStore = useSidebarOrderStore.getState();
   orderStore.setPinnedWorkspaceOrder(
     buildPinnedOrderSeed({ pinnedAtByKey, storedOrder: orderStore.pinnedWorkspaceOrder }),
@@ -27,10 +36,17 @@ export function seedPinnedWorkspaceOrder(pinnedAtByKey: Record<string, string>):
   seedStore.markSeeded();
 }
 
-/** Drops one key from the stored order. Seeds first so the removal does not move other rows. */
-export function removePinnedOrderKey(key: string, pinnedAtByKey: Record<string, string>): void {
+/**
+ * Drops one key from the stored order. Seeds first, when the hosts allow it, so the removal does
+ * not move other rows.
+ */
+export function removePinnedOrderKey(
+  key: string,
+  pinnedAtByKey: Record<string, string>,
+  hosts: PinnedOrderSeedHosts,
+): void {
   if (!isWeb || !storesReady()) return;
-  seedPinnedWorkspaceOrder(pinnedAtByKey);
+  seedPinnedWorkspaceOrder(pinnedAtByKey, hosts);
   useSidebarOrderStore.getState().removePinnedWorkspaceKey(key);
 }
 

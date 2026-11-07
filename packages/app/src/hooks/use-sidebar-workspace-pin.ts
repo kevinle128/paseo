@@ -7,6 +7,7 @@ import { removePinnedOrderKey } from "@/pinned-grid/pinned-order-seed";
 import { selectPinnedEntries } from "@/pinned-grid/use-pinned-workspace-selections";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
+import { selectWorkspaceDirectoryServerIds } from "@/stores/session-store-hooks/selectors";
 
 // Everything the pin toggle actually needs. Kept narrower than SidebarWorkspaceEntry so the
 // global keyboard handler can build one from the active route selection without a sidebar row.
@@ -29,7 +30,11 @@ function removeFromStoredOrder(workspaceKey: string): void {
   )) {
     pinnedAtByKey[`${serverId}:${workspaceId}`] = pinnedAt;
   }
-  removePinnedOrderKey(workspaceKey, pinnedAtByKey);
+  const serverIds = getHostRuntimeStore()
+    .getHosts()
+    .map((host) => host.serverId);
+  const loadedServerIds = selectWorkspaceDirectoryServerIds(useSessionStore.getState(), serverIds);
+  removePinnedOrderKey(workspaceKey, pinnedAtByKey, { serverIds, loadedServerIds });
 }
 
 export function useSidebarWorkspacePinController(): ToggleSidebarWorkspacePin {

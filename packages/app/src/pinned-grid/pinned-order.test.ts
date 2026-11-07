@@ -183,24 +183,26 @@ describe("resolvePinnedOrderRule", () => {
 });
 
 describe("shouldSeedPinnedOrder", () => {
-  it("seeds only when every registered host is hydrated and the flag is unset", () => {
+  it("seeds when every registered host has a loaded directory and the flag is unset", () => {
     expect(
-      shouldSeedPinnedOrder({
-        seeded: false,
-        serverIds: ["a", "b"],
-        hydratedServerIds: ["a", "b"],
-      }),
+      shouldSeedPinnedOrder({ seeded: false, serverIds: ["a", "b"], loadedServerIds: ["a", "b"] }),
     ).toBe(true);
+  });
+
+  it("blocks while a registered host has no loaded directory", () => {
     expect(
-      shouldSeedPinnedOrder({ seeded: false, serverIds: ["a", "b"], hydratedServerIds: ["a"] }),
-    ).toBe(false);
-    expect(
-      shouldSeedPinnedOrder({ seeded: true, serverIds: ["a"], hydratedServerIds: ["a"] }),
+      shouldSeedPinnedOrder({ seeded: false, serverIds: ["a", "b"], loadedServerIds: ["a"] }),
     ).toBe(false);
   });
 
+  it("does not seed twice", () => {
+    expect(shouldSeedPinnedOrder({ seeded: true, serverIds: ["a"], loadedServerIds: ["a"] })).toBe(
+      false,
+    );
+  });
+
   it("waits while no host is registered", () => {
-    expect(shouldSeedPinnedOrder({ seeded: false, serverIds: [], hydratedServerIds: [] })).toBe(
+    expect(shouldSeedPinnedOrder({ seeded: false, serverIds: [], loadedServerIds: [] })).toBe(
       false,
     );
   });

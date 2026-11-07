@@ -69,15 +69,22 @@ function orderAppend(pinnedAtByKey: Record<string, string>, storedOrder: string[
   return [...ordered, ...rest];
 }
 
-/** True once every registered host has loaded its workspaces and no seed ran yet. */
-export function shouldSeedPinnedOrder(input: {
-  seeded: boolean;
+/** The hosts a seed depends on: every registered host and those whose directory is loaded. */
+export interface PinnedOrderSeedHosts {
   serverIds: string[];
-  hydratedServerIds: string[];
-}): boolean {
+  /** Hosts with a live snapshot or a directory restored from cache. */
+  loadedServerIds: string[];
+}
+
+/**
+ * True once every registered host has a loaded directory and no seed ran yet. A host that is
+ * offline with a cached directory counts as loaded; one offline without a cache blocks the
+ * seed, because its pins are unknown. Every seed path goes through this one condition.
+ */
+export function shouldSeedPinnedOrder(input: PinnedOrderSeedHosts & { seeded: boolean }): boolean {
   if (input.seeded || input.serverIds.length === 0) return false;
-  const hydrated = new Set(input.hydratedServerIds);
-  return input.serverIds.every((serverId) => hydrated.has(serverId));
+  const loaded = new Set(input.loadedServerIds);
+  return input.serverIds.every((serverId) => loaded.has(serverId));
 }
 
 /**

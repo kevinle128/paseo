@@ -4,7 +4,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useHosts } from "@/runtime/host-runtime";
 import { usePinnedOrderSeedStore } from "@/stores/pinned-order-seed-store";
 import { useSessionStore, type SessionState } from "@/stores/session-store";
-import { useHydratedWorkspaceServerIds } from "@/stores/session-store-hooks";
+import { useWorkspaceDirectoryServerIds } from "@/stores/session-store-hooks";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { shouldSeedPinnedOrder } from "./pinned-order";
 import { prunePinnedOrder, seedPinnedWorkspaceOrder } from "./pinned-order-seed";
@@ -52,7 +52,8 @@ function areWorkspaceMapsEqual(
 
 /**
  * Keeps the stored pinned order in step with the pins the hosts report: seeds it once every
- * registered host has loaded, then drops keys of workspaces that were unpinned elsewhere.
+ * registered host has a loaded directory (live or restored from cache), then drops keys of
+ * workspaces that were unpinned elsewhere.
  * Web only; native keeps the recency order and never writes here.
  */
 export function PinnedOrderReconciler(): null {
@@ -62,7 +63,7 @@ export function PinnedOrderReconciler(): null {
   const seeded = usePinnedOrderSeedStore((state) => state.seeded);
   const hosts = useHosts();
   const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
-  const hydratedServerIds = useHydratedWorkspaceServerIds(serverIds);
+  const loadedServerIds = useWorkspaceDirectoryServerIds(serverIds);
   const workspaceMaps = useStoreWithEqualityFn(
     useSessionStore,
     (state) => selectWorkspaceMaps(state.sessions),
@@ -75,13 +76,13 @@ export function PinnedOrderReconciler(): null {
   );
 
   useEffect(() => {
-    if (!ready || !shouldSeedPinnedOrder({ seeded, serverIds, hydratedServerIds })) return;
+    if (!ready || !shouldSeedPinnedOrder({ seeded, serverIds, loadedServerIds })) return;
     const pinnedAtByKey: Record<string, string> = {};
     for (const { serverId, workspaceId, pinnedAt } of pinnedEntries) {
       pinnedAtByKey[`${serverId}:${workspaceId}`] = pinnedAt;
     }
-    seedPinnedWorkspaceOrder(pinnedAtByKey);
-  }, [ready, seeded, serverIds, hydratedServerIds, pinnedEntries]);
+    seedPinnedWorkspaceOrder(pinnedAtByKey, { serverIds, loadedServerIds });
+  }, [ready, seeded, serverIds, loadedServerIds, pinnedEntries]);
 
   const workspacePinnedAtByKey = useMemo(() => {
     const map: Record<string, string | null> = {};
