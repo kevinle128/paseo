@@ -42,6 +42,8 @@ export const UPSTREAM_HEADING = "### Từ upstream getpaseo";
 const NO_CHANGES_TEXT = "Không có thay đổi đáng chú ý trong bản này.";
 
 const NOISE_TYPES = new Set(["test", "ci", "docs", "chore", "style", "build"]);
+// Release tooling changes are invisible to app users even when typed feat or fix.
+const NOISE_SCOPES = new Set(["ci", "release"]);
 const NOISE_SUBJECT = /^(merge|release|bump|version)\b|^v?\d+\.\d+\.\d+/i;
 const CONVENTIONAL = /^(\w+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/;
 
@@ -93,12 +95,12 @@ export function parseSubject(raw) {
 }
 
 export function isNoiseSubject(raw) {
-  const { type, text, subject } = parseSubject(raw);
+  const { type, scope, text, subject } = parseSubject(raw);
   if (text === "") {
     return true;
   }
   if (type !== null) {
-    return NOISE_TYPES.has(type);
+    return NOISE_TYPES.has(type) || (scope !== null && NOISE_SCOPES.has(scope.toLowerCase()));
   }
   return NOISE_SUBJECT.test(subject);
 }
