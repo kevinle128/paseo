@@ -332,6 +332,13 @@ export async function callChatCompletions({
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
     let response;
+    // A referenced timer keeps the process alive until the deadline;
+    // AbortSignal.timeout() does not, so a hung request could end the process early.
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new DOMException("request timed out", "TimeoutError")),
+      timeoutMs,
+    );
     try {
       response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
@@ -348,11 +355,13 @@ export async function callChatCompletions({
             { role: "user", content: user },
           ],
         }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: controller.signal,
       });
     } catch (error) {
       lastError = new ChangelogApiError(describeFetchError(error));
       continue;
+    } finally {
+      clearTimeout(timer);
     }
     if (!response.ok) {
       lastError = new ChangelogApiError(`API trả về HTTP ${response.status}`);
