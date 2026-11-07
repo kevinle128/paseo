@@ -21,6 +21,7 @@ import {
   createNotifyOnlyUpdateService,
   isNotifyOnlyUpdateMode,
   parseForkUpdateConfig,
+  resolveAllowPrerelease,
   resolveFeedChannel,
   type ForkUpdateConfig,
 } from "./fork-update-mode.js";
@@ -180,7 +181,10 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
     // Electron's built-in handler would install an older download without checking
     // whether a newer release has superseded it.
     autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.allowPrerelease = input.releaseChannel === "beta";
+    autoUpdater.allowPrerelease = resolveAllowPrerelease(
+      input.releaseChannel,
+      getForkUpdateConfig(),
+    );
     autoUpdater.channel = resolveFeedChannel(input.releaseChannel, getForkUpdateConfig());
     autoUpdater.allowDowngrade = false;
     autoUpdater.isUserWithinRollout = async (info) => {

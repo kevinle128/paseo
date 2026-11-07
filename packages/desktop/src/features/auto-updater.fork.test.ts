@@ -3,12 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const FEED = "https://s3.ap-southeast-1.wasabisys.com/game-mobile-registry/paseo-desktop";
+const DOWNLOAD_BASE = "https://github.com/kevinle128/paseo/releases/download";
 
 const { autoUpdaterMock, electronMock } = vi.hoisted(() => ({
   autoUpdaterMock: {
     logger: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
     autoDownload: undefined as boolean | undefined,
+    allowPrerelease: undefined as boolean | undefined,
     channel: undefined as string | undefined,
     checkForUpdates: vi.fn(),
     downloadUpdate: vi.fn(),
@@ -37,7 +38,10 @@ async function loadUpdater(options: { fork: boolean; platform: NodeJS.Platform }
     path.join(appDir, "package.json"),
     JSON.stringify(
       options.fork
-        ? { version: "0.14.0-mf.1", paseoFork: { macUpdateMode: "notify", feedBaseUrl: FEED } }
+        ? {
+            version: "0.14.0-mf.1",
+            paseoFork: { macUpdateMode: "notify", downloadBaseUrl: DOWNLOAD_BASE },
+          }
         : { version: "0.14.0" },
     ),
   );
@@ -52,7 +56,8 @@ function mockAvailableUpdate() {
     isUpdateAvailable: true,
     updateInfo: {
       version: "0.14.0-mf.2",
-      files: [{ url: "0.14.0-mf.2/Paseo-0.14.0-mf.2-arm64.dmg" }],
+      tag: "mf-desktop-v0.14.0-mf.2",
+      files: [{ url: "Paseo-0.14.0-mf.2-arm64.dmg" }],
     },
   });
 }
@@ -81,6 +86,7 @@ describe("fork build on macOS", () => {
     });
     expect(autoUpdaterMock.autoDownload).toBe(false);
     expect(autoUpdaterMock.channel).toBe("latest");
+    expect(autoUpdaterMock.allowPrerelease).toBe(false);
     expect(check).toMatchObject({ hasUpdate: true, readyToInstall: true });
 
     const install = await updater.downloadAndInstallUpdate({
@@ -89,7 +95,9 @@ describe("fork build on macOS", () => {
     });
     expect(install.installed).toBe(false);
     expect(electronMock.shell.openExternal).toHaveBeenCalledOnce();
-    expect(electronMock.shell.openExternal.mock.calls[0]?.[0]).toMatch(/-(arm64|x64)\.dmg$/);
+    expect(electronMock.shell.openExternal.mock.calls[0]?.[0]).toBe(
+      `${DOWNLOAD_BASE}/mf-desktop-v0.14.0-mf.2/Paseo-0.14.0-mf.2-arm64.dmg`,
+    );
     expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
     expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
   });
@@ -107,6 +115,7 @@ describe("fork build on Windows and Linux", () => {
     });
     expect(autoUpdaterMock.autoDownload).toBe(true);
     expect(autoUpdaterMock.channel).toBe("latest");
+    expect(autoUpdaterMock.allowPrerelease).toBe(false);
     expect(check).toMatchObject({ hasUpdate: true, readyToInstall: false });
   });
 });
@@ -123,5 +132,6 @@ describe("upstream build", () => {
     });
     expect(autoUpdaterMock.autoDownload).toBe(true);
     expect(autoUpdaterMock.channel).toBe("beta");
+    expect(autoUpdaterMock.allowPrerelease).toBe(true);
   });
 });

@@ -4,14 +4,18 @@ extraMetadata:
   # Read by src/features/fork-update-config.ts to pick the updater behavior.
   paseoFork:
     macUpdateMode: notify
-    feedBaseUrl: https://s3.ap-southeast-1.wasabisys.com/game-mobile-registry/paseo-desktop
+    # Release assets live at <downloadBaseUrl>/<tag>/<file>. Keep in step with
+    # the publish entry below.
+    downloadBaseUrl: https://github.com/kevinle128/paseo/releases/download
 # A list replaces the base github entry; a plain object would be merged into it
-# and keep its owner and repo keys, which the generic provider rejects.
+# and keep the upstream owner and repo.
 publish:
-  - provider: generic
-    url: https://s3.ap-southeast-1.wasabisys.com/game-mobile-registry/paseo-desktop
-    # The app always requests the "latest" channel from this feed, so the
-    # manifests must be named latest*.yml whatever prerelease id the version has.
+  - provider: github
+    owner: kevinle128
+    repo: paseo
+    releaseType: release
+    # The app always requests the "latest" channel, so the manifests must be
+    # named latest*.yml whatever prerelease id the version has.
     channel: latest
 mac:
   identity: "-"

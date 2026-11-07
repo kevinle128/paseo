@@ -7,12 +7,14 @@ import type {
 } from "./app-update-service.js";
 import type { AppReleaseChannel } from "./app-update-rollout.js";
 
-// Fork builds publish one feed (the "latest" channel) next to the installers.
-// electron-builder bakes this block into the packaged package.json through
-// `extraMetadata`. Upstream builds have no such block and keep every default.
+// Fork builds publish one feed (the "latest" channel) as the manifests of the
+// newest normal GitHub release of the fork. electron-builder bakes this block
+// into the packaged package.json through `extraMetadata`. Upstream builds have
+// no such block and keep every default.
 const forkUpdateConfigSchema = z.object({
   macUpdateMode: z.literal("notify").optional(),
-  feedBaseUrl: z.url(),
+  // Release assets live at `<downloadBaseUrl>/<tag>/<file>`.
+  downloadBaseUrl: z.url(),
 });
 
 export type ForkUpdateConfig = z.infer<typeof forkUpdateConfigSchema>;
@@ -43,20 +45,35 @@ export function resolveFeedChannel(
   return releaseChannel === "beta" ? "beta" : "latest";
 }
 
+// The GitHub provider reads the release marked latest unless prereleases are
+// allowed. Allowing them makes it scan release tags for a semver prerelease id,
+// and the fork tags (`mf-desktop-v<version>`) have none, so it finds no release.
+// A fork build therefore never allows prereleases, whatever the release channel.
+export function resolveAllowPrerelease(
+  releaseChannel: AppReleaseChannel,
+  config: ForkUpdateConfig | null,
+): boolean {
+  if (config) return false;
+  return releaseChannel === "beta";
+}
+
 export type MacArch = "arm64" | "x64";
 
+// electron-updater's GitHub provider returns the release tag next to the
+// manifest fields, and every `files[].url` is a bare asset name in that release.
 export function resolveMacDmgUrl(
   info: Pick<RuntimeUpdateInfo, "files"> | null,
   config: ForkUpdateConfig,
   arch: MacArch,
 ): string | null {
-  if (!Array.isArray(info?.files)) return null;
-  const base = config.feedBaseUrl.endsWith("/") ? config.feedBaseUrl : `${config.feedBaseUrl}/`;
+  const tag = (info as { tag?: unknown } | null)?.tag;
+  if (typeof tag !== "string" || tag.length === 0 || !Array.isArray(info?.files)) return null;
+  const base = config.downloadBaseUrl.replace(/\/+$/, "");
   for (const file of info.files) {
     const url = (file as { url?: unknown } | null)?.url;
     if (typeof url !== "string") continue;
     const name = url.split("?")[0].split("/").pop() ?? "";
-    if (name.endsWith(`-${arch}.dmg`)) return new URL(url, base).href;
+    if (name.endsWith(`-${arch}.dmg`)) return `${base}/${tag}/${name}`;
   }
   return null;
 }
