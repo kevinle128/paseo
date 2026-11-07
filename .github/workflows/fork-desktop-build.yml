@@ -221,7 +221,9 @@ jobs:
             for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
-            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+            # updaterCacheDirName is a local cache folder electron-builder derives
+            # from the package name (@getpaseo/desktop); it is not a feed.
+            if grep -v '^updaterCacheDirName:' "$file" | grep -Eiq 'getpaseo|wasabi'; then
               echo "::error::${file} points at another feed"
               exit 1
             fi
@@ -324,7 +326,9 @@ jobs:
             for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
-            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+            # updaterCacheDirName is a local cache folder electron-builder derives
+            # from the package name (@getpaseo/desktop); it is not a feed.
+            if grep -v '^updaterCacheDirName:' "$file" | grep -Eiq 'getpaseo|wasabi'; then
               echo "::error::${file} points at another feed"
               exit 1
             fi
@@ -429,7 +433,9 @@ jobs:
             for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
-            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+            # updaterCacheDirName is a local cache folder electron-builder derives
+            # from the package name (@getpaseo/desktop); it is not a feed.
+            if grep -v '^updaterCacheDirName:' "$file" | grep -Eiq 'getpaseo|wasabi'; then
               echo "::error::${file} points at another feed"
               exit 1
             fi
