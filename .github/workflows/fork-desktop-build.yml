@@ -1,9 +1,12 @@
 name: Fork Desktop Build
 
-# Builds the desktop app on GitHub-hosted runners and publishes it to the fork's
-# object storage. Only the fork runs this; the tag prefix `mf-desktop-v` matches
-# none of the tag triggers of the upstream workflows (`v*`, `desktop-v*`,
-# `app-v*`, `android-v*`, ...), so a release here never starts them.
+# Builds the desktop app on GitHub-hosted runners and publishes it as a normal
+# GitHub release of the fork. Installed fork builds read their updates from that
+# release (`/releases/latest` and the latest*.yml assets); a copy of every
+# release goes to the fork's object storage as a private backup. Only the fork
+# runs this; the tag prefix `mf-desktop-v` matches none of the tag triggers of
+# the upstream workflows (`v*`, `desktop-v*`, `app-v*`, `android-v*`, ...), and
+# the one workflow with a release trigger skips that prefix.
 
 on:
   workflow_dispatch:
@@ -45,7 +48,7 @@ on:
         description: Published version, for example 0.14.0-mf.3.
         value: ${{ jobs.publish.outputs.version }}
       download_base_url:
-        description: Public directory that holds this version's installers.
+        description: Public GitHub release download directory that holds this version's installers.
         value: ${{ jobs.publish.outputs.download_base_url }}
       download_links:
         description: Markdown list of installer links, one per line.
@@ -91,13 +94,18 @@ jobs:
             exit 1
           fi
 
-      - name: Check the updater feed matches the upload location
+      - name: Check the updater feed matches this repository
         run: |
-          feed="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}"
-          if ! grep -Fq "url: ${feed}" "${DESKTOP_PACKAGE_PATH}/electron-builder.fork.yml"; then
-            echo "::error::${DESKTOP_PACKAGE_PATH}/electron-builder.fork.yml does not publish to ${feed}"
-            exit 1
-          fi
+          config="${DESKTOP_PACKAGE_PATH}/electron-builder.fork.yml"
+          for expected in \
+            "owner: ${GITHUB_REPOSITORY%/*}" \
+            "repo: ${GITHUB_REPOSITORY#*/}" \
+            "downloadBaseUrl: https://github.com/${GITHUB_REPOSITORY}/releases/download"; do
+            if ! grep -Fq "$expected" "$config"; then
+              echo "::error::${config} is missing '${expected}'"
+              exit 1
+            fi
+          done
 
       - name: Resolve version and tag
         id: resolve
@@ -197,6 +205,28 @@ jobs:
           set -euo pipefail
           npm run build:desktop -- --config electron-builder.fork.yml --publish never --mac --${{ matrix.electron_arch }}
 
+      # The packaged app reads this file to find its updates. A wrong owner here
+      # ships a build that updates from another project.
+      - name: Check the baked update feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(find "${DESKTOP_PACKAGE_PATH}/release" -name app-update.yml)"
+          if [[ -z "$files" ]]; then
+            echo "::error::No app-update.yml in the packaged app"
+            exit 1
+          fi
+          while IFS= read -r file; do
+            cat "$file"
+            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+              grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
+            done
+            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+              echo "::error::${file} points at another feed"
+              exit 1
+            fi
+          done <<< "$files"
+
       - name: Upload packaged smoke diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -277,6 +307,28 @@ jobs:
         run: |
           set -euo pipefail
           npm run build:desktop -- --config electron-builder.fork.yml --publish never --win --x64
+
+      # The packaged app reads this file to find its updates. A wrong owner here
+      # ships a build that updates from another project.
+      - name: Check the baked update feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(find "${DESKTOP_PACKAGE_PATH}/release" -name app-update.yml)"
+          if [[ -z "$files" ]]; then
+            echo "::error::No app-update.yml in the packaged app"
+            exit 1
+          fi
+          while IFS= read -r file; do
+            cat "$file"
+            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+              grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
+            done
+            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+              echo "::error::${file} points at another feed"
+              exit 1
+            fi
+          done <<< "$files"
 
       - name: Upload packaged smoke diagnostics
         if: failure()
@@ -361,6 +413,28 @@ jobs:
           set -euo pipefail
           npm run build:desktop -- --config electron-builder.fork.yml --publish never --linux --x64
 
+      # The packaged app reads this file to find its updates. A wrong owner here
+      # ships a build that updates from another project.
+      - name: Check the baked update feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(find "${DESKTOP_PACKAGE_PATH}/release" -name app-update.yml)"
+          if [[ -z "$files" ]]; then
+            echo "::error::No app-update.yml in the packaged app"
+            exit 1
+          fi
+          while IFS= read -r file; do
+            cat "$file"
+            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+              grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
+            done
+            if grep -Eiq 'getpaseo|wasabi' "$file"; then
+              echo "::error::${file} points at another feed"
+              exit 1
+            fi
+          done <<< "$files"
+
       - name: Upload packaged smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -392,8 +466,8 @@ jobs:
           retention-days: 3
 
   # Runs only when every platform built, so a feed never names a missing
-  # installer. Versioned files go up first and the feed manifests last, so a
-  # client never sees a manifest before the files it points at.
+  # installer. The release is created as a draft with every asset and published
+  # last, so a client never sees a release that is still missing files.
   publish:
     needs: [setup, build-macos, build-windows, build-linux]
     if: github.repository == 'kevinle128/paseo'
@@ -466,43 +540,14 @@ jobs:
           done
           ls -la release feed
 
-      - name: Upload installers to Wasabi
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${VERSION}/"
-          if [[ -n "$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT")" ]]; then
-            echo "::error::${target} already has files. Choose another version."
-            exit 1
-          fi
-          aws s3 cp release "$target" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
-          uploaded="$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT" | wc -l | tr -d ' ')"
-          expected="$(find release -type f | wc -l | tr -d ' ')"
-          if [[ "$uploaded" != "$expected" ]]; then
-            echo "::error::Uploaded ${uploaded} files, expected ${expected}"
-            exit 1
-          fi
-
-      - name: Publish update manifests
-        shell: bash
-        run: |
-          set -euo pipefail
-          for name in latest-mac.yml latest.yml latest-linux.yml; do
-            aws s3 cp "feed/${name}" "s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${name}" \
-              --endpoint-url "$WASABI_ENDPOINT" \
-              --content-type "text/yaml" \
-              --cache-control "no-cache" \
-              --only-show-errors
-          done
-
-      # Names come from the files that were uploaded, so the links cannot drift
+      # Names come from the files that are uploaded, so the links cannot drift
       # from the artifact name templates.
       - name: Collect download links
         id: links
         shell: bash
         run: |
           set -euo pipefail
-          base="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}/${VERSION}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
           {
             echo "base_url=${base}"
             echo "links<<LINKS_EOF"
@@ -522,18 +567,75 @@ jobs:
             echo "LINKS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create tag and GitHub release
+      - name: Create draft release with every asset
         shell: bash
         run: |
           set -euo pipefail
-          feed="${WASABI_ENDPOINT}/${WASABI_BUCKET}/${WASABI_PREFIX}"
           gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$SOURCE_SHA" \
             --title "Paseo desktop ${VERSION}" \
-            --notes "Fork desktop build ${VERSION} from ${SOURCE_SHA}. Primary download location: ${feed}/${VERSION}/" \
-            --prerelease \
+            --notes "Fork desktop build ${VERSION} from ${SOURCE_SHA}." \
+            --draft \
             release/* feed/latest-mac.yml feed/latest.yml feed/latest-linux.yml
+          # GitHub renames some asset names on upload, and a renamed asset would
+          # leave the update manifests pointing at a file that does not exist.
+          expected="$( (ls release; ls feed) | sort)"
+          actual="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)"
+          if [[ "$expected" != "$actual" ]]; then
+            echo "::error::Release assets differ from the build output."
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
+
+      # Normal release, marked latest: electron-updater reads /releases/latest,
+      # which never returns a prerelease or a draft.
+      - name: Publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease=false \
+            --latest
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [[ "$latest" != "$RELEASE_TAG" ]]; then
+            echo "::error::/releases/latest returns ${latest}, expected ${RELEASE_TAG}"
+            exit 1
+          fi
+
+      # A draft that was never published is invisible to clients; remove it so
+      # the same version can be retried.
+      - name: Remove unpublished draft release
+        if: failure()
+        shell: bash
+        run: |
+          is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "$is_draft" == "true" ]]; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+
+      # Private backup copy. Clients never read it, so a failure here must not
+      # undo or block a release that is already published.
+      - name: Back up release files to Wasabi
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${VERSION}/"
+          if [[ -n "$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT")" ]]; then
+            echo "::error::${target} already has files."
+            exit 1
+          fi
+          aws s3 cp release "$target" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          aws s3 cp feed "$target" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          uploaded="$(aws s3 ls "$target" --endpoint-url "$WASABI_ENDPOINT" | wc -l | tr -d ' ')"
+          expected="$(find release feed -type f | wc -l | tr -d ' ')"
+          if [[ "$uploaded" != "$expected" ]]; then
+            echo "::error::Backed up ${uploaded} files, expected ${expected}"
+            exit 1
+          fi
 
   # Manual runs report their own result; a calling workflow reports its own.
   notify:
@@ -558,7 +660,7 @@ jobs:
           if [[ "$PUBLISH_RESULT" == "success" ]]; then
             event=release.published
             key=build-published
-            text="Paseo fork ${VERSION} is ready"$'\n'"${LINKS}"$'\n'"macOS: download and replace Paseo in Applications."
+            text="Paseo fork ${VERSION} is ready"$'\n'"${LINKS}"$'\n'"Windows and Linux AppImage builds update themselves. macOS: download the DMG and replace Paseo in Applications."
           else
             event=build.failed
             key=build-failed
