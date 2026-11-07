@@ -12,6 +12,7 @@ import {
 } from "@/constants/layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+import { isWeb } from "@/constants/platform";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 import {
   HEADER_INTERACTIVE_SELECTOR,
@@ -50,7 +51,7 @@ export function ScreenHeader({
   // The press is observed, never prevented, so the header keeps its native double-click.
   useEffect(() => {
     const node: unknown = innerRef.current;
-    if (!beginHeaderDrag || !(node instanceof HTMLElement)) {
+    if (!isWeb || !beginHeaderDrag || !(node instanceof HTMLElement)) {
       return undefined;
     }
     const handlePointerDown = (event: PointerEvent) => {
