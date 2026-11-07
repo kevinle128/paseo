@@ -9,7 +9,7 @@ import {
   UPSTREAM_HEADING,
   buildFallback,
   buildPrompt,
-  callAnthropic,
+  callChatCompletions,
   capText,
   cleanSubject,
   collectCommits,
@@ -251,10 +251,10 @@ test("buildFallback lists the raw changes with a Vietnamese note and the compare
   const text = buildFallback({
     fork,
     upstream,
-    reason: "thiếu ANTHROPIC_API_KEY",
+    reason: "thiếu OPENAI_API_KEY",
     upstreamUrl: "https://github.com/getpaseo/paseo/compare/aaa...bbb",
   });
-  assert.match(text, /^_Không tạo được bản tóm tắt tiếng Việt \(thiếu ANTHROPIC_API_KEY\)/);
+  assert.match(text, /^_Không tạo được bản tóm tắt tiếng Việt \(thiếu OPENAI_API_KEY\)/);
   assert.ok(text.includes(FORK_HEADING));
   assert.ok(text.includes(UPSTREAM_HEADING));
   assert.match(text, /- … và 2 thay đổi khác/);
@@ -282,15 +282,28 @@ function okResponse(text) {
   return {
     ok: true,
     status: 200,
-    json: async () => ({ content: [{ type: "thinking" }, { type: "text", text }] }),
+    json: async () => ({ choices: [{ message: { role: "assistant", content: text } }] }),
   };
 }
 
-const apiOptions = { apiKey: "test-key", model: "m", system: "s", user: "u", retryDelayMs: 0 };
+const baseEnv = {
+  OPENAI_BASE_URL: "https://llm.example.ts.net/v1",
+  OPENAI_API_KEY: "k",
+  OPENAI_MODEL: "m",
+};
 
-test("callAnthropic sends the request and returns the text blocks", async () => {
+const apiOptions = {
+  baseUrl: "https://llm.example.ts.net/v1/",
+  apiKey: "test-key",
+  model: "m",
+  system: "s",
+  user: "u",
+  retryDelayMs: 0,
+};
+
+test("callChatCompletions sends the request and returns the text blocks", async () => {
   let seen;
-  const text = await callAnthropic({
+  const text = await callChatCompletions({
     ...apiOptions,
     fetchImpl: async (url, init) => {
       seen = { url, init };
@@ -298,32 +311,37 @@ test("callAnthropic sends the request and returns the text blocks", async () => 
     },
   });
   assert.equal(text, "xin chào");
-  assert.equal(seen.url, "https://api.anthropic.com/v1/messages");
-  assert.equal(seen.init.headers["x-api-key"], "test-key");
-  assert.equal(seen.init.headers["anthropic-version"], "2023-06-01");
+  assert.equal(seen.url, "https://llm.example.ts.net/v1/chat/completions");
+  assert.equal(seen.init.method, "POST");
+  assert.equal(seen.init.headers.authorization, "Bearer test-key");
+  assert.equal(seen.init.headers["content-type"], "application/json");
   const body = JSON.parse(seen.init.body);
   assert.equal(body.model, "m");
-  assert.equal(body.system, "s");
-  assert.deepEqual(body.messages, [{ role: "user", content: "u" }]);
+  assert.ok(body.temperature <= 0.3);
+  assert.ok(body.max_tokens > 0);
+  assert.deepEqual(body.messages, [
+    { role: "system", content: "s" },
+    { role: "user", content: "u" },
+  ]);
 });
 
-test("callAnthropic retries once on a server error and then succeeds", async () => {
+test("callChatCompletions retries once on a server error and then succeeds", async () => {
   let calls = 0;
-  const text = await callAnthropic({
+  const text = await callChatCompletions({
     ...apiOptions,
     fetchImpl: async () => {
       calls += 1;
-      return calls === 1 ? { ok: false, status: 529 } : okResponse("ok");
+      return calls === 1 ? { ok: false, status: 503 } : okResponse("ok");
     },
   });
   assert.equal(text, "ok");
   assert.equal(calls, 2);
 });
 
-test("callAnthropic fails after one retry on repeated server errors", async () => {
+test("callChatCompletions fails after one retry on repeated server errors", async () => {
   let calls = 0;
   await assert.rejects(
-    callAnthropic({
+    callChatCompletions({
       ...apiOptions,
       fetchImpl: async () => {
         calls += 1;
@@ -335,10 +353,10 @@ test("callAnthropic fails after one retry on repeated server errors", async () =
   assert.equal(calls, 2);
 });
 
-test("callAnthropic does not retry a client error", async () => {
+test("callChatCompletions does not retry a client error", async () => {
   let calls = 0;
   await assert.rejects(
-    callAnthropic({
+    callChatCompletions({
       ...apiOptions,
       fetchImpl: async () => {
         calls += 1;
@@ -350,7 +368,7 @@ test("callAnthropic does not retry a client error", async () => {
   assert.equal(calls, 1);
 });
 
-test("callAnthropic times out a request that never answers", async () => {
+test("callChatCompletions times out a request that never answers", async () => {
   let calls = 0;
   const hang = (_url, init) =>
     new Promise((_resolve, reject) => {
@@ -358,15 +376,15 @@ test("callAnthropic times out a request that never answers", async () => {
       init.signal.addEventListener("abort", () => reject(init.signal.reason));
     });
   await assert.rejects(
-    callAnthropic({ ...apiOptions, timeoutMs: 20, fetchImpl: hang }),
+    callChatCompletions({ ...apiOptions, timeoutMs: 20, fetchImpl: hang }),
     /hết thời gian chờ/,
   );
   assert.equal(calls, 2);
 });
 
-test("callAnthropic rejects an empty answer", async () => {
+test("callChatCompletions rejects an empty answer", async () => {
   await assert.rejects(
-    callAnthropic({ ...apiOptions, fetchImpl: async () => okResponse("   ") }),
+    callChatCompletions({ ...apiOptions, fetchImpl: async () => okResponse("   ") }),
     /nội dung rỗng/,
   );
 });
@@ -379,7 +397,7 @@ test("generateChangelog returns the model answer, escaped, with the upstream lin
       previousTag: "mf-desktop-v1",
       head,
       version: "0.14.0-mf.2",
-      env: { ANTHROPIC_API_KEY: "k", ANTHROPIC_MODEL: "custom-model" },
+      env: { ...baseEnv, OPENAI_MODEL: "custom-model" },
       fetchImpl: async (_url, init) => {
         requestBody = JSON.parse(init.body);
         return okResponse(
@@ -393,16 +411,16 @@ test("generateChangelog returns the model answer, escaped, with the upstream lin
     assert.equal(result.model, "custom-model");
     assert.equal(requestBody.model, "custom-model");
     assert.ok(
-      !requestBody.messages[0].content.includes("tweak workflow"),
+      !requestBody.messages[1].content.includes("tweak workflow"),
       "ci commits are filtered",
     );
     assert.ok(
-      !requestBody.messages[0].content.includes("cover updater"),
+      !requestBody.messages[1].content.includes("cover updater"),
       "test commits are filtered",
     );
-    assert.ok(requestBody.messages[0].content.includes("[fix] fix(desktop): updater feed owner"));
+    assert.ok(requestBody.messages[1].content.includes("[fix] fix(desktop): updater feed owner"));
     assert.ok(
-      requestBody.messages[0].content.includes("[feat] feat(server): upstream agent presets"),
+      requestBody.messages[1].content.includes("[feat] feat(server): upstream agent presets"),
     );
     assert.ok(!result.markdown.includes("@octocat"));
     assert.match(
@@ -412,42 +430,49 @@ test("generateChangelog returns the model answer, escaped, with the upstream lin
   });
 });
 
-test("generateChangelog uses the default model when the variable is empty", async () => {
+test("generateChangelog posts to the configured endpoint", async () => {
   await withReposAsync(async ({ fork, head }) => {
-    let model;
+    let seen;
     await generateChangelog({
       cwd: fork,
       previousTag: "mf-desktop-v1",
       head,
-      env: { ANTHROPIC_API_KEY: "k", ANTHROPIC_MODEL: "" },
-      fetchImpl: async (_url, init) => {
-        model = JSON.parse(init.body).model;
+      env: { ...baseEnv, OPENAI_BASE_URL: "https://llm.example.ts.net/v1/" },
+      fetchImpl: async (url, init) => {
+        seen = { url, init };
         return okResponse("x");
       },
       log: () => {},
     });
-    assert.equal(model, "claude-sonnet-5-5");
+    assert.equal(seen.url, "https://llm.example.ts.net/v1/chat/completions");
+    assert.equal(seen.init.headers.authorization, "Bearer k");
   });
 });
 
-test("generateChangelog falls back without a key and never calls the API", async () => {
-  await withReposAsync(async ({ fork, head }) => {
-    const result = await generateChangelog({
-      cwd: fork,
-      previousTag: "mf-desktop-v1",
-      head,
-      env: {},
-      fetchImpl: async () => {
-        throw new Error("must not be called");
-      },
-      log: () => {},
+for (const [name, key, code, note] of [
+  ["base URL", "OPENAI_BASE_URL", "missing-base-url", /thiếu OPENAI_BASE_URL/],
+  ["key", "OPENAI_API_KEY", "missing-key", /thiếu OPENAI_API_KEY/],
+  ["model", "OPENAI_MODEL", "missing-model", /chưa cấu hình model/],
+]) {
+  test(`generateChangelog falls back without a ${name} and never calls the API`, async () => {
+    await withReposAsync(async ({ fork, head }) => {
+      const result = await generateChangelog({
+        cwd: fork,
+        previousTag: "mf-desktop-v1",
+        head,
+        env: { ...baseEnv, [key]: "  " },
+        fetchImpl: async () => {
+          throw new Error("must not be called");
+        },
+        log: () => {},
+      });
+      assert.equal(result.source, "fallback");
+      assert.equal(result.reason, code);
+      assert.match(result.markdown, note);
+      assert.ok(result.markdown.includes("- fix(desktop): updater feed owner"));
     });
-    assert.equal(result.source, "fallback");
-    assert.equal(result.reason, "missing-key");
-    assert.match(result.markdown, /thiếu ANTHROPIC_API_KEY/);
-    assert.ok(result.markdown.includes("- fix(desktop): updater feed owner"));
   });
-});
+}
 
 test("generateChangelog falls back on an API error", async () => {
   await withReposAsync(async ({ fork, head }) => {
@@ -455,7 +480,7 @@ test("generateChangelog falls back on an API error", async () => {
       cwd: fork,
       previousTag: "mf-desktop-v1",
       head,
-      env: { ANTHROPIC_API_KEY: "k" },
+      env: baseEnv,
       fetchImpl: async () => ({ ok: false, status: 401 }),
       retryDelayMs: 0,
       log: () => {},
@@ -472,7 +497,7 @@ test("generateChangelog falls back on a timeout", async () => {
       cwd: fork,
       previousTag: "mf-desktop-v1",
       head,
-      env: { ANTHROPIC_API_KEY: "k" },
+      env: baseEnv,
       timeoutMs: 20,
       retryDelayMs: 0,
       fetchImpl: (_url, init) =>
@@ -495,7 +520,7 @@ test("generateChangelog reports no changes when only noise commits exist", async
       cwd: fork,
       previousTag: "mf-desktop-v2",
       head: newHead,
-      env: { ANTHROPIC_API_KEY: "k" },
+      env: baseEnv,
       fetchImpl: async () => {
         throw new Error("must not be called");
       },
@@ -509,7 +534,7 @@ test("generateChangelog does not throw when git cannot read the history", async 
   const result = await generateChangelog({
     cwd: tmpdir(),
     head: "HEAD",
-    env: { ANTHROPIC_API_KEY: "k" },
+    env: baseEnv,
     log: () => {},
   });
   assert.equal(result.source, "fallback");

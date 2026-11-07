@@ -8,21 +8,20 @@ import { isMainModule } from "./is-main-module.mjs";
 // Commits between the previous published release and the new one are split in
 // two groups: fork-only commits and commits that came in through the upstream
 // merge (reachable from the upstream main branch). Both groups are filtered,
-// sent to the Anthropic Messages API and summarised in Vietnamese. The script
-// never fails a release: when the key is missing or the API call fails, it
+// sent to an OpenAI-compatible chat completions endpoint and summarised in
+// Vietnamese. The script never fails a release: when the base URL, key or model
+// is missing or the API call fails, it
 // writes the raw English change list with a short Vietnamese note instead.
 // Git is called without a shell and commit subjects are treated as data, so
 // nothing from upstream reaches a shell or a workflow expression.
 
-export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_UPSTREAM_REPO = "getpaseo/paseo";
 export const DEFAULT_UPSTREAM_REF = "upstream/main";
 
-const API_URL = "https://api.anthropic.com/v1/messages";
-const API_VERSION = "2023-06-01";
-// Adaptive thinking tokens count against max_tokens on current models, so the
-// ceiling is far above the length of the answer.
+// Reasoning models count thinking tokens against max_tokens, so the ceiling is
+// far above the length of the answer.
 const MAX_OUTPUT_TOKENS = 4096;
+const TEMPERATURE = 0.2;
 const DEFAULT_TIMEOUT_MS = 45000;
 const DEFAULT_RETRY_DELAY_MS = 2000;
 
@@ -316,7 +315,8 @@ function describeFetchError(error) {
 
 // One retry for timeouts, network errors, 429 and 5xx. Other 4xx errors (bad
 // key, bad model name) fail at once because a retry cannot fix them.
-export async function callAnthropic({
+export async function callChatCompletions({
+  baseUrl,
   apiKey,
   model,
   system,
@@ -333,18 +333,20 @@ export async function callAnthropic({
     }
     let response;
     try {
-      response = await fetchImpl(API_URL, {
+      response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": API_VERSION,
+          authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
+          temperature: TEMPERATURE,
           max_tokens: MAX_OUTPUT_TOKENS,
-          system,
-          messages: [{ role: "user", content: user }],
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -365,11 +367,8 @@ export async function callAnthropic({
     } catch {
       throw new ChangelogApiError("API trả về dữ liệu không đọc được");
     }
-    const text = (Array.isArray(data?.content) ? data.content : [])
-      .filter((block) => block?.type === "text" && typeof block.text === "string")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const content = data?.choices?.[0]?.message?.content;
+    const text = typeof content === "string" ? content.trim() : "";
     if (text === "") {
       throw new ChangelogApiError("API trả về nội dung rỗng");
     }
@@ -378,12 +377,21 @@ export async function callAnthropic({
   throw lastError;
 }
 
-// An unset repository variable reaches the workflow as an empty string.
+// An unset secret or repository variable reaches the workflow as an empty string.
+const SETTING_GAPS = [
+  ["baseUrl", "thiếu OPENAI_BASE_URL", "missing-base-url"],
+  ["apiKey", "thiếu OPENAI_API_KEY", "missing-key"],
+  ["model", "chưa cấu hình model (OPENAI_MODEL)", "missing-model"],
+];
+
 function readApiSettings(env) {
-  return {
-    apiKey: (env.ANTHROPIC_API_KEY ?? "").trim(),
-    model: (env.ANTHROPIC_MODEL ?? "").trim() || DEFAULT_MODEL,
+  const settings = {
+    baseUrl: (env.OPENAI_BASE_URL ?? "").trim(),
+    apiKey: (env.OPENAI_API_KEY ?? "").trim(),
+    model: (env.OPENAI_MODEL ?? "").trim(),
   };
+  const gap = SETTING_GAPS.find(([field]) => settings[field] === "");
+  return { ...settings, missing: gap ? { reason: gap[1], code: gap[2] } : null };
 }
 
 // Never throws. `source` tells the caller which path produced the markdown.
@@ -430,13 +438,15 @@ export async function generateChangelog({
     };
   };
 
-  const { apiKey, model } = readApiSettings(env);
-  if (apiKey === "") {
-    return fallback("thiếu ANTHROPIC_API_KEY", "missing-key");
+  const settings = readApiSettings(env);
+  if (settings.missing !== null) {
+    return fallback(settings.missing.reason, settings.missing.code);
   }
+  const { baseUrl, apiKey, model } = settings;
   const { system, user } = buildPrompt({ version, fork, upstream });
   try {
-    const text = await callAnthropic({
+    const text = await callChatCompletions({
+      baseUrl,
       apiKey,
       model,
       system,

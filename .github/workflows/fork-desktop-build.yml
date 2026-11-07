@@ -510,6 +510,7 @@ jobs:
             package.json
             package-lock.json
             scripts
+            .github/actions
           ref: ${{ needs.setup.outputs.sha }}
           # The changelog walks the commits since the previous release.
           fetch-depth: 0
@@ -624,16 +625,25 @@ jobs:
 
       # Best effort. The release is already published here, so nothing in the
       # changelog may fail the job: the script falls back to the raw English
-      # change list when the key is missing or the API call fails, and
-      # continue-on-error covers a crash of the script itself.
+      # change list when the endpoint settings are missing or the API call
+      # fails, and continue-on-error covers a crash of the script itself. The
+      # endpoint is reachable only inside the tailnet.
+      - name: Join tailnet for the changelog
+        continue-on-error: true
+        uses: ./.github/actions/join-tailnet
+        with:
+          ts_oauth_client_id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts_oauth_secret: ${{ secrets.TS_OAUTH_SECRET }}
+
       - name: Write Vietnamese changelog
         id: changelog
         continue-on-error: true
         timeout-minutes: 5
         shell: bash
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
           set -euo pipefail
           previous="$( { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 30 --json tagName --jq '.[].tagName' \

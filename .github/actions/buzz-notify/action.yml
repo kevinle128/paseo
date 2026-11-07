@@ -33,11 +33,10 @@ runs:
   steps:
     # The relay is reachable only inside the tailnet.
     - name: Join tailnet
-      uses: tailscale/github-action@v4
+      uses: ./.github/actions/join-tailnet
       with:
-        oauth-client-id: ${{ inputs.ts_oauth_client_id }}
-        oauth-secret: ${{ inputs.ts_oauth_secret }}
-        tags: tag:ci
+        ts_oauth_client_id: ${{ inputs.ts_oauth_client_id }}
+        ts_oauth_secret: ${{ inputs.ts_oauth_secret }}
 
     - name: Post to Buzz
       shell: bash
