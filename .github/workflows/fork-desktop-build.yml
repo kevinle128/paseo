@@ -123,10 +123,16 @@ jobs:
           if [[ -z "$version" ]]; then
             base="$(node -p "require('./${DESKTOP_PACKAGE_PATH}/package.json').version")"
             if [[ "$base" == *-* ]]; then
-              version="${base}.mf.${GITHUB_RUN_NUMBER}"
+              prefix="${base}.mf."
             else
-              version="${base}-mf.${GITHUB_RUN_NUMBER}"
+              prefix="${base}-mf."
             fi
+            # A called workflow sees the caller's run number, so derive N from
+            # the published tags instead. The next build is always higher.
+            last="$(git ls-remote --tags origin "refs/tags/mf-desktop-v${prefix}*" \
+              | sed -n "s|.*refs/tags/mf-desktop-v${prefix//./\\.}\([0-9][0-9]*\)\$|\1|p" \
+              | sort -n | tail -1)"
+            version="${prefix}$(( ${last:-0} + 1 ))"
           fi
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+\.mf\.[0-9]+|-mf\.[0-9]+)$ ]]; then
             echo "::error::Version '$version' must look like X.Y.Z-mf.N or X.Y.Z-beta.K.mf.N"
