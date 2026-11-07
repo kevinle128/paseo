@@ -81,10 +81,10 @@ async function readTestIds(locator: Locator): Promise<string[]> {
   );
 }
 
-async function scrollDeckTo(page: Page, top: number): Promise<void> {
-  await page.getByTestId("workspace-deck").evaluate((deck, target) => {
-    deck.scrollTop = target;
-  }, top);
+async function scrollDeckToEnd(page: Page): Promise<void> {
+  await page.getByTestId("workspace-deck").evaluate((deck) => {
+    deck.scrollTop = deck.scrollHeight;
+  });
 }
 
 test.describe("Pinned grid fidelity tiers", () => {
@@ -123,8 +123,8 @@ test.describe("Pinned grid fidelity tiers", () => {
         .poll(() => subscriptions.latest()?.length ?? 0, { timeout: 30_000 })
         .toBe(agents.length);
 
-      // The grid lists the newest pin first and keeps the focused cell in view: focusing the oldest
-      // pin scrolls the grid to its bottom, so the cells at the top sit far above the viewport.
+      // The grid lists the oldest pin first and keeps the focused cell in view: focusing the oldest
+      // pin keeps the grid at its top, so the cells at the end sit far below the viewport.
       await switchWorkspaceViaSidebar({ page, serverId, workspaceId: agents[0].workspaceId });
       await chooseGridMode(page, "2");
       await expect(page.getByTestId(cellTestId(serverId, agents[0].workspaceId))).toBeVisible({
@@ -149,8 +149,8 @@ test.describe("Pinned grid fidelity tiers", () => {
         expect(isSubscribed(subscriptions.latest(), agent)).toBe(true);
       }
 
-      // Scrolling back to the top brings the hidden cells in view and the subscription returns.
-      await scrollDeckTo(page, 0);
+      // Scrolling to the end brings the hidden cells in view and the subscription returns.
+      await scrollDeckToEnd(page);
       for (const agent of hiddenAgents) {
         await expect(page.getByTestId(cellTestId(serverId, agent.workspaceId))).toBeVisible({
           timeout: 15_000,
@@ -199,9 +199,9 @@ test.describe("Pinned grid fidelity tiers", () => {
       // A card shows only for a cell that is off screen. Scrolling to it mounts the cell (on-screen
       // cells are never evicted), and the cap then moves to the cells that left the screen.
       const cardIds = await readTestIds(cards);
-      // The first workspace is focused, which is the last cell, so the grid starts at its bottom and
-      // the cards are at the top.
-      await scrollDeckTo(page, 0);
+      // The first workspace is focused, which is the first cell, so the grid starts at its top and
+      // the cards are at the end.
+      await scrollDeckToEnd(page);
       for (const cardId of cardIds) {
         const target = cardId.replace("pinned-grid-dormant-", "");
         await expect(page.getByTestId(`workspace-deck-entry-${target}`)).toHaveCount(1, {
