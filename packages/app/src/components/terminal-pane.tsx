@@ -300,7 +300,8 @@ export function TerminalPane({
   // A workspace shown but not owning input (reduced) still renders its terminal and claims its own
   // size. Only focus handling below is tied to the drilled `isWorkspaceFocused` (owns input).
   const workspacePresence = useWorkspacePresence();
-  const isTerminalPresented = retainedPanelActive && isPresented(workspacePresence);
+  const isWorkspacePresented = isPresented(workspacePresence);
+  const isTerminalPresented = retainedPanelActive && isWorkspacePresented;
   const supportsTerminalRestoreModes = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-restore-modes"] === true,
   );
@@ -668,7 +669,7 @@ export function TerminalPane({
       terminalId,
       terminalStreamKey,
       rendererReadyStreamKey,
-      isTerminalPresented,
+      isTerminalPresented: isWorkspacePresented,
     });
     streamControllerRef.current?.setTerminal({
       terminalId: nextTerminalId,
@@ -676,7 +677,7 @@ export function TerminalPane({
   }, [
     client,
     isConnected,
-    isTerminalPresented,
+    isWorkspacePresented,
     rendererReadyStreamKey,
     terminalId,
     terminalStreamKey,
