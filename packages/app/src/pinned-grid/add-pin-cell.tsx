@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState, type ReactElement } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Plus } from "lucide-react-native";
@@ -8,6 +8,9 @@ import { DensityIcon } from "@/components/ui/density-icon";
 import { PressHighlight } from "@/components/ui/press-highlight";
 import type { GridCellRect } from "./geometry";
 import { AddPinPicker } from "./add-pin-picker";
+import { useGridScrollSignalSource } from "./grid-scroll-signal";
+
+const ANCHOR_WIDTH = 320;
 
 interface AddPinCellProps {
   rect: GridCellRect;
@@ -24,9 +27,20 @@ export const AddPinCell = memo(function AddPinCell({
   onPicked,
 }: AddPinCellProps): ReactElement | null {
   const { t } = useTranslation();
-  const tileRef = useRef<View | null>(null);
+  const anchorRef = useRef<View | null>(null);
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+
+  const scrollSignal = useGridScrollSignalSource();
+
+  // The popover is positioned once, when it opens. A grid that scrolls would leave it behind the
+  // tile, so scrolling (or any move of the cells) closes it like other dropdowns.
+  useEffect(() => {
+    if (!open || !scrollSignal) {
+      return undefined;
+    }
+    return scrollSignal.subscribe(() => setOpen(false));
+  }, [open, scrollSignal]);
 
   const handleOpen = useCallback(() => setOpen(true), []);
   const handleClose = useCallback(() => setOpen(false), []);
@@ -40,7 +54,6 @@ export const AddPinCell = memo(function AddPinCell({
 
   return (
     <View
-      ref={tileRef}
       style={[styles.tile, rectStyle]}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
@@ -57,7 +70,12 @@ export const AddPinCell = memo(function AddPinCell({
           {label}
         </Text>
       </PressHighlight>
-      {open ? <AddPinPicker anchorRef={tileRef} onClose={handleClose} onPicked={onPicked} /> : null}
+      {/* The picker hangs from the top of the tile. A tile in the last visible row would put a
+          popover below its bottom edge outside the window, and web does not flip popovers. */}
+      <View ref={anchorRef} pointerEvents="none" style={styles.anchor} />
+      {open ? (
+        <AddPinPicker anchorRef={anchorRef} onClose={handleClose} onPicked={onPicked} />
+      ) : null}
     </View>
   );
 });
@@ -65,6 +83,14 @@ export const AddPinCell = memo(function AddPinCell({
 const styles = StyleSheet.create((theme) => ({
   tile: {
     position: "absolute",
+  },
+  anchor: {
+    position: "absolute",
+    top: theme.spacing[4],
+    left: "50%",
+    width: ANCHOR_WIDTH,
+    marginLeft: -ANCHOR_WIDTH / 2,
+    height: 1,
   },
   press: {
     flex: 1,
