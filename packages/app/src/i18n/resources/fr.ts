@@ -466,6 +466,12 @@ export const fr: TranslationResources = {
     gridCell: {
       maximize: "Agrandir la cellule",
       restore: "Restaurer la cellule",
+      addPin: {
+        label: "Épingler un espace de travail",
+        searchPlaceholder: "Rechercher un espace de travail à épingler",
+        noMatch: "Aucun espace de travail ne correspond",
+        allPinned: "Tous les espaces de travail sont épinglés",
+      },
     },
     route: {
       loading: "Chargement de l’espace de travail…",

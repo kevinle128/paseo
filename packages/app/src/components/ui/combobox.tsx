@@ -86,6 +86,8 @@ export interface ComboboxProps {
     onPress: () => void;
   }) => ReactElement;
   onSearchQueryChange?: (query: string) => void;
+  /** Keep the order of `options` while searching, so grouped options stay grouped. */
+  preserveOptionOrder?: boolean;
   searchable?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -1286,6 +1288,7 @@ export function Combobox({
   onSelect,
   renderOption,
   onSearchQueryChange,
+  preserveOptionOrder,
   searchable = true,
   placeholder,
   searchPlaceholder,
@@ -1451,6 +1454,7 @@ export function Combobox({
         customValuePrefix,
         customValueDescription,
         customValueKind,
+        preserveOptionOrder,
       }),
     [
       allowCustomValue,
@@ -1458,6 +1462,7 @@ export function Combobox({
       customValueKind,
       customValuePrefix,
       options,
+      preserveOptionOrder,
       searchQuery,
       searchable,
     ],

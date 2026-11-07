@@ -466,6 +466,12 @@ export const ja: TranslationResources = {
     gridCell: {
       maximize: "セルを最大化",
       restore: "セルを元に戻す",
+      addPin: {
+        label: "ワークスペースをピン留め",
+        searchPlaceholder: "ピン留めするワークスペースを検索",
+        noMatch: "一致するワークスペースがありません",
+        allPinned: "すべてのワークスペースがピン留めされています",
+      },
     },
     route: {
       loading: "ワークスペースを読み込み中",
