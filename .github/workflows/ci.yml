@@ -156,6 +156,9 @@ jobs:
       - name: Verify fork desktop manifest checks
         run: node --test scripts/fork-desktop-manifest.test.mjs
 
+      - name: Verify fork sync conflict report
+        run: node --test scripts/fork-sync-conflict-report.test.mjs
+
       - name: Build server stack
         run: npm run build:server
 

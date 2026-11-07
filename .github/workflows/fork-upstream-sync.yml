@@ -36,6 +36,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      issues: write
       packages: read
     outputs:
       changed: ${{ steps.merge.outputs.changed }}
@@ -51,6 +52,8 @@ jobs:
         id: merge
         env:
           FORCE_BUILD: ${{ inputs.force_build }}
+          FORK_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -93,6 +96,24 @@ jobs:
             exit 0
           fi
           files="$(git diff --name-only --diff-filter=U)"
+          # The report needs the conflict markers, so build it before the abort.
+          # A failure here must not hide the conflict: fall back to a short body.
+          report_dir="${RUNNER_TEMP}/sync-conflict"
+          mkdir -p "$report_dir"
+          if ! node scripts/fork-sync-conflict-report.mjs \
+            --body-out "${report_dir}/body.md" --title-out "${report_dir}/title.txt" \
+            --run-url "$RUN_URL" --repo "$FORK_REPO"; then
+            echo "::warning::Could not build the detailed conflict report; using a short one."
+            {
+              echo "The daily sync could not merge upstream (${range}). The merge was aborted and nothing was pushed."
+              echo
+              echo "Run: ${RUN_URL}"
+              echo
+              echo "Conflicting files:"
+              while IFS= read -r name; do echo "- \`${name}\`"; done <<< "$files"
+            } > "${report_dir}/body.md"
+            echo "Upstream sync conflict (upstream ${new_upstream})" > "${report_dir}/title.txt"
+          fi
           git merge --abort
           {
             echo "conflict=true"
@@ -103,6 +124,30 @@ jobs:
           echo "::error::Merge conflict in: $(echo "$files" | tr '\n' ' ')"
           exit 1
 
+      - name: Open or update conflict issue
+        id: issue
+        if: ${{ failure() && steps.merge.outputs.conflict == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LABEL: upstream-sync-conflict
+        run: |
+          set -euo pipefail
+          report_dir="${RUNNER_TEMP}/sync-conflict"
+          title="$(cat "${report_dir}/title.txt")"
+          gh label create "$LABEL" --color B60205 \
+            --description "Daily upstream sync stopped on a merge conflict" --force
+          existing="$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue edit "$existing" --title "$title"
+            gh issue comment "$existing" --body-file "${report_dir}/body.md"
+            url="${GITHUB_SERVER_URL}/${GH_REPO}/issues/${existing}"
+          else
+            url="$(gh issue create --title "$title" --label "$LABEL" --body-file "${report_dir}/body.md")"
+          fi
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Conflict issue: ${url}"
+
       - name: Notify sync blocked
         if: ${{ failure() && steps.merge.outputs.conflict == 'true' }}
         uses: ./.github/actions/buzz-notify
@@ -111,6 +156,7 @@ jobs:
           content: |
             Paseo fork sync blocked: merging upstream ${{ steps.merge.outputs.range }} conflicts in these files:
             ${{ steps.merge.outputs.conflict_files }}
+            ${{ steps.issue.outputs.url != '' && format('Issue: {0}', steps.issue.outputs.url) || 'The conflict issue could not be created; see the run log.' }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           idempotency_key: ${{ github.run_id }}-${{ github.run_attempt }}-sync-blocked
           callback_url: ${{ secrets.BUZZ_APP_CALLBACK_URL }}
@@ -158,6 +204,22 @@ jobs:
           set -euo pipefail
           git push origin HEAD:main
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The conflict is resolved once a sync merges and pushes cleanly. A failure
+      # to close must not turn a pushed sync red, so it only warns.
+      - name: Close resolved conflict issues
+        if: steps.push.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MERGED_SHA: ${{ steps.push.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for number in $(gh issue list --label upstream-sync-conflict --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "Resolved: a later sync merged upstream and pushed \`${MERGED_SHA:0:9}\` to main. Run: ${RUN_URL}"
+          done
 
       - name: Find failed stage
         id: stage
