@@ -15,6 +15,18 @@ describe("createGridScrollSignal", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
+  it("tells subscribers whether the grid scrolled or only its layout moved", () => {
+    const signal = createGridScrollSignal();
+    const listener = vi.fn();
+    signal.subscribe(listener);
+
+    signal.notify();
+    signal.notify("layout");
+
+    expect(listener).toHaveBeenNthCalledWith(1, "scroll");
+    expect(listener).toHaveBeenNthCalledWith(2, "layout");
+  });
+
   it("stops notifying after unsubscribe", () => {
     const signal = createGridScrollSignal();
     const listener = vi.fn();

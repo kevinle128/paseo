@@ -34,12 +34,17 @@ export const AddPinCell = memo(function AddPinCell({
   const scrollSignal = useGridScrollSignalSource();
 
   // The popover is positioned once, when it opens. A grid that scrolls would leave it behind the
-  // tile, so scrolling (or any move of the cells) closes it like other dropdowns.
+  // tile, so scrolling closes it like other dropdowns. A change of the cell list (a pin made on
+  // another device) leaves it open, so the user keeps the search they typed.
   useEffect(() => {
     if (!open || !scrollSignal) {
       return undefined;
     }
-    return scrollSignal.subscribe(() => setOpen(false));
+    return scrollSignal.subscribe((reason) => {
+      if (reason === "scroll") {
+        setOpen(false);
+      }
+    });
   }, [open, scrollSignal]);
 
   const handleOpen = useCallback(() => setOpen(true), []);

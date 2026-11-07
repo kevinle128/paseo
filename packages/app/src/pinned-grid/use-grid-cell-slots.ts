@@ -41,7 +41,7 @@ export function useGridCellSlots(input: {
       store.setPinnedWorkspaceOrder(mergeWithRemainder(merge));
     }
   }, []);
-  const onFrame = useCallback(() => signal.notify(), [signal]);
+  const onFrame = useCallback(() => signal.notify("layout"), [signal]);
   const { beginHeaderDrag, draggedKey } = useGridReorderDrag({
     deckRef,
     enabled: grid !== null && maximizedKey === null && cellKeys.length > 1,
@@ -58,7 +58,7 @@ export function useGridCellSlots(input: {
   );
   // Electron fixed surfaces (browser panes) follow a cell to its new slot.
   useEffect(() => {
-    signal.notify();
+    signal.notify("layout");
   }, [signal, slotIndexByKey, cellKeys]);
 
   const cellRects = useMemo(() => {
