@@ -91,7 +91,8 @@ import { useComposerHeight } from "./height";
 import { ComposerInputPresentation } from "./presentation";
 import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
 import { useGridComposerDensity } from "./use-grid-composer-density";
-import type { ComposerDensity } from "@/pinned-grid/composer-density";
+import { isGridCell, type ComposerDensity } from "@/pinned-grid/composer-density";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
 import { pasteLinkedClipboardText } from "@/composer/pasted-text";
 import type { NativePastedFile } from "@/composer/native-pasted-image";
@@ -1455,20 +1456,23 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const textInputRef = useRef<ComposerTextInputHandle | null>(null);
     const isInputFocusedRef = useRef(false);
     const focusIntentRef = useRef(false);
-    const focusTextInput = useCallback(() => textInputRef.current?.focus(), []);
+    // A grid cell never gets its focus back on its own; the user presses the input again.
+    const inGridCell = isGridCell(useWorkspaceGridCell());
+    const inGridCellRef = useRef(inGridCell);
+    inGridCellRef.current = inGridCell;
+    const [webTextArea, setWebTextArea] = useState<HTMLElement | null>(null);
     const density = useGridComposerDensity({
       rootRef,
+      textInputElement: webTextArea,
       inputFocused: isInputFocused,
       hasDraft: hasLiveText,
       hasAttachments: attachments.length > 0 || Boolean(hasExternalContent),
-      focusInput: focusTextInput,
     });
     const isMinimal = density === "minimal";
     const valueRef = useRef(value);
     const selectionRef = useRef({ start: value.length, end: value.length });
     const paneFocusedRef = useRef(isPaneFocused);
     paneFocusedRef.current = isPaneFocused;
-    const [webTextArea, setWebTextArea] = useState<HTMLElement | null>(null);
     const appliedTextReplacementKeyRef = useRef(textReplacement.key);
     const webTextareaRef = useRef<HTMLElement | null>(null);
     const updateLiveTextPresence = useCallback((text: string) => {
@@ -1497,7 +1501,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         // Hiding a retained tab only blurs its editor after the browser renders.
         // A quick return before that frame would otherwise keep touch focus.
         textInputRef.current?.blur();
-      } else if (isPaneFocused && focusIntentRef.current && finePointer) {
+      } else if (isPaneFocused && focusIntentRef.current && finePointer && !inGridCellRef.current) {
         textInputRef.current?.focus();
       }
     }, [isPaneFocused]);
@@ -1518,7 +1522,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         textInputRef.current?.setSelection(selection);
         if (retained.focused && hasFinePointer()) {
           focusIntentRef.current = true;
-          if (paneFocusedRef.current) textInputRef.current?.focus();
+          if (paneFocusedRef.current && !inGridCellRef.current) textInputRef.current?.focus();
         }
       }
       return () => {

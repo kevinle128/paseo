@@ -31,6 +31,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isGridCell } from "@/pinned-grid/composer-density";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 import {
   controlSizingForLayout,
   TOOLBAR_CONTROL_GAP,
@@ -1320,6 +1322,7 @@ function ComposerContentImpl({
   const toolbarGlyph = toolbarGlyphsFor(controlSizing).icon;
   const discGlyphSize = TOOLBAR_DISC_GLYPH_SIZES[controlSizing];
   const isDesktopWebBreakpoint = resolveIsDesktopWebBreakpoint(isCompactFormFactor);
+  const gridCell = useWorkspaceGridCell();
   const { finePointer: hasFinePointer } = usePointerCapabilities();
   const isDesktopLayout = resolveIsDesktopWebBreakpoint(isCompactLayout);
   const messagePlaceholder = resolveMessagePlaceholder(inputMode, isDesktopLayout, t, placeholder);
@@ -2413,7 +2416,10 @@ function ComposerContentImpl({
   );
 
   // Focusing the composer on a touch screen raises the on-screen keyboard over the conversation.
-  const messageInputAutoFocus = autoFocus && isDesktopWebBreakpoint && hasFinePointer;
+  // A grid cell never grabs focus on its own: focusing a cell would expand its slim composer
+  // and maximize/restore would leave the caret in it. The user presses the input to type.
+  const messageInputAutoFocus =
+    autoFocus && isDesktopWebBreakpoint && hasFinePointer && !isGridCell(gridCell);
   const submitLoadingPressHandler = isAgentRunning ? handleCancelAgent : undefined;
   const sendErrorNode = useMemo(
     () =>

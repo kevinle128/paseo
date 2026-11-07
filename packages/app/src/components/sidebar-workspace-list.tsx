@@ -25,7 +25,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { router, usePathname, type Href } from "expo-router";
 import {
-  navigateToWorkspace,
   useActiveWorkspaceSelection,
   type ActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
@@ -55,6 +54,7 @@ import { useSidebarCollapsedSectionsStore } from "@/stores/sidebar-collapsed-sec
 import { useHostFeatureMap } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { PinnedGridModeControl } from "@/pinned-grid/pinned-grid-mode-control";
+import { useSidebarWorkspacePress } from "@/pinned-grid/use-sidebar-workspace-press";
 import { useHasPinnedWorkspace } from "@/pinned-grid/use-pinned-workspace-selections";
 import { useProjectIcons } from "@/projects/icons";
 import {
@@ -1413,12 +1413,17 @@ function WorkspaceRowItem({
   isDragging = false,
   dragHandleProps,
 }: WorkspaceRowItemProps) {
+  const pressWorkspace = useSidebarWorkspacePress();
   const handlePress = useCallback(() => {
     if (!workspace.serverId) {
       return;
     }
-    navigateToWorkspace({ serverId: workspace.serverId, workspaceId: workspace.workspaceId });
-  }, [workspace.serverId, workspace.workspaceId]);
+    pressWorkspace({
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+      pinnedAt: workspaceEntry?.pinnedAt,
+    });
+  }, [pressWorkspace, workspaceEntry?.pinnedAt, workspace.serverId, workspace.workspaceId]);
 
   return (
     <WorkspaceRow
