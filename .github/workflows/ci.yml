@@ -159,6 +159,9 @@ jobs:
       - name: Verify fork sync conflict report
         run: node --test scripts/fork-sync-conflict-report.test.mjs
 
+      - name: Verify fork release changelog
+        run: node --test scripts/fork-release-changelog.test.mjs
+
       - name: Build server stack
         run: npm run build:server
 

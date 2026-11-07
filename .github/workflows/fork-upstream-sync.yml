@@ -280,6 +280,8 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           VERSION: ${{ needs.build.outputs.version }}
           LINKS: ${{ needs.build.outputs.download_links }}
+          CHANGELOG: ${{ needs.build.outputs.changelog }}
+          RELEASE_URL: ${{ needs.build.outputs.release_url }}
           RANGE: ${{ needs.sync.outputs.upstream_range }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -287,18 +289,23 @@ jobs:
           if [[ "$BUILD_RESULT" == "success" ]]; then
             event=release.published
             key=release-published
-            text="Paseo fork ${VERSION} is ready"$'\n'"Upstream: ${RANGE}"$'\n'"${LINKS}"$'\n'"macOS: download and replace Paseo in Applications."
+            text="Paseo fork ${VERSION} is ready"$'\n'"Upstream: ${RANGE}"
+            if [[ -n "$CHANGELOG" ]]; then
+              text+=$'\n\n'"${CHANGELOG}"
+            fi
+            text+=$'\n\n'"${LINKS}"$'\n'"macOS: download and replace Paseo in Applications."$'\n'"Release: ${RELEASE_URL}"
           else
             event=build.failed
             key=build-failed
             text="Paseo fork build failed (${BUILD_RESULT}). Upstream: ${RANGE}. Run: ${RUN_URL}"
           fi
+          delimiter="TEXT_$(openssl rand -hex 8)"
           {
             echo "event=${event}"
             echo "key=${key}"
-            echo "text<<TEXT_EOF"
+            echo "text<<${delimiter}"
             echo "$text"
-            echo "TEXT_EOF"
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Buzz

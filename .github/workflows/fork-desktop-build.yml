@@ -53,6 +53,12 @@ on:
       download_links:
         description: Markdown list of installer links, one per line.
         value: ${{ jobs.publish.outputs.download_links }}
+      release_url:
+        description: GitHub release page of this version.
+        value: ${{ jobs.publish.outputs.release_url }}
+      changelog:
+        description: Vietnamese changelog in Markdown. Empty when it could not be written.
+        value: ${{ jobs.publish.outputs.changelog }}
 
 concurrency:
   group: fork-desktop-build
@@ -486,7 +492,10 @@ jobs:
       version: ${{ needs.setup.outputs.version }}
       download_base_url: ${{ steps.links.outputs.base_url }}
       download_links: ${{ steps.links.outputs.links }}
+      release_url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.setup.outputs.tag }}
+      changelog: ${{ steps.changelog.outputs.text }}
     env:
+      UPSTREAM_URL: https://github.com/getpaseo/paseo.git
       VERSION: ${{ needs.setup.outputs.version }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
       SOURCE_SHA: ${{ needs.setup.outputs.sha }}
@@ -502,6 +511,8 @@ jobs:
             package-lock.json
             scripts
           ref: ${{ needs.setup.outputs.sha }}
+          # The changelog walks the commits since the previous release.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -611,6 +622,48 @@ jobs:
             exit 1
           fi
 
+      # Best effort. The release is already published here, so nothing in the
+      # changelog may fail the job: the script falls back to the raw English
+      # change list when the key is missing or the API call fails, and
+      # continue-on-error covers a crash of the script itself.
+      - name: Write Vietnamese changelog
+        id: changelog
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+        run: |
+          set -euo pipefail
+          previous="$( { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 30 --json tagName --jq '.[].tagName' \
+            | grep '^mf-desktop-v' | grep -vxF "$RELEASE_TAG" | head -n 1; } || true)"
+          echo "Previous release: ${previous:-none}"
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream main || echo "::warning::Could not fetch upstream main; upstream changes are not separated."
+          changelog="${RUNNER_TEMP}/changelog.md"
+          node scripts/fork-release-changelog.mjs \
+            --previous-tag "$previous" --head "$SOURCE_SHA" --version "$VERSION" --out "$changelog"
+          {
+            echo "Fork desktop build ${VERSION} from ${SOURCE_SHA}."
+            echo
+            cat "$changelog"
+          } > "${RUNNER_TEMP}/release-notes.md"
+          delimiter="CHANGELOG_$(openssl rand -hex 8)"
+          {
+            echo "text<<${delimiter}"
+            cat "$changelog"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Add changelog to the release notes
+        if: ${{ steps.changelog.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "${RUNNER_TEMP}/release-notes.md"
+
       # A draft that was never published is invisible to clients; remove it so
       # the same version can be retried.
       - name: Remove unpublished draft release
@@ -660,24 +713,31 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           VERSION: ${{ needs.setup.outputs.version }}
           LINKS: ${{ needs.publish.outputs.download_links }}
+          CHANGELOG: ${{ needs.publish.outputs.changelog }}
+          RELEASE_URL: ${{ needs.publish.outputs.release_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           if [[ "$PUBLISH_RESULT" == "success" ]]; then
             event=release.published
             key=build-published
-            text="Paseo fork ${VERSION} is ready"$'\n'"${LINKS}"$'\n'"Windows and Linux AppImage builds update themselves. macOS: download the DMG and replace Paseo in Applications."
+            text="Paseo fork ${VERSION} is ready"
+            if [[ -n "$CHANGELOG" ]]; then
+              text+=$'\n\n'"${CHANGELOG}"
+            fi
+            text+=$'\n\n'"${LINKS}"$'\n'"Windows and Linux AppImage builds update themselves. macOS: download the DMG and replace Paseo in Applications."$'\n'"Release: ${RELEASE_URL}"
           else
             event=build.failed
             key=build-failed
             text="Paseo fork desktop build failed ${VERSION:+(${VERSION}) }- ${RUN_URL}"
           fi
+          delimiter="TEXT_$(openssl rand -hex 8)"
           {
             echo "event=${event}"
             echo "key=${key}"
-            echo "text<<TEXT_EOF"
+            echo "text<<${delimiter}"
             echo "$text"
-            echo "TEXT_EOF"
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Buzz
