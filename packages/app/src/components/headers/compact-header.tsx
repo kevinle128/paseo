@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { router } from "expo-router";
@@ -13,6 +13,8 @@ import {
   mutedIconColorMapping,
 } from "@/components/ui/icon-button-chrome";
 import { HEADER_INNER_HEIGHT_MOBILE, HEADER_TOP_PADDING_MOBILE } from "@/constants/layout";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
+import { useHeaderMaximizeDoubleClick } from "@/pinned-grid/use-header-maximize-double-click";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 
 const ThemedArrowLeft = withUnistyles(ArrowLeft);
@@ -51,6 +53,10 @@ export function CompactHeader({
   actions,
 }: CompactHeaderProps) {
   const insets = useSafeAreaInsets();
+  const rootRef = useRef<View | null>(null);
+  useHeaderMaximizeDoubleClick(rootRef);
+  // A grid cell has no sidebar toggle: the sidebar is not the cell's.
+  const showNavigation = useWorkspaceGridCell() === null;
   const rootStyle = useMemo(
     () => [
       styles.root,
@@ -65,11 +71,13 @@ export function CompactHeader({
 
   return (
     <IconButtonChromeProvider value="header-island">
-      <View style={rootStyle}>
+      <View ref={rootRef} style={rootStyle}>
         <View style={styles.row}>
-          <View style={styles.island}>
-            {navigation === "menu" ? <SidebarMenuToggle /> : <BackButton onBack={onBack} />}
-          </View>
+          {showNavigation ? (
+            <View style={styles.island}>
+              {navigation === "menu" ? <SidebarMenuToggle /> : <BackButton onBack={onBack} />}
+            </View>
+          ) : null}
           <View style={styles.titleGroup}>
             <CompactHeaderTitle
               loading={loading}

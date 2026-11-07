@@ -13,6 +13,8 @@ import {
   WindowLayoutActions,
 } from "@/window-layout";
 import { IconButtonChromeProvider } from "@/components/ui/icon-button-chrome";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
+import { GridCellMaximizeButton } from "@/pinned-grid/grid-cell-header";
 
 export { MobileWorkspaceTabSwitcher } from "./tab-switcher";
 
@@ -49,6 +51,7 @@ export function CompactWorkspaceHeader({
 }: CompactWorkspaceHeaderProps) {
   const { t } = useTranslation();
   const actionsInBar = resolveWorkspaceActionPlacement(useWindowLayout()) === "vertical-bar";
+  const isGridCell = useWorkspaceGridCell() !== null;
   const projectRow = useMemo(
     () => (
       <WorkspaceHeaderProjectRow
@@ -77,6 +80,18 @@ export function CompactWorkspaceHeader({
     <Fragment key={symbol}>{symbols[symbol]}</Fragment>
   ));
 
+  // A cell narrower than the compact threshold still needs its maximize control, and the
+  // vertical bar only carries the workspace actions, not the cell's.
+  const barActions = actionsInBar ? undefined : actions;
+  const headerActions = isGridCell ? (
+    <>
+      {barActions}
+      <GridCellMaximizeButton />
+    </>
+  ) : (
+    barActions
+  );
+
   return (
     <IconButtonChromeProvider value="header-island">
       {headerVariant === "compact" ? (
@@ -86,7 +101,7 @@ export function CompactWorkspaceHeader({
           titleTestID="workspace-header-title"
           subtitle={projectRow}
           loading={isLoading}
-          actions={actionsInBar ? undefined : actions}
+          actions={headerActions}
         />
       ) : null}
       <WindowLayoutActions active={actionsActive}>{actions}</WindowLayoutActions>

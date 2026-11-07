@@ -1,5 +1,5 @@
 import { ComposerDockBackground } from "@/composer/dock";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,12 +12,8 @@ import {
 } from "@/constants/layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
-import { isWeb } from "@/constants/platform";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
-
-// Controls the header double-click must leave alone, so a double-click on a button does nothing.
-const HEADER_INTERACTIVE_SELECTOR =
-  'button, a, input, textarea, select, [role="button"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
+import { useHeaderMaximizeDoubleClick } from "@/pinned-grid/use-header-maximize-double-click";
 
 interface ScreenHeaderProps {
   left?: ReactNode;
@@ -44,26 +40,8 @@ export function ScreenHeader({
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
   const gridCell = useWorkspaceGridCell();
-  const toggleMaximize = gridCell?.toggleMaximize ?? null;
   const innerRef = useRef<View | null>(null);
-
-  // A grid cell header maximizes the cell on double-click. Native handlers cannot see nested
-  // controls, so the DOM listener skips targets inside interactive elements.
-  useEffect(() => {
-    const node: unknown = innerRef.current;
-    if (!isWeb || !toggleMaximize || !(node instanceof HTMLElement)) {
-      return undefined;
-    }
-    const handleDoubleClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest(HEADER_INTERACTIVE_SELECTOR)) {
-        return;
-      }
-      toggleMaximize();
-    };
-    node.addEventListener("dblclick", handleDoubleClick);
-    return () => node.removeEventListener("dblclick", handleDoubleClick);
-  }, [toggleMaximize]);
+  useHeaderMaximizeDoubleClick(innerRef);
 
   // Only add extra padding on mobile for better touch targets; on desktop, only use safe area insets
   const topPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
