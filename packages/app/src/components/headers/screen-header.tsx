@@ -1,5 +1,5 @@
 import { ComposerDockBackground } from "@/composer/dock";
-import { useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { View, type StyleProp, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,8 +12,12 @@ import {
 } from "@/constants/layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+import { isWeb } from "@/constants/platform";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
-import { useHeaderMaximizeDoubleClick } from "@/pinned-grid/use-header-maximize-double-click";
+import {
+  HEADER_INTERACTIVE_SELECTOR,
+  useHeaderMaximizeDoubleClick,
+} from "@/pinned-grid/use-header-maximize-double-click";
 
 interface ScreenHeaderProps {
   left?: ReactNode;
@@ -42,6 +46,24 @@ export function ScreenHeader({
   const gridCell = useWorkspaceGridCell();
   const innerRef = useRef<View | null>(null);
   useHeaderMaximizeDoubleClick(innerRef);
+  const beginHeaderDrag = gridCell?.beginHeaderDrag ?? null;
+
+  // The press is observed, never prevented, so the header keeps its native double-click.
+  useEffect(() => {
+    const node: unknown = innerRef.current;
+    if (!isWeb || !beginHeaderDrag || !(node instanceof HTMLElement)) {
+      return undefined;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(HEADER_INTERACTIVE_SELECTOR)) {
+        return;
+      }
+      beginHeaderDrag(event);
+    };
+    node.addEventListener("pointerdown", handlePointerDown);
+    return () => node.removeEventListener("pointerdown", handlePointerDown);
+  }, [beginHeaderDrag]);
 
   // Only add extra padding on mobile for better touch targets; on desktop, only use safe area insets
   const topPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;

@@ -462,6 +462,12 @@ export const ko: TranslationResources = {
     gridCell: {
       maximize: "셀 최대화",
       restore: "셀 복원",
+      addPin: {
+        label: "워크스페이스 고정",
+        searchPlaceholder: "고정할 워크스페이스 검색",
+        noMatch: "일치하는 워크스페이스가 없습니다",
+        allPinned: "모든 워크스페이스가 고정되어 있습니다",
+      },
     },
     route: {
       loading: "워크스페이스 불러오는 중",

@@ -36,6 +36,8 @@ export interface BuildVisibleComboboxOptionsInput {
   customValuePrefix: string;
   customValueDescription?: string;
   customValueKind?: ComboboxOptionKind;
+  /** Keep the given option order while filtering, for options the caller has grouped. */
+  preserveOptionOrder?: boolean;
 }
 
 export function shouldShowCustomComboboxOption(input: {
@@ -74,11 +76,22 @@ export function filterAndRankComboboxOptions(
   return scored.map((entry) => entry.opt);
 }
 
+/** Same match as the ranked filter, but the options keep the order they were given in. */
+export function filterComboboxOptionsInOrder(
+  options: ComboboxOptionModel[],
+  search: string,
+): ComboboxOptionModel[] {
+  if (!search) return options;
+  return options.filter((opt) => scoreOption(opt, search) !== null);
+}
+
 export function buildVisibleComboboxOptions(
   input: BuildVisibleComboboxOptionsInput,
 ): ComboboxOptionModel[] {
   const normalizedSearch = input.searchable ? input.searchQuery.trim().toLowerCase() : "";
-  const filteredOptions = filterAndRankComboboxOptions(input.options, normalizedSearch);
+  const filteredOptions = input.preserveOptionOrder
+    ? filterComboboxOptionsInOrder(input.options, normalizedSearch)
+    : filterAndRankComboboxOptions(input.options, normalizedSearch);
 
   const sanitizedSearchValue = input.searchQuery.trim();
   const showCustomOption = shouldShowCustomComboboxOption({

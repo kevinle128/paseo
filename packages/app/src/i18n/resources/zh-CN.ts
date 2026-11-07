@@ -461,6 +461,12 @@ export const zhCN: TranslationResources = {
     gridCell: {
       maximize: "最大化单元格",
       restore: "还原单元格",
+      addPin: {
+        label: "置顶工作区",
+        searchPlaceholder: "搜索要置顶的工作区",
+        noMatch: "没有匹配的工作区",
+        allPinned: "所有工作区都已置顶",
+      },
     },
     route: {
       loading: "正在加载 workspace",

@@ -17,6 +17,8 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 }));
 
 import { useSessionStore } from "@/stores/session-store";
+import { usePinnedOrderSeedStore } from "@/stores/pinned-order-seed-store";
+import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import type { SessionState } from "@/stores/session-store";
 import {
@@ -44,6 +46,27 @@ function setSessions(sessions: Record<string, SessionState>) {
 describe("pinned workspace selections", () => {
   beforeEach(() => {
     useSessionStore.setState({ sessions: {} });
+    usePinnedOrderSeedStore.setState({ seeded: false });
+    useSidebarOrderStore.setState({ pinnedWorkspaceOrder: [] });
+  });
+
+  it("puts a new pin last once the order is seeded, and first before", () => {
+    setSessions({
+      "host-a": session([
+        workspace("a1", "2026-01-01"),
+        workspace("a2", "2026-01-02"),
+        workspace("a3", "2026-01-03"),
+      ]),
+    });
+    useSidebarOrderStore.setState({ pinnedWorkspaceOrder: ["host-a:a2", "host-a:a1"] });
+
+    const unseeded = renderHook(() => usePinnedWorkspaceSelections());
+    expect(unseeded.result.current.map((entry) => entry.workspaceId)).toEqual(["a3", "a2", "a1"]);
+
+    act(() => {
+      usePinnedOrderSeedStore.setState({ seeded: true });
+    });
+    expect(unseeded.result.current.map((entry) => entry.workspaceId)).toEqual(["a2", "a1", "a3"]);
   });
 
   it("lists pinned workspaces across hosts, most recent first, and ignores unpinned ones", () => {

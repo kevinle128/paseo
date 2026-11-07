@@ -77,6 +77,7 @@ function projectionInput(options?: {
       pinnedAtByKey: { [pinned.placement.workspaceKey]: "2026-07-12T12:00:00.000Z" },
     },
     pinnedWorkspaceOrder: [],
+    pinnedOrderRule: "recency" as const,
     workspaceEntriesByKey: new Map([
       [pinned.entry.workspaceKey, pinned.entry],
       [unpinned.entry.workspaceKey, unpinned.entry],
@@ -113,6 +114,34 @@ function twoProjectInput(groupMode: "project" | "status") {
 }
 
 describe("buildSidebarProjection", () => {
+  for (const [rule, expected] of [
+    ["recency", ["second", "first"]],
+    ["append", ["first", "second"]],
+  ] as const) {
+    it(`lists pinned chats with the ${rule} rule`, () => {
+      const first = makeWorkspace("first", "running");
+      const second = makeWorkspace("second", "running");
+      const projection = buildSidebarProjection({
+        ...projectionInput(),
+        projects: [makeProject([first.placement, second.placement])],
+        pinnedKeys: {
+          pinnedWorkspaceKeys: [first.placement.workspaceKey, second.placement.workspaceKey],
+          pinnedAtByKey: {
+            [first.placement.workspaceKey]: "2026-07-12T12:00:00.000Z",
+            [second.placement.workspaceKey]: "2026-07-13T12:00:00.000Z",
+          },
+        },
+        pinnedOrderRule: rule,
+        workspaceEntriesByKey: new Map([
+          [first.entry.workspaceKey, first.entry],
+          [second.entry.workspaceKey, second.entry],
+        ]),
+      });
+
+      expect(projection.pinnedGroups.pinnedChats.map((chat) => chat.workspaceId)).toEqual(expected);
+    });
+  }
+
   // The rule that outlived the bug it was written for: a project icon is fetched per project, so
   // whatever a mode groups by, the rows it produces can only reference projects already covered.
   for (const groupMode of ["project", "status"] as const) {

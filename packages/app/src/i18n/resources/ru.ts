@@ -465,6 +465,12 @@ export const ru: TranslationResources = {
     gridCell: {
       maximize: "Развернуть ячейку",
       restore: "Восстановить ячейку",
+      addPin: {
+        label: "Закрепить рабочее пространство",
+        searchPlaceholder: "Поиск рабочих пространств для закрепления",
+        noMatch: "Нет подходящих рабочих пространств",
+        allPinned: "Все рабочие пространства закреплены",
+      },
     },
     route: {
       loading: "Загрузка рабочего пространства",

@@ -458,6 +458,12 @@ export const en = {
     gridCell: {
       maximize: "Maximize cell",
       restore: "Restore cell",
+      addPin: {
+        label: "Pin a workspace",
+        searchPlaceholder: "Search workspaces to pin",
+        noMatch: "No workspaces match",
+        allPinned: "Every workspace is pinned",
+      },
     },
     route: {
       loading: "Loading workspace",

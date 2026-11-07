@@ -1,6 +1,6 @@
 # Pinned grid
 
-The pinned grid shows every pinned workspace side by side, each cell a full workspace. It exists on web and Electron in a non-compact layout only (`supportsGrid` in `packages/app/src/screens/workspace/workspace-deck.tsx:82`). Native and compact layouts always show one workspace. Read this before touching the workspace deck, `WorkspaceScreen` gates, or anything that subscribes to agent streams.
+The pinned grid shows every pinned workspace side by side, each cell a full workspace. It exists on web and Electron in a non-compact layout only (`supportsGrid` in `packages/app/src/screens/workspace/workspace-deck.tsx:92`). Native and compact layouts always show one workspace. Read this before touching the workspace deck, `WorkspaceScreen` gates, or anything that subscribes to agent streams.
 
 ## The grid is a presentation of the deck, not a route
 
@@ -8,12 +8,12 @@ The grid is a style on the existing workspace deck. The route is still `/h/:serv
 
 A second route or a second deck would mount a workspace twice. Floating panels, keyboard handlers and the document title all assume one live mount per workspace, so duplicates break them. Route ownership is in [expo-router.md](expo-router.md).
 
-- One render loop. `WorkspaceDeck` maps every retained entry once (`workspace-deck.tsx:252-285`) in both presentations. `resolveDeckPresentation` (`packages/app/src/pinned-grid/presentation.ts:26`) only chooses `single` or `grid`.
+- One render loop. `WorkspaceDeck` maps every retained entry once (`workspace-deck.tsx:293`) in both presentations. `resolveDeckPresentation` (`packages/app/src/pinned-grid/presentation.ts:26`) only chooses `single` or `grid`.
 - One stable wrapper per entry. `GridCellFrame` (`packages/app/src/pinned-grid/grid-cell-frame.tsx:35`) switches between `flex: 1` and an absolute rect. Nothing above the workspace changes type, so switching Normal, grid and focus mode never remounts a workspace. `packages/app/e2e/browser/pinned-grid-deck.spec.ts` proves it with DOM marks. Keep that property when you add a wrapper.
-- Each entry reads its own host through `HostRouteProvider` (`workspace-deck.tsx:360`), not the host of the route that renders the deck. `packages/app/e2e/browser/workspace-deck-cross-host-retention.spec.ts` covers a second host.
+- Each entry reads its own host through `HostRouteProvider` (`workspace-deck.tsx:455`), not the host of the route that renders the deck. `packages/app/e2e/browser/workspace-deck-cross-host-retention.spec.ts` covers a second host.
 - The grid shows only while the active workspace is pinned. Opening an unpinned workspace leaves the grid.
 - Unpinning the focused cell keeps the grid. The cell leaves and focus moves to the cell after it in the previous order, or the one before it when it was last (`resolveFocusAfterCellRemoval`, `packages/app/src/pinned-grid/focus-after-removal.ts`). `useFocusAfterCellRemoval` hands the deck that neighbor as the active workspace in the same render, so the single layout never shows, then moves the route with `focusWorkspaceCell`. With no pinned workspace left, the unpinned workspace shows alone.
-- Focus mode shows one cell, but the other pinned cells stay retained so leaving it brings the grid back without a remount (`workspace-deck.tsx:99-114`).
+- Focus mode shows one cell, but the other pinned cells stay retained so leaving it brings the grid back without a remount (`workspace-deck.tsx:118-130`).
 
 ## Workspace presence
 
@@ -25,41 +25,68 @@ Every mounted workspace has a presence (`packages/app/src/screens/workspace/work
 | `reduced` | yes       | no         | Visible or near the viewport. Live, throttled. |
 | `hidden`  | no        | no         | Mounted, drawing nothing.                      |
 
-`isPresented` feeds `RetainedPanel active` (`workspace-deck.tsx:377`), so it decides what renders. `ownsInput` decides who gets keyboard handlers, the document title, and the per-host focused agent and terminal slots. In Normal mode the two are equal, which is why single mode behaves as it did before the grid.
+`isPresented` feeds `RetainedPanel active` (`workspace-deck.tsx:475`), so it decides what renders. `ownsInput` decides who gets keyboard handlers, the document title, and the per-host focused agent and terminal slots. In Normal mode the two are equal, which is why single mode behaves as it did before the grid.
 
 Classify a new gate by what it protects:
 
 - Keeps data live or renders something: read `isPresented`. A reduced cell still needs its terminal stream, its queries and its tab reconcile.
 - Claims something there is one of per window or per host (keyboard, title, focused id, a modal): read `ownsInput`.
 
-`WorkspaceScreen` reads both from one prop (`workspace-screen.tsx:1041-1042`). `terminal-pane.tsx:304` is a gate that needs both.
+`WorkspaceScreen` reads both from one prop (`workspace-screen.tsx:1049-1050`). `terminal-pane.tsx:303` is a gate that needs both.
 
 ## Focus
 
 A click or DOM focus inside a cell focuses it in the same commit, before the next key. `GridCellFrame` listens in the capture phase and never calls `preventDefault`, so the click still reaches its target. A user who clicks a cell and presses Shift+Tab or Escape acts on that cell's agent.
 
-The route follows through `focusWorkspaceCell` (`packages/app/src/stores/navigation-active-workspace-store/navigation.ts:134`), which only moves the route. `navigateToWorkspace` also opens the attention agent's tab and reveals panels, so using it would change what a visible cell shows. A route change from outside the grid (a sidebar click) is mirrored back into the grid state (`packages/app/src/pinned-grid/use-grid-focus.ts:29`).
+The route follows through `focusWorkspaceCell` (`packages/app/src/stores/navigation-active-workspace-store/navigation.ts:115`), which only moves the route. `navigateToWorkspace` also opens the attention agent's tab and reveals panels, so using it would change what a visible cell shows. A sidebar press on a pinned row while a grid mode shows does the same: it focuses the cell and scrolls it into view (`resolveSidebarWorkspacePress`, `packages/app/src/pinned-grid/sidebar-workspace-press.ts:14`), because the full navigation can change what a visible cell shows. Any other route change from outside the grid is mirrored back into the grid state (`packages/app/src/pinned-grid/use-grid-focus.ts:33`).
 
 ### First-click guard
 
 A press that moved focus into a cell only focuses it. The claim lasts for the whole pointer gesture: a key pressed between pointer-down and release does not clear it, so a press that began on an unfocused cell never acts. Keyboard activation acts only in a cell that was already focused. Controls with consequences, permission Allow and Deny, plan approval, and the question card's Dismiss and final Submit, go through `useGuardedCellPress` and act on the next press (`packages/app/src/pinned-grid/cell-press-guard.ts`, callers in `packages/app/src/agent-stream/view.tsx` and `packages/app/src/components/question-form-card.tsx`). Without it, a click that only meant to select a cell could approve a tool call or answer a question. Wrap any new consequential control the same way.
 
-The slim send button of an idle cell composer is not one of these controls in practice. The line is slim only while there is nothing to send, so the button is disabled and visual: pressing the line expands the composer, and sending happens from the full composer. The button still uses the guard so a future enabled state cannot send on a focusing click.
+In a grid cell the composer never takes focus on its own and never restores it, maximized or not (`isGridCell`, `packages/app/src/pinned-grid/composer-density.ts:16`). A slim composer expands only on a press in its text input or on keyboard focus. A click that only selects a cell must not move the caret or resize the cell, and maximizing then restoring must not leave a full composer behind.
+
+The slim send button is disabled and visual: the line is slim only while there is nothing to send. It still uses the guard so a future enabled state cannot send on a focusing click.
+
+## Order
+
+Grid and sidebar Pinned section list pinned workspaces in one order, `useSidebarOrderStore` (`packages/app/src/stores/sidebar-order-store.ts:155`), read through `orderPinnedWorkspaceKeys` (`packages/app/src/pinned-grid/pinned-order.ts:29`). It is client-local: it spans hosts, no daemon owns it, and grid mode is a per-device choice, so it is not synced across devices.
+
+- Native keeps the old rule, newest pin first with the stored order laid over it. Pins with the same `pinnedAt` are ordered by key.
+- Web and Electron use "new pins last" at every width: the stored keys that are still pinned, then the other pins oldest first, ties by key. The rule follows the platform, never the compact breakpoint, because a rule tied to the breakpoint would reorder the sidebar when the window resizes (`resolvePinnedOrderRule`, `pinned-order.ts:15`).
+- A first-run seed freezes the order the user sees today, so switching rules moves no row (`packages/app/src/pinned-grid/pinned-order-seed.ts`). The seed flag lives in its own store (`packages/app/src/stores/pinned-order-seed-store.ts`), not in the order store, so the order store keeps its version and a downgrade loses nothing. One condition gates every seed path, the reconciler and the local pin or unpin: each registered host must have a loaded directory, either a live snapshot or one restored from cache. A host that is offline without a cache blocks the seed, and a local pin or unpin then drops its key without seeding. The seed keeps stored keys it does not know and is the only writer of the flag.
+- Prune removes only keys whose workspace is loaded and unpinned, because "hydrated" can mean one merged workspace. A device that was offline for both an unpin and a re-pin keeps the old slot.
+- A drop merges the new order with the stored remainder, so keys of an offline host survive (`packages/app/src/pinned-grid/use-grid-cell-slots.ts:37`).
+
+Pins that exist when the app loads are seeded newest first. A test that needs a known order pins after the app loaded.
+
+## Add cell and reorder
+
+The "+" tile is the last slot while the grid shows. It is a geometry slot, not an entry, so retention, presence, focus and the dormant layer never see it. It does not show with no pins, and it is hidden while a cell is maximized (`GridDeckTail`, `workspace-deck.tsx:366`).
+
+The picker is `Combobox` with `preserveOptionOrder`, so the list keeps the sidebar's project grouping (`packages/app/src/pinned-grid/add-pin-picker.tsx`). Its content mounts only while open, because the sidebar list hook keeps projecting while mounted, even when disabled. Combobox positions the popover once and does not follow scrolling, so the picker closes when the grid scrolls, stays open when the cell list changes (a pin made on another device) so the search is kept, and anchors to a strip near the top of the tile, which keeps the list inside the window for a tile in the last row. Focus after a pick waits for the pin to show up and yields to any focus change the user makes first (`packages/app/src/pinned-grid/pending-pin-focus.ts`).
+
+A header drag reorders cells (`packages/app/src/pinned-grid/use-grid-reorder-drag.ts`):
+
+- Mouse only, past a 6 px threshold (`HEADER_DRAG_THRESHOLD_PX`), so a double-click still maximizes. The header press is observed and never prevented.
+- One `cancel()` serves every exit: pointer cancel, lost capture, window blur, the cell leaving the grid, unmount and Escape. Add new exits there.
+- The preview changes slots only. The store is written once, on drop, so the sidebar updates on drop and not during the drag. A drop that changes nothing writes nothing.
+- The click that ends a drag is swallowed, so releasing over a control does not press it.
 
 ## Fidelity of a reduced cell
 
 A reduced cell is not paced and not live per event. Two rules apply.
 
 - The gate is inside the selector. `useFidelityGatedSelector` (`packages/app/src/agent-stream/use-agent-stream-tail.ts:15`) returns the last delivered value, so store writes schedule no render at all. A gate in a component would still pay the selector and the render. Gate new per-event subscriptions the same way. Subscriptions that change per turn or per permission are not gated, so permission cards never lag.
-- One clock serves every reduced cell (`packages/app/src/pinned-grid/reduced-fidelity-clock.ts:14`): a 250 ms period cut into slots, so one wake renders one or two cells instead of all of them. The clock has no timer while no cell listens.
+- One clock serves every reduced cell (`packages/app/src/pinned-grid/reduced-fidelity-clock.ts:15`): a 250 ms period cut into slots, so one wake renders one or two cells instead of all of them. The clock has no timer while no cell listens.
 
-`useRevealedText` shows committed text whole in a reduced cell (`packages/app/src/hooks/use-revealed-text.ts:29`), because a paced reveal needs a frame loop per cell. How the pacing works is in [agent-stream-performance.md](agent-stream-performance.md).
+`useRevealedText` shows committed text whole in a reduced cell (`packages/app/src/hooks/use-revealed-text.ts:28`), because a paced reveal needs a frame loop per cell. How the pacing works is in [agent-stream-performance.md](agent-stream-performance.md).
 
 A cell is `reduced` inside the viewport plus a 25% margin and turns `hidden` after 2 s off screen (`packages/app/src/pinned-grid/cell-presence.ts:5-7`). The delay stops scroll thrash from tearing down streams. The scroll offset is never React state; presences recompute on one frame-throttled handler.
 
 ## Hidden cells and the timeline
 
-A hidden cell releases its chats from the timeline subscription so the daemon stops streaming them. `suspendSource` and `resumeSource` (`packages/app/src/timeline/viewed-timeline-sync.ts:344-346`) remove a source's chats from desired membership and bring them back through the normal catch-up. This is the one exception to the rule that an opened chat stays subscribed while it is hidden. The opened set is untouched, so closing a tab still removes a chat for good. A chat another source shows stays subscribed. The cell calls it from `workspace-deck.tsx:348`.
+A hidden cell releases its chats from the timeline subscription so the daemon stops streaming them. `suspendSource` and `resumeSource` (`packages/app/src/timeline/viewed-timeline-sync.ts:345-347`) remove a source's chats from desired membership and bring them back through the normal catch-up. This is the one exception to the rule that an opened chat stays subscribed while it is hidden. The opened set is untouched, so closing a tab still removes a chat for good. A chat another source shows stays subscribed. The cell calls it from `workspace-deck.tsx:443`.
 
 The set a cell suspends comes from its pane layout and its sheet tabs (`packages/app/src/pinned-grid/use-cell-timeline-suspension.ts:21`). A chat open only in a sheet still streams, so leaving sheets out leaves a hidden cell subscribed. A hidden cell whose workspace unmounts stays suspended while its dormant card shows. The deck ends that suspension when the cell leaves the grid or the deck unmounts (`useReleaseUnmountedCellSuspensions`). A terminal in a hidden cell releases its output stream through the same presented gate.
 
@@ -71,12 +98,12 @@ A dropped cell draws a dormant card (`packages/app/src/pinned-grid/dormant-cell-
 
 ## Maximize
 
-Maximize is the header button, a header double-click (`packages/app/src/components/headers/screen-header.tsx:50-66`), or `Cmd/Ctrl+Shift+Enter` (`packages/app/src/keyboard/keyboard-shortcuts.ts:1037-1053`). It is not Escape. Escape is `agent.interrupt` (`keyboard-shortcuts.ts:1172-1174`), and a maximized cell is where the user is most likely to be interrupting a running agent. A maximized cell is the only `focused` cell and every other cell is `hidden`.
+Maximize is the header button, a header double-click (`packages/app/src/pinned-grid/use-header-maximize-double-click.ts:14`), or `Cmd/Ctrl+Shift+Enter` (`packages/app/src/keyboard/keyboard-shortcuts.ts:1061-1080`). It is not Escape. Escape stays `agent.interrupt` (`keyboard-shortcuts.ts:1198-1200`), also in a maximized cell, because that is where the user is most likely to be interrupting a running agent. The one exception is a header drag: while it runs, Escape cancels the drag and the cell returns to its slot. The handler outranks the composer's interrupt handler and is enabled only during a drag (`DRAG_CANCEL_PRIORITY`, `packages/app/src/pinned-grid/use-grid-reorder-drag.ts:17`), because a user who holds a cell and presses Escape means the drag. A maximized cell is the only `focused` cell and every other cell is `hidden`.
 
 ## Electron
 
-- A cell header has no `TitlebarDragRegion` (`screen-header.tsx:93`). A drag region would turn every cell header into a window drag handle and make its double-click zoom the window instead of maximizing the cell. The window controls belong to the corner cells (`resolveCellChromeCorners`, `packages/app/src/pinned-grid/grid-layout.ts`).
-- Browser `<webview>` surfaces and the fullscreen composer are fixed-position, so scrolling the grid does not move them. While the grid shows they clip to its viewport and are placed again on every scroll (`packages/app/src/pinned-grid/use-grid-fixed-surfaces.electron.ts:9`). Dimming does not reach a webview, because it sits above the DOM.
+- A cell header has no `TitlebarDragRegion` (`screen-header.tsx:92`). A drag region would turn every cell header into a window drag handle and make its double-click zoom the window instead of maximizing the cell. The window controls belong to the corner cells (`resolveCellChromeCorners`, `packages/app/src/pinned-grid/grid-layout.ts`).
+- Browser `<webview>` surfaces and the fullscreen composer are fixed-position, so scrolling the grid does not move them. While the grid shows they clip to its viewport and are placed again on every scroll (`packages/app/src/pinned-grid/use-grid-fixed-surfaces.electron.ts:13`). Dimming does not reach a webview, because it sits above the DOM.
 
 ## Performance
 

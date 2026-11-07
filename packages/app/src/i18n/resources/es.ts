@@ -466,6 +466,12 @@ export const es: TranslationResources = {
     gridCell: {
       maximize: "Maximizar celda",
       restore: "Restaurar celda",
+      addPin: {
+        label: "Anclar un espacio de trabajo",
+        searchPlaceholder: "Buscar espacios de trabajo para anclar",
+        noMatch: "Ningún espacio de trabajo coincide",
+        allPinned: "Todos los espacios de trabajo están anclados",
+      },
     },
     route: {
       loading: "Cargando espacio de trabajo",

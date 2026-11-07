@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import type { GestureType } from "react-native-gesture-handler";
-import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
+import { useSidebarWorkspacePress } from "@/pinned-grid/use-sidebar-workspace-press";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { type SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { StatusBucket } from "@/hooks/sidebar-status-view-model";
@@ -571,10 +571,15 @@ const StatusWorkspaceRow = memo(function StatusWorkspaceRow({
     activeWorkspaceSelection?.serverId === workspace.serverId &&
     activeWorkspaceSelection?.workspaceId === workspace.workspaceId;
 
+  const pressWorkspace = useSidebarWorkspacePress();
   const handlePress = useCallback(() => {
     if (!workspace.serverId) return;
-    navigateToWorkspace({ serverId: workspace.serverId, workspaceId: workspace.workspaceId });
-  }, [workspace.serverId, workspace.workspaceId]);
+    pressWorkspace({
+      serverId: workspace.serverId,
+      workspaceId: workspace.workspaceId,
+      pinnedAt: workspace.pinnedAt,
+    });
+  }, [pressWorkspace, workspace.pinnedAt, workspace.serverId, workspace.workspaceId]);
 
   return (
     <StatusWorkspaceRowWithMenu

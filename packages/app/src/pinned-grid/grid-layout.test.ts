@@ -3,6 +3,7 @@ import {
   resolveCellChromeCorners,
   resolveGridCellPresence,
   resolveGridFocusedKey,
+  resolveGridSlots,
   resolveScrollToCell,
 } from "./grid-layout";
 
@@ -85,5 +86,47 @@ describe("resolveCellChromeCorners", () => {
 
   it("gives a maximized cell both corners", () => {
     expect(resolveCellChromeCorners({ index: 4, columns: 2, isMaximized: true })).toBe("both");
+  });
+});
+
+describe("resolveGridSlots", () => {
+  const cellKeys = ["s:a", "s:b", "s:c"];
+
+  it("uses committed indices and no drop slot without a preview", () => {
+    const slots = resolveGridSlots({ cellKeys, previewOrder: null });
+    expect([...slots.slotIndexByKey]).toEqual([
+      ["s:a", 0],
+      ["s:b", 1],
+      ["s:c", 2],
+    ]);
+    expect(slots.dropSlotIndex).toBeNull();
+  });
+
+  it("shifts the other cells and reports the dragged cell's slot", () => {
+    const slots = resolveGridSlots({
+      cellKeys,
+      previewOrder: ["s:b", "s:c", "s:a"],
+      draggedKey: "s:a",
+    });
+    expect(slots.slotIndexByKey.get("s:a")).toBe(2);
+    expect(slots.slotIndexByKey.get("s:b")).toBe(0);
+    expect(slots.slotIndexByKey.get("s:c")).toBe(1);
+    expect(slots.dropSlotIndex).toBe(2);
+  });
+
+  it("points the drop slot at the committed slot before the first move", () => {
+    const slots = resolveGridSlots({ cellKeys, previewOrder: null, draggedKey: "s:b" });
+    expect(slots.dropSlotIndex).toBe(1);
+  });
+
+  it("keeps the committed index of a key the preview does not name", () => {
+    const slots = resolveGridSlots({
+      cellKeys,
+      previewOrder: ["s:b", "s:a"],
+      draggedKey: "s:a",
+    });
+    expect(slots.slotIndexByKey.get("s:c")).toBe(2);
+    expect(slots.slotIndexByKey.get("s:b")).toBe(0);
+    expect(slots.slotIndexByKey.get("s:a")).toBe(1);
   });
 });

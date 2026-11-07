@@ -5,9 +5,12 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
  * scrolled, so they recompute their rect the way they do on resize. The offset is never React
  * state: a re-render per scroll frame would re-render every cell.
  */
+export type GridSignalReason = "scroll" | "layout";
+
 export interface GridScrollSignal {
-  subscribe(listener: () => void): () => void;
-  notify(): void;
+  subscribe(listener: (reason: GridSignalReason) => void): () => void;
+  /** `scroll` is the default. `layout` means cells moved or a drag frame ran, not that the grid scrolled. */
+  notify(reason?: GridSignalReason): void;
   /** The scrolling grid element. Fixed-position surfaces clip themselves to its visible area. */
   setViewport(element: HTMLElement | null): void;
   getViewportRect(): GridViewportRect | null;
@@ -21,7 +24,7 @@ export interface GridViewportRect {
 }
 
 export function createGridScrollSignal(): GridScrollSignal {
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(reason: GridSignalReason) => void>();
   let viewport: HTMLElement | null = null;
   return {
     subscribe(listener) {
@@ -30,9 +33,9 @@ export function createGridScrollSignal(): GridScrollSignal {
         listeners.delete(listener);
       };
     },
-    notify() {
+    notify(reason = "scroll") {
       for (const listener of listeners) {
-        listener();
+        listener(reason);
       }
     },
     setViewport(element) {

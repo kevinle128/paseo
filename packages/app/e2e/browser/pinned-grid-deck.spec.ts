@@ -76,6 +76,23 @@ function cellLocator(page: Page, serverId: string, workspaceId: string) {
   return page.getByTestId(`pinned-grid-cell-${serverId}:${workspaceId}`);
 }
 
+// The cells in slot order, read from where they are drawn: DOM order is not slot order.
+async function readCellOrder<T extends { workspaceId: string }>(
+  page: Page,
+  serverId: string,
+  workspaces: T[],
+): Promise<T[]> {
+  const placed = await Promise.all(
+    workspaces.map(async (workspace) => {
+      const box = await cellLocator(page, serverId, workspace.workspaceId).boundingBox();
+      if (!box) throw new Error(`no box for cell ${workspace.workspaceId}`);
+      return { workspace, x: box.x, y: box.y };
+    }),
+  );
+  placed.sort((a, b) => a.y - b.y || a.x - b.x);
+  return placed.map((entry) => entry.workspace);
+}
+
 test.describe("Pinned grid in the workspace deck", () => {
   test.describe.configure({ timeout: 240_000 });
 
@@ -202,13 +219,15 @@ test.describe("Pinned grid in the workspace deck", () => {
     const workspaces = [first, second, third];
 
     try {
-      // Cells run from the most recently pinned, so the cell order is third, second, first.
-      for (const workspace of workspaces) {
-        await workspace.client.setWorkspacePinned(workspace.workspaceId, true);
-      }
+      // The app loads before the pins exist, so the one-time order seed has nothing to freeze and
+      // the append rule applies. Pins made in the same millisecond tie, so the test reads the
+      // rendered cell order instead of assuming the pin order.
       await gotoAppShell(page);
       for (const workspace of workspaces) {
         await waitForWorkspaceInSidebar(page, { serverId, workspaceId: workspace.workspaceId });
+      }
+      for (const workspace of workspaces) {
+        await workspace.client.setWorkspacePinned(workspace.workspaceId, true);
       }
       await switchWorkspaceViaSidebar({ page, serverId, workspaceId: second.workspaceId });
       await chooseGridMode(page, "3");
@@ -217,40 +236,46 @@ test.describe("Pinned grid in the workspace deck", () => {
           timeout: 30_000,
         });
       }
+      const ordered = await readCellOrder(page, serverId, workspaces);
+      expect(ordered).toHaveLength(3);
+      const [head, middle, tail] = ordered;
+      if (!head || !middle || !tail) throw new Error("expected three cells");
+
+      await switchWorkspaceViaSidebar({ page, serverId, workspaceId: middle.workspaceId });
       await markNewDeckEntries(page, "grid");
       const entryId = (workspaceId: string) => `workspace-deck-entry-${serverId}:${workspaceId}`;
       await expect(
-        cellLocator(page, serverId, second.workspaceId).getByTestId("pinned-grid-focus-ring"),
+        cellLocator(page, serverId, middle.workspaceId).getByTestId("pinned-grid-focus-ring"),
       ).toHaveCount(1);
 
       // The focused middle cell leaves the grid: the grid stays and the next cell takes focus.
-      await second.client.setWorkspacePinned(second.workspaceId, false);
-      await expect(cellLocator(page, serverId, second.workspaceId)).toHaveCount(0);
-      await expect(cellLocator(page, serverId, third.workspaceId)).toBeVisible();
-      await expect(cellLocator(page, serverId, first.workspaceId)).toBeVisible();
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, first.workspaceId));
+      await middle.client.setWorkspacePinned(middle.workspaceId, false);
+      await expect(cellLocator(page, serverId, middle.workspaceId)).toHaveCount(0);
+      await expect(cellLocator(page, serverId, head.workspaceId)).toBeVisible();
+      await expect(cellLocator(page, serverId, tail.workspaceId)).toBeVisible();
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, tail.workspaceId));
       await expect(
-        cellLocator(page, serverId, first.workspaceId).getByTestId("pinned-grid-focus-ring"),
+        cellLocator(page, serverId, tail.workspaceId).getByTestId("pinned-grid-focus-ring"),
       ).toHaveCount(1);
       await expect(
-        cellLocator(page, serverId, third.workspaceId).getByTestId("pinned-grid-focus-ring"),
+        cellLocator(page, serverId, head.workspaceId).getByTestId("pinned-grid-focus-ring"),
       ).toHaveCount(0);
       await expectEntriesKeepMarks(page, {
-        [entryId(third.workspaceId)]: "grid",
-        [entryId(first.workspaceId)]: "grid",
+        [entryId(head.workspaceId)]: "grid",
+        [entryId(tail.workspaceId)]: "grid",
       });
 
       // The last cell has no cell after it, so focus goes to the one before.
-      await first.client.setWorkspacePinned(first.workspaceId, false);
-      await expect(cellLocator(page, serverId, first.workspaceId)).toHaveCount(0);
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, third.workspaceId));
-      await expect(cellLocator(page, serverId, third.workspaceId)).toBeVisible();
+      await tail.client.setWorkspacePinned(tail.workspaceId, false);
+      await expect(cellLocator(page, serverId, tail.workspaceId)).toHaveCount(0);
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, head.workspaceId));
+      await expect(cellLocator(page, serverId, head.workspaceId)).toBeVisible();
 
       // No pinned workspace is left, so the workspace shows alone.
-      await third.client.setWorkspacePinned(third.workspaceId, false);
-      await expect(cellLocator(page, serverId, third.workspaceId)).toHaveCount(0);
-      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, third.workspaceId));
-      await expectEntriesKeepMarks(page, { [entryId(third.workspaceId)]: "grid" });
+      await head.client.setWorkspacePinned(head.workspaceId, false);
+      await expect(cellLocator(page, serverId, head.workspaceId)).toHaveCount(0);
+      await expectAppRoute(page, buildHostWorkspaceRoute(serverId, head.workspaceId));
+      await expectEntriesKeepMarks(page, { [entryId(head.workspaceId)]: "grid" });
     } finally {
       for (const workspace of workspaces.toReversed()) {
         await workspace.cleanup();

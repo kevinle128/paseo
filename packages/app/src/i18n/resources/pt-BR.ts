@@ -465,6 +465,12 @@ export const ptBR: TranslationResources = {
     gridCell: {
       maximize: "Maximizar célula",
       restore: "Restaurar célula",
+      addPin: {
+        label: "Fixar um workspace",
+        searchPlaceholder: "Pesquisar workspaces para fixar",
+        noMatch: "Nenhum workspace corresponde",
+        allPinned: "Todos os workspaces estão fixados",
+      },
     },
     route: {
       loading: "Carregando workspace",

@@ -86,3 +86,38 @@ export function resolveCellChromeCorners(input: {
   }
   return topRight ? "top-right" : "none";
 }
+
+export interface GridSlots {
+  /** Geometry slot of each cell key. */
+  slotIndexByKey: Map<string, number>;
+  /** Slot the dragged cell would take on drop, or null when nothing is dragged. */
+  dropSlotIndex: number | null;
+}
+
+/**
+ * Assigns a geometry slot to every cell. A preview order moves cells between slots only; a key
+ * that the preview does not name keeps its committed slot, so no cell ever lacks a rect.
+ */
+export function resolveGridSlots(input: {
+  cellKeys: readonly string[];
+  previewOrder: readonly string[] | null;
+  draggedKey?: string | null;
+}): GridSlots {
+  const { cellKeys, previewOrder, draggedKey } = input;
+  const slotIndexByKey = new Map(cellKeys.map((key, index) => [key, index]));
+  if (previewOrder) {
+    applyPreview(slotIndexByKey, previewOrder);
+  }
+  const dropped = draggedKey ? slotIndexByKey.get(draggedKey) : undefined;
+  return { slotIndexByKey, dropSlotIndex: dropped ?? null };
+}
+
+function applyPreview(slotIndexByKey: Map<string, number>, previewOrder: readonly string[]) {
+  let slot = 0;
+  for (const key of previewOrder) {
+    if (slotIndexByKey.has(key)) {
+      slotIndexByKey.set(key, slot);
+      slot += 1;
+    }
+  }
+}

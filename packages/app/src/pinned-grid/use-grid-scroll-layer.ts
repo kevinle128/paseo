@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { View } from "react-native";
+import { subscribeCellReveal } from "./cell-reveal-request";
 import type { GridCellRect } from "./geometry";
 import { resolveScrollToCell } from "./grid-layout";
 import type { GridScrollSignal } from "./grid-scroll-signal";
@@ -65,6 +66,32 @@ export function useGridScrollLayer(input: {
     node.scrollTop = maximizedKey !== null ? 0 : savedScrollTopRef.current;
   }, [deckRef, isGrid, maximizedKey]);
 
+  const scrollCellIntoView = useCallback(
+    (key: string) => {
+      const node: unknown = deckRef.current;
+      if (!(node instanceof HTMLElement)) return;
+      const rect = cellRectsRef.current.get(key);
+      if (!rect) return;
+      const target = resolveScrollToCell({
+        cellTop: rect.y,
+        cellHeight: rect.height,
+        scrollTop: node.scrollTop,
+        viewportHeight: viewportHeightRef.current,
+      });
+      if (target !== null) {
+        node.scrollTop = target;
+      }
+    },
+    [deckRef],
+  );
+
+  useEffect(() => {
+    if (!isGrid) return undefined;
+    return subscribeCellReveal((key) => {
+      if (!isMaximizedRef.current) scrollCellIntoView(key);
+    });
+  }, [isGrid, scrollCellIntoView]);
+
   useEffect(() => {
     const node: unknown = deckRef.current;
     if (!isGrid || isMaximizedRef.current || activeKey === null || !(node instanceof HTMLElement)) {
@@ -76,18 +103,6 @@ export function useGridScrollLayer(input: {
       gridFocusedKeyRef.current = null;
       return;
     }
-    const rect = cellRectsRef.current.get(activeKey);
-    if (!rect) {
-      return;
-    }
-    const target = resolveScrollToCell({
-      cellTop: rect.y,
-      cellHeight: rect.height,
-      scrollTop: node.scrollTop,
-      viewportHeight: viewportHeightRef.current,
-    });
-    if (target !== null) {
-      node.scrollTop = target;
-    }
-  }, [activeKey, deckRef, gridFocusedKeyRef, isGrid]);
+    scrollCellIntoView(activeKey);
+  }, [activeKey, deckRef, gridFocusedKeyRef, isGrid, scrollCellIntoView]);
 }

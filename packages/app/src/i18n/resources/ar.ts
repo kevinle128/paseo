@@ -461,6 +461,12 @@ export const ar: TranslationResources = {
     gridCell: {
       maximize: "تكبير الخلية",
       restore: "استعادة الخلية",
+      addPin: {
+        label: "تثبيت مساحة عمل",
+        searchPlaceholder: "ابحث عن مساحات عمل لتثبيتها",
+        noMatch: "لا توجد مساحات عمل مطابقة",
+        allPinned: "جميع مساحات العمل مثبّتة",
+      },
     },
     route: {
       loading: "جارٍ تحميل مساحة العمل",
