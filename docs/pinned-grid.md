@@ -13,7 +13,7 @@ A second route or a second deck would mount a workspace twice. Floating panels, 
 - Each entry reads its own host through `HostRouteProvider` (`workspace-deck.tsx:455`), not the host of the route that renders the deck. `packages/app/e2e/browser/workspace-deck-cross-host-retention.spec.ts` covers a second host.
 - The grid shows only while the active workspace is pinned. Opening an unpinned workspace leaves the grid.
 - Unpinning the focused cell keeps the grid. The cell leaves and focus moves to the cell after it in the previous order, or the one before it when it was last (`resolveFocusAfterCellRemoval`, `packages/app/src/pinned-grid/focus-after-removal.ts`). `useFocusAfterCellRemoval` hands the deck that neighbor as the active workspace in the same render, so the single layout never shows, then moves the route with `focusWorkspaceCell`. With no pinned workspace left, the unpinned workspace shows alone.
-- Focus mode shows one cell, but the other pinned cells stay retained so leaving it brings the grid back without a remount (`workspace-deck.tsx:111-120`).
+- Focus mode shows one cell, but the other pinned cells stay retained so leaving it brings the grid back without a remount (`workspace-deck.tsx:118-130`).
 
 ## Workspace presence
 
@@ -52,7 +52,7 @@ The slim send button is disabled and visual: the line is slim only while there i
 
 Grid and sidebar Pinned section list pinned workspaces in one order, `useSidebarOrderStore` (`packages/app/src/stores/sidebar-order-store.ts:155`), read through `orderPinnedWorkspaceKeys` (`packages/app/src/pinned-grid/pinned-order.ts:29`). It is client-local: it spans hosts, no daemon owns it, and grid mode is a per-device choice, so it is not synced across devices.
 
-- Native keeps the old rule, newest pin first with the stored order laid over it.
+- Native keeps the old rule, newest pin first with the stored order laid over it. Pins with the same `pinnedAt` are ordered by key.
 - Web and Electron use "new pins last" at every width: the stored keys that are still pinned, then the other pins oldest first, ties by key. The rule follows the platform, never the compact breakpoint, because a rule tied to the breakpoint would reorder the sidebar when the window resizes (`resolvePinnedOrderRule`, `pinned-order.ts:15`).
 - A first-run seed freezes the order the user sees today, so switching rules moves no row (`packages/app/src/pinned-grid/pinned-order-seed.ts`). The seed flag lives in its own store (`packages/app/src/stores/pinned-order-seed-store.ts`), not in the order store, so the order store keeps its version and a downgrade loses nothing. One condition gates every seed path, the reconciler and the local pin or unpin: each registered host must have a loaded directory, either a live snapshot or one restored from cache. A host that is offline without a cache blocks the seed, and a local pin or unpin then drops its key without seeding. The seed keeps stored keys it does not know and is the only writer of the flag.
 - Prune removes only keys whose workspace is loaded and unpinned, because "hydrated" can mean one merged workspace. A device that was offline for both an unpin and a re-pin keeps the old slot.
