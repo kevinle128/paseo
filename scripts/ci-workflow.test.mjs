@@ -690,6 +690,97 @@ process.exit(code);
   }
 });
 
+test("fork macOS build retries only a busy DMG volume and removes partial images first", async (t) => {
+  const workflow = readFileSync(
+    new URL(".github/workflows/fork-desktop-build.yml", repoRoot),
+    "utf8",
+  );
+  const wrapper = workflow
+    .match(/<<'DMGRETRY'\n([\s\S]*?)\n {10}DMGRETRY/)[1]
+    .replace(/^ {10}/gm, "");
+  assert.match(
+    workflow,
+    /"\$retry_bin\/retry-busy-dmg" \\\n {12}npm run build:desktop -- --config electron-builder\.fork\.yml/,
+  );
+  const busy =
+    'dmgbuild.core.DMGError: Unable to detach device cleanly: hdiutil: couldn\'t eject "disk2" - Resource busy';
+  const cases = [
+    { name: "success", outcomes: [0], output: "built", expected: 0, attempts: 1 },
+    { name: "busy then success", outcomes: [1, 0], output: busy, expected: 0, attempts: 2 },
+    { name: "busy every time", outcomes: [1, 1, 1, 0], output: busy, expected: 1, attempts: 3 },
+    {
+      name: "other build error",
+      outcomes: [1, 0],
+      output: "Error: tsc failed",
+      expected: 1,
+      attempts: 1,
+    },
+    {
+      name: "busy resource without the detach error",
+      outcomes: [1, 0],
+      output: "hdiutil: create failed - Resource busy",
+      expected: 1,
+      attempts: 1,
+    },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const directory = mkdtempSync(join(tmpdir(), "dmg-retry-"));
+      try {
+        const statePath = join(directory, "state.json");
+        const releaseDir = join(directory, "release");
+        const build = join(directory, "build");
+        const wrapperPath = join(directory, "retry-busy-dmg");
+        mkdirSync(releaseDir);
+        writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
+        writeFileSync(join(directory, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        writeFileSync(
+          statePath,
+          JSON.stringify({ outcomes: scenario.outcomes, output: scenario.output, calls: [] }),
+        );
+        // Each attempt records which release files it found, then leaves a
+        // partial DMG behind next to the zip that the build always writes.
+        writeFileSync(
+          build,
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const state = JSON.parse(fs.readFileSync(process.env.DMG_STATE, "utf8"));
+state.calls.push(fs.readdirSync(process.env.DMG_RELEASE_DIR).sort());
+const code = state.outcomes.shift();
+for (const name of ["Paseo-x64.dmg", "Paseo-x64.dmg.blockmap", "Paseo-x64.zip"]) {
+  fs.writeFileSync(path.join(process.env.DMG_RELEASE_DIR, name), "partial");
+}
+fs.writeFileSync(process.env.DMG_STATE, JSON.stringify(state));
+console.log(state.output);
+process.exit(code);
+`,
+          { mode: 0o755 },
+        );
+        const result = spawnSync("bash", [wrapperPath, build], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            DMG_RELEASE_DIR: releaseDir,
+            DMG_STATE: statePath,
+            PATH: `${directory}:${process.env.PATH}`,
+          },
+          timeout: 5000,
+        });
+        assert.equal(result.status, scenario.expected, result.stdout + result.stderr);
+        const state = JSON.parse(readFileSync(statePath, "utf8"));
+        assert.deepEqual(state.calls, [
+          [],
+          ...Array.from({ length: scenario.attempts - 1 }, () => ["Paseo-x64.zip"]),
+        ]);
+        assert.match(result.stdout, /built|Resource busy|tsc failed/);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 // GitHub retires macOS 14 on 2026-11-02; brownouts already reject these jobs.
 test("workflows avoid retired macOS 14 runners", () => {
   for (const path of filesUnder(".github/workflows", (candidate) => /\.ya?ml$/.test(candidate))) {

@@ -215,7 +215,36 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=${{ matrix.node_heap_mb }}
         run: |
           set -euo pipefail
-          npm run build:desktop -- --config electron-builder.fork.yml --publish never --mac --${{ matrix.electron_arch }}
+          # Hosted macOS runners sometimes keep the scratch DMG volume busy, so
+          # dmgbuild cannot detach it (actions/runner-images#7522). Only that
+          # failure is retried. The whole build runs again, so the packaged smoke
+          # test also runs again on the app that is shipped.
+          retry_bin="$(mktemp -d)"
+          trap 'rm -rf "$retry_bin"' EXIT
+          cat > "$retry_bin/retry-busy-dmg" <<'DMGRETRY'
+          #!/bin/bash
+          set -uo pipefail
+          output="$(mktemp)"
+          trap 'rm -f "$output"' EXIT
+          for attempt in 1 2 3; do
+            "$@" 2>&1 | tee "$output"
+            status="${PIPESTATUS[0]}"
+            if [[ "$status" == 0 ]]; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]] ||
+              ! grep -Fq "hdiutil: couldn't eject" "$output" ||
+              ! grep -Fq "Resource busy" "$output"; then
+              exit "$status"
+            fi
+            echo "::warning::The DMG volume stayed busy after packaging; building again ($attempt/3)" >&2
+            rm -f "$DMG_RELEASE_DIR"/*.dmg "$DMG_RELEASE_DIR"/*.dmg.blockmap
+            sleep 30
+          done
+          DMGRETRY
+          chmod +x "$retry_bin/retry-busy-dmg"
+          DMG_RELEASE_DIR="${DESKTOP_PACKAGE_PATH}/release" "$retry_bin/retry-busy-dmg" \
+            npm run build:desktop -- --config electron-builder.fork.yml --publish never --mac --${{ matrix.electron_arch }}
 
       # The packaged app reads this file to find its updates. A wrong owner here
       # ships a build that updates from another project.
