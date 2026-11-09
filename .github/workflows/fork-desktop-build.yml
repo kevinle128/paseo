@@ -26,6 +26,11 @@ on:
         required: false
         default: true
         type: boolean
+      prune_dry_run:
+        description: "Build nothing; only log which Wasabi backup versions the prune would keep and delete."
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       version:
@@ -75,7 +80,7 @@ env:
 
 jobs:
   setup:
-    if: github.repository == 'kevinle128/paseo'
+    if: github.repository == 'kevinle128/paseo' && !inputs.prune_dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -740,6 +745,59 @@ jobs:
             echo "::error::Backed up ${uploaded} files, expected ${expected}"
             exit 1
           fi
+
+  # Keeps only the newest versions in the private Wasabi backup. Clients read
+  # updates and installers from GitHub Releases, so nothing they use is deleted;
+  # GitHub releases stay as they are. Only whole version folders go, never a
+  # file at the backup root, and nothing goes unless the new version's backup
+  # is among the newest. A dry run builds nothing and deletes nothing.
+  prune-backups:
+    needs: [setup, publish]
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && (inputs.prune_dry_run || needs.publish.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.WASABI_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WASABI_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ap-southeast-1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      - name: Delete older backup versions
+        id: prune
+        shell: bash
+        env:
+          CURRENT: ${{ needs.setup.outputs.version }}
+          DRY_RUN: ${{ inputs.prune_dry_run && 'true' || 'false' }}
+          KEEP: "3"
+        run: |
+          set -euo pipefail
+          listing="${RUNNER_TEMP}/backup-listing.txt"
+          delete_list="${RUNNER_TEMP}/backup-delete.txt"
+          if ! aws s3 ls "s3://${WASABI_BUCKET}/${WASABI_PREFIX}/" --endpoint-url "$WASABI_ENDPOINT" > "$listing"; then
+            echo "::warning::Could not list the backup; nothing is deleted."
+            exit 0
+          fi
+          args=(--listing "$listing" --keep "$KEEP" --out "$delete_list")
+          if [[ -n "$CURRENT" ]]; then
+            args+=(--current "$CURRENT")
+          fi
+          node scripts/fork-desktop-backup-prune.mjs "${args[@]}"
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run: nothing is deleted."
+            exit 0
+          fi
+          while IFS= read -r version; do
+            [[ -n "$version" ]] || continue
+            aws s3 rm "s3://${WASABI_BUCKET}/${WASABI_PREFIX}/${version}/" --recursive \
+              --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+            echo "Deleted backup ${version}"
+          done < "$delete_list"
 
   # Manual runs report their own result; a calling workflow reports its own.
   notify:

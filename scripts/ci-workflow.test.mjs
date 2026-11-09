@@ -1179,3 +1179,119 @@ test("the build starts only after a sync pull request merge that contains the is
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// Returns the `run: |` script of the step with this id, without its YAML indent.
+function workflowStepScript(source, id) {
+  const lines = source.split("\n");
+  const idLine = lines.findIndex((line) => line.trim() === `id: ${id}`);
+  assert.ok(idLine >= 0, `step ${id} exists`);
+  const runLine = lines.findIndex((line, index) => index > idLine && /^\s+run: \|$/.test(line));
+  const keyIndent = lines[runLine].search(/\S/);
+  const body = [];
+  for (const line of lines.slice(runLine + 1)) {
+    if (line.trim() !== "" && line.search(/\S/) <= keyIndent) break;
+    body.push(line);
+  }
+  const indent = Math.min(...body.filter((line) => line.trim()).map((line) => line.search(/\S/)));
+  return body.map((line) => line.slice(indent)).join("\n");
+}
+
+test("the fork backup prune deletes only old version folders and fails safe", async (t) => {
+  const workflow = readFileSync(
+    new URL(".github/workflows/fork-desktop-build.yml", repoRoot),
+    "utf8",
+  );
+  const prune = workflowStepScript(workflow, "prune");
+  const job = jobBlocks(workflow).get("prune-backups").join("\n");
+  assert.match(job, /continue-on-error: true/);
+  assert.match(
+    job,
+    /if: \$\{\{ always\(\) && github\.repository == 'kevinle128\/paseo' && \(inputs\.prune_dry_run \|\| needs\.publish\.result == 'success'\) \}\}/,
+  );
+  assert.match(
+    jobBlocks(workflow).get("setup").join("\n"),
+    /if: github\.repository == 'kevinle128\/paseo' && !inputs\.prune_dry_run/,
+  );
+  const folders = (names) =>
+    names.map((name) => `                           PRE ${name}/`).join("\n");
+  const versions = [
+    "0.14.0-beta.1.mf.2",
+    "0.15.3-mf.4",
+    "0.15.3-mf.5",
+    "0.15.3-mf.6",
+    "0.15.3-mf.7",
+  ];
+  const prefix = "s3://bucket/paseo-desktop";
+  for (const scenario of [
+    {
+      name: "after a release",
+      listing: folders([...versions, "0.15.3-mf.8"]),
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      removed: ["0.15.3-mf.5", "0.15.3-mf.4", "0.14.0-beta.1.mf.2"],
+    },
+    { name: "dry run", listing: folders(versions), current: "", dryRun: "true", removed: [] },
+    { name: "listing fails", listing: null, current: "0.15.3-mf.8", dryRun: "false", removed: [] },
+    {
+      name: "new backup missing",
+      listing: folders(versions),
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      removed: [],
+    },
+    {
+      name: "root files stay",
+      listing: `${folders(versions.slice(1))}\n2026-11-09 10:00:00 512 latest.yml`,
+      current: "0.15.3-mf.7",
+      dryRun: "false",
+      removed: ["0.15.3-mf.4"],
+    },
+  ]) {
+    await t.test(scenario.name, () => {
+      const directory = mkdtempSync(join(tmpdir(), "backup-prune-"));
+      try {
+        const callsPath = join(directory, "calls.txt");
+        writeFileSync(callsPath, "");
+        writeFileSync(
+          join(directory, "aws"),
+          `#!/bin/bash
+echo "$*" >> "${callsPath}"
+if [[ "$1 $2" == "s3 ls" ]]; then
+  ${scenario.listing === null ? "exit 1" : `cat <<'LISTING'\n${scenario.listing}\nLISTING`}
+fi
+`,
+          { mode: 0o755 },
+        );
+        writeFileSync(join(directory, "prune.sh"), prune);
+        const result = spawnSync("bash", [join(directory, "prune.sh")], {
+          cwd: new URL(".", repoRoot).pathname,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CURRENT: scenario.current,
+            DRY_RUN: scenario.dryRun,
+            KEEP: "3",
+            RUNNER_TEMP: directory,
+            WASABI_BUCKET: "bucket",
+            WASABI_PREFIX: "paseo-desktop",
+            WASABI_ENDPOINT: "https://s3.example.test",
+            PATH: `${directory}:${process.env.PATH}`,
+          },
+          timeout: 10000,
+        });
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const removed = readFileSync(callsPath, "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("s3 rm "))
+          .map((line) => line.split(" ")[2]);
+        assert.deepEqual(
+          removed,
+          scenario.removed.map((version) => `${prefix}/${version}/`),
+        );
+        if (scenario.dryRun === "true") assert.match(result.stdout, /Dry run: nothing is deleted/);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
