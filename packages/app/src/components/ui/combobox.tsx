@@ -89,6 +89,8 @@ export interface ComboboxProps {
   /** Keep the order of `options` while searching, so grouped options stay grouped. */
   preserveOptionOrder?: boolean;
   searchable?: boolean;
+  /** The caller answers the search query itself, so the options are shown as given. */
+  remoteSearch?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -1282,6 +1284,10 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement | null {
   );
 }
 
+function filtersLocally(input: { searchable: boolean; remoteSearch?: boolean }): boolean {
+  return input.searchable && !input.remoteSearch;
+}
+
 export function Combobox({
   options,
   value,
@@ -1290,6 +1296,7 @@ export function Combobox({
   onSearchQueryChange,
   preserveOptionOrder,
   searchable = true,
+  remoteSearch,
   placeholder,
   searchPlaceholder,
   emptyText,
@@ -1449,7 +1456,7 @@ export function Combobox({
       buildVisibleComboboxOptions({
         options,
         searchQuery,
-        searchable,
+        searchable: filtersLocally({ searchable, remoteSearch }),
         allowCustomValue,
         customValuePrefix,
         customValueDescription,
@@ -1463,6 +1470,7 @@ export function Combobox({
       customValuePrefix,
       options,
       preserveOptionOrder,
+      remoteSearch,
       searchQuery,
       searchable,
     ],
