@@ -162,6 +162,9 @@ jobs:
       - name: Verify fork release changelog
         run: node --test scripts/fork-release-changelog.test.mjs
 
+      - name: Verify fork desktop backup prune
+        run: node --test scripts/fork-desktop-backup-prune.test.mjs
+
       - name: Build server stack
         run: npm run build:server
 
