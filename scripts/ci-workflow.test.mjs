@@ -852,3 +852,330 @@ test("Nix desktop packaging resolves the workspace-local builder", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+const forkSyncWorkflowPath = new URL(".github/workflows/fork-upstream-sync.yml", repoRoot);
+const forkResumeWorkflowPath = new URL(".github/workflows/fork-sync-resume.yml", repoRoot);
+
+// Returns the `run: |` script of the step with this id, without its YAML indent.
+function stepRunScript(source, id) {
+  const lines = source.split("\n");
+  const idLine = lines.findIndex((line) => line.trim() === `id: ${id}`);
+  assert.ok(idLine >= 0, `step ${id} exists`);
+  const runLine = lines.findIndex((line, index) => index > idLine && /^\s+run: \|$/.test(line));
+  const keyIndent = lines[runLine].search(/\S/);
+  const body = [];
+  for (const line of lines.slice(runLine + 1)) {
+    if (line.trim() !== "" && line.search(/\S/) <= keyIndent) break;
+    body.push(line);
+  }
+  const indent = Math.min(...body.filter((line) => line.trim()).map((line) => line.search(/\S/)));
+  return body.map((line) => line.slice(indent)).join("\n");
+}
+
+// A fake `gh` that serves canned issues and pull requests and records each call.
+const fakeGh = `#!/usr/bin/env node
+const fs = require("node:fs");
+const state = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, "utf8"));
+const args = process.argv.slice(2);
+state.calls.push(args);
+fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(state));
+if (args[0] === "issue" && args[1] === "list") {
+  console.log(JSON.stringify(state.issues));
+} else if (args[0] === "issue" && args[1] === "view") {
+  console.log(JSON.stringify({ body: state.issues.find((issue) => String(issue.number) === args[2]).body }));
+} else if (args[0] === "api") {
+  console.log(JSON.stringify(state.pulls));
+}
+`;
+
+function runWithFakeGh(script, { issues = [], pulls = [], env = {}, cwd } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "fork-sync-"));
+  try {
+    const statePath = join(directory, "state.json");
+    const outputPath = join(directory, "output.txt");
+    writeFileSync(join(directory, "gh"), fakeGh, { mode: 0o755 });
+    writeFileSync(join(directory, "script.sh"), script);
+    writeFileSync(outputPath, "");
+    writeFileSync(statePath, JSON.stringify({ issues, pulls, calls: [] }));
+    const result = spawnSync("bash", [join(directory, "script.sh")], {
+      cwd: cwd ?? directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...env,
+        FAKE_GH_STATE: statePath,
+        GITHUB_OUTPUT: outputPath,
+        PATH: `${directory}:${process.env.PATH}`,
+      },
+      timeout: 10000,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout + result.stderr,
+      output: readFileSync(outputPath, "utf8"),
+      calls: JSON.parse(readFileSync(statePath, "utf8")).calls,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const realIssue = {
+  number: 21,
+  url: "https://github.com/kevinle128/paseo/issues/21",
+  labels: [{ name: "upstream-sync-conflict" }],
+};
+const testIssue = {
+  number: 22,
+  url: "https://github.com/kevinle128/paseo/issues/22",
+  labels: [{ name: "upstream-sync-conflict" }, { name: "sync-test" }],
+};
+
+test("fork sync test runs need both replay shas and never push or build", async (t) => {
+  const source = readFileSync(forkSyncWorkflowPath, "utf8");
+  const guard = stepRunScript(source, "inputs");
+  const sha = "a".repeat(40);
+  for (const scenario of [
+    { name: "real run", fork: "", upstream: "", status: 0, output: "test=false" },
+    { name: "test run", fork: sha, upstream: "b".repeat(40), status: 0, output: "test=true" },
+    { name: "only one sha", fork: sha, upstream: "", status: 1, output: "" },
+    { name: "short sha", fork: sha.slice(1), upstream: sha, status: 1, output: "" },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(guard, {
+        env: { TEST_FORK_SHA: scenario.fork, TEST_UPSTREAM_SHA: scenario.upstream },
+      });
+      assert.equal(result.status, scenario.status, result.stdout);
+      assert.equal(result.output.trim(), scenario.output);
+    });
+  }
+
+  assert.match(
+    source,
+    /ref: \$\{\{ \(inputs\.test_fork_sha != '' \|\| inputs\.test_upstream_sha != ''\) && github\.sha \|\| 'main' \}\}/,
+  );
+  const merge = stepRunScript(source, "merge");
+  assert.match(merge, /git worktree add --detach "\$\{RUNNER_TEMP\}\/replay" "\$TEST_FORK_SHA"/);
+  const jobs = jobBlocks(source);
+  const sync = jobs.get("sync").join("\n");
+  assert.match(
+    sync,
+    /- name: Push main\n\s+id: push\n\s+if: steps\.merge\.outputs\.changed == 'true' && steps\.inputs\.outputs\.test != 'true'/,
+  );
+  assert.match(
+    jobs.get("build").join("\n"),
+    /needs\.sync\.outputs\.changed == 'true' && inputs\.test_fork_sha == '' && inputs\.test_upstream_sha == ''/,
+  );
+  assert.match(sync, /id: merge\n\s+if: steps\.pause\.outputs\.paused != 'true'/);
+});
+
+test("a scheduled sync pauses for a real conflict issue and a test run only for a test issue", async (t) => {
+  const pause = stepRunScript(readFileSync(forkSyncWorkflowPath, "utf8"), "pause");
+  for (const scenario of [
+    { name: "real issue pauses the schedule", test: "false", issues: [realIssue], paused: 21 },
+    { name: "test issue never pauses the schedule", test: "false", issues: [testIssue], paused: 0 },
+    {
+      name: "test issue pauses a test run",
+      test: "true",
+      issues: [realIssue, testIssue],
+      paused: 22,
+    },
+    { name: "real issue never pauses a test run", test: "true", issues: [realIssue], paused: 0 },
+    { name: "no issue", test: "false", issues: [], paused: 0 },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(pause, {
+        issues: scenario.issues,
+        env: { TEST: scenario.test },
+      });
+      assert.equal(result.status, 0, result.stdout);
+      if (scenario.paused) {
+        assert.equal(result.output.trim(), "paused=true");
+        assert.match(
+          result.stdout,
+          new RegExp(`Sync paused: conflict issue #${scenario.paused} is open`),
+        );
+      } else {
+        assert.equal(result.output.trim(), "");
+      }
+    });
+  }
+});
+
+test("the blocked notice mentions the resolver once, and a test only when asked", async (t) => {
+  const compose = stepRunScript(readFileSync(forkSyncWorkflowPath, "utf8"), "blocked");
+  const mention =
+    "@Tiểu Hổ hãy giải quyết conflict ở issue #21: https://github.com/kevinle128/paseo/issues/21";
+  for (const scenario of [
+    { name: "new real issue", test: "false", created: "true", mention: "", expected: true },
+    { name: "updated real issue", test: "false", created: "false", mention: "", expected: false },
+    { name: "test issue", test: "true", created: "true", mention: "false", expected: false },
+    {
+      name: "test issue that asks",
+      test: "true",
+      created: "true",
+      mention: "true",
+      expected: true,
+    },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(compose, {
+        env: {
+          TEST: scenario.test,
+          TEST_MENTION: scenario.mention,
+          RESOLVER: "Tiểu Hổ",
+          RANGE: "33faacc05..0e4002251 (210 commits)",
+          FILES: "packages/app/src/composer/input/input.tsx",
+          ISSUE_URL: realIssue.url,
+          ISSUE_NUMBER: "21",
+          CREATED: scenario.created,
+          RUN_URL: "https://example.test/run/1",
+        },
+      });
+      assert.equal(result.status, 0, result.stdout);
+      const text = result.output.split("\n").slice(1, -2).join("\n");
+      assert.equal(text.startsWith("[TEST] "), scenario.test === "true");
+      assert.equal(text.split("\n").includes(mention), scenario.expected, text);
+    });
+  }
+});
+
+test("every fork sync notice goes to the configured Buzz route", () => {
+  const source = readFileSync(forkSyncWorkflowPath, "utf8");
+  const notices = source.split("uses: ./.github/actions/buzz-notify").slice(1);
+  assert.equal(notices.length, 3);
+  for (const notice of notices) {
+    assert.match(
+      notice.split("\n      - ")[0],
+      /repository_name: \$\{\{ vars\.BUZZ_REPOSITORY_NAME \|\| 'paseo' \}\}/,
+    );
+  }
+});
+
+test("the build starts only after a sync pull request merge that contains the issue's upstream commit", async (t) => {
+  const workflow = readFileSync(forkResumeWorkflowPath, "utf8");
+  assert.match(workflow, /on:\n  push:\n    branches: \[main\]\n/);
+  const resume = workflow.match(/<<'RESUME'\n([\s\S]*?)\n {10}RESUME/)[1].replace(/^ {10}/gm, "");
+  const repo = mkdtempSync(join(tmpdir(), "fork-resume-repo-"));
+  try {
+    const gitIn = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    gitIn("init", "-q", "-b", "main");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "upstream",
+    );
+    const upstreamSha = gitIn("rev-parse", "HEAD");
+    gitIn("checkout", "-q", "--orphan", "other");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "unrelated",
+    );
+    const unrelatedSha = gitIn("rev-parse", "HEAD");
+    gitIn("checkout", "-q", "main");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "merge",
+    );
+    const mergeSha = gitIn("rev-parse", "HEAD");
+    const block = (sha) =>
+      `<!-- fork-sync-conflict:v1 {"schema":1,"upstream_sha":"${sha}","fork_ref":"main"} -->\n\nreport`;
+    const syncPull = {
+      merged_at: "2026-11-09T00:00:00Z",
+      base: { ref: "main" },
+      head: { ref: "sync/upstream-21-abcdef01" },
+    };
+    const featurePull = { ...syncPull, head: { ref: "feat/pinned-grid" } };
+    const closes = (calls) => calls.filter((call) => call[0] === "issue" && call[1] === "close");
+    const builds = (calls) => calls.filter((call) => call[0] === "workflow" && call[1] === "run");
+    for (const scenario of [
+      {
+        name: "sync merge with the upstream commit",
+        pulls: [syncPull],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [21],
+        built: true,
+      },
+      {
+        name: "feature merge",
+        pulls: [featurePull],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [],
+        built: false,
+      },
+      {
+        name: "squash merge without the upstream commit",
+        pulls: [syncPull],
+        issues: [{ ...realIssue, body: block(unrelatedSha) }],
+        closed: [],
+        built: false,
+      },
+      {
+        name: "test issue is ignored",
+        pulls: [syncPull],
+        issues: [{ ...testIssue, body: block(unrelatedSha) }],
+        closed: [],
+        built: true,
+      },
+      {
+        name: "push without a pull request",
+        pulls: [],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [],
+        built: false,
+      },
+    ]) {
+      await t.test(scenario.name, () => {
+        const result = runWithFakeGh(resume, {
+          cwd: repo,
+          issues: scenario.issues,
+          pulls: scenario.pulls,
+          env: { GH_REPO: "kevinle128/paseo", SHA: mergeSha },
+        });
+        assert.equal(result.status, 0, result.stdout);
+        assert.deepEqual(
+          closes(result.calls).map((call) => Number(call[2])),
+          scenario.closed,
+        );
+        assert.deepEqual(
+          builds(result.calls),
+          scenario.built
+            ? [
+                [
+                  "workflow",
+                  "run",
+                  "fork-desktop-build.yml",
+                  "--ref",
+                  "main",
+                  "-f",
+                  `ref=${mergeSha}`,
+                ],
+              ]
+            : [],
+        );
+      });
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

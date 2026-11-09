@@ -26,7 +26,7 @@ function commitFile(cwd, name, content, message, author = "Dev One") {
 }
 
 // Builds a work tree in the middle of a conflicted merge of `upstream/main`.
-function withConflictedMerge({ lines = 3 } = {}, run) {
+function withConflictedMerge({ lines = 3, fileName = "shared.txt" } = {}, run) {
   const dir = mkdtempSync(path.join(tmpdir(), "paseo-sync-report-"));
   try {
     const upstream = path.join(dir, "upstream");
@@ -34,12 +34,12 @@ function withConflictedMerge({ lines = 3 } = {}, run) {
     git(dir, "init", "-q", "-b", "main", upstream);
     const text = (tag) =>
       Array.from({ length: lines }, (_, i) => `${tag} line ${i}`).join("\n") + "\n";
-    commitFile(upstream, "shared.txt", text("base"), "base");
+    commitFile(upstream, fileName, text("base"), "base");
     commitFile(upstream, "clean.txt", "clean\n", "add clean");
     git(dir, "clone", "-q", upstream, fork);
     git(fork, "remote", "rename", "origin", "upstream");
-    commitFile(fork, "shared.txt", text("fork"), "fork edits shared @octocat #12", "Fork Dev");
-    commitFile(upstream, "shared.txt", text("up"), "upstream edits shared <b>x</b> #34", "Up Dev");
+    commitFile(fork, fileName, text("fork"), "fork edits shared @octocat #12", "Fork Dev");
+    commitFile(upstream, fileName, text("up"), "upstream edits shared <b>x</b> #34", "Up Dev");
     git(fork, "fetch", "-q", "--no-tags", "upstream", "main");
     assert.throws(() =>
       git(
@@ -57,6 +57,14 @@ function withConflictedMerge({ lines = 3 } = {}, run) {
   } finally {
     rmSync(dir, { force: true, recursive: true });
   }
+}
+
+const machineBlockPattern = /^<!-- fork-sync-conflict:v1 (\{.*?\}) -->$/m;
+
+function readMachineBlock(body) {
+  const match = body.match(machineBlockPattern);
+  assert.ok(match, "body has a machine block");
+  return { line: match[0], fields: JSON.parse(match[1]) };
 }
 
 const options = {
@@ -115,5 +123,57 @@ test("refuses to run outside a conflicted merge", () => {
   withConflictedMerge({}, (cwd) => {
     git(cwd, "merge", "--abort");
     assert.throws(() => buildConflictReport({ cwd, ...options }), /No unmerged files/);
+  });
+});
+
+test("report starts with one machine block that holds full shas and the conflicted files", () => {
+  withConflictedMerge({}, (cwd) => {
+    const { body } = buildConflictReport({ cwd, ...options });
+    const { line, fields } = readMachineBlock(body);
+    assert.equal(body.split("\n")[0], line);
+    assert.deepEqual(fields, {
+      schema: 1,
+      label: "upstream-sync-conflict",
+      test: false,
+      upstream_repo: "getpaseo/paseo",
+      upstream_sha: git(cwd, "rev-parse", "upstream/main").trim(),
+      fork_repo: "kevinle128/paseo",
+      fork_ref: "main",
+      fork_sha: git(cwd, "rev-parse", "HEAD").trim(),
+      merge_base: git(cwd, "merge-base", "HEAD", "upstream/main").trim(),
+      files: ["shared.txt"],
+      run_url: "https://example.test/run/1",
+      detected: "2026-11-07",
+    });
+    for (const sha of [fields.upstream_sha, fields.fork_sha, fields.merge_base]) {
+      assert.match(sha, /^[0-9a-f]{40}$/);
+    }
+  });
+});
+
+test("a file name with comment or html markers cannot end the machine block", () => {
+  withConflictedMerge({ fileName: "a-->b<c>.txt" }, (cwd) => {
+    const { body } = buildConflictReport({ cwd, ...options });
+    const { line, fields } = readMachineBlock(body);
+    assert.equal(line.split("-->").length, 2);
+    assert.ok(line.endsWith(" -->"));
+    assert.deepEqual(fields.files, ["a-->b<c>.txt"]);
+  });
+});
+
+test("a test report is marked in the block and the title", () => {
+  withConflictedMerge({}, (cwd) => {
+    const upstreamSha = git(cwd, "rev-parse", "upstream/main").trim();
+    const { title, body } = buildConflictReport({
+      cwd,
+      ...options,
+      upstreamRef: upstreamSha,
+      test: true,
+    });
+    const { fields } = readMachineBlock(body);
+    assert.equal(fields.test, true);
+    assert.equal(fields.upstream_sha, upstreamSha);
+    assert.equal(fields.fork_ref, "main");
+    assert.match(title, /^\[test\] Upstream sync conflict: 1 file /);
   });
 });

@@ -37,6 +37,15 @@ function sanitizeInline(text) {
     .replaceAll(">", "&gt;");
 }
 
+// One HTML comment with the fields that automation reads from the issue body.
+// JSON keeps `<` and `>` as escapes, so no file name can close the comment.
+const MACHINE_BLOCK_PREFIX = "<!-- fork-sync-conflict:v1 ";
+
+function machineBlock(fields) {
+  const json = JSON.stringify(fields).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
+  return `${MACHINE_BLOCK_PREFIX}${json} -->`;
+}
+
 function fenceFor(content) {
   const longestRun = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
   return "`".repeat(Math.max(3, longestRun + 1));
@@ -88,6 +97,7 @@ export function buildConflictReport({
   forkRepo,
   runUrl,
   date = new Date().toISOString().slice(0, 10),
+  test = false,
   maxHunkLines = DEFAULT_MAX_HUNK_LINES,
   maxBodyChars = DEFAULT_MAX_BODY_CHARS,
 }) {
@@ -99,6 +109,8 @@ export function buildConflictReport({
   }
 
   const mergeBase = git(cwd, ["merge-base", "HEAD", upstreamRef]);
+  const upstreamFull = git(cwd, ["rev-parse", upstreamRef]);
+  const forkFull = git(cwd, ["rev-parse", "HEAD"]);
   const oldSha = git(cwd, ["rev-parse", "--short=9", mergeBase]);
   const newSha = git(cwd, ["rev-parse", "--short=9", upstreamRef]);
   const forkSha = git(cwd, ["rev-parse", "--short=9", "HEAD"]);
@@ -110,7 +122,24 @@ export function buildConflictReport({
     listedFiles.push(`- _and ${files.length - MAX_LISTED_FILES} more_`);
   }
 
+  const machine = {
+    schema: 1,
+    label: "upstream-sync-conflict",
+    test,
+    upstream_repo: upstreamRepo,
+    upstream_sha: upstreamFull,
+    fork_repo: forkRepo,
+    fork_ref: "main",
+    fork_sha: forkFull,
+    merge_base: mergeBase,
+    files,
+    run_url: runUrl,
+    detected: date,
+  };
+
   const header = [
+    machineBlock(machine),
+    "",
     "## Upstream sync conflict",
     "",
     `The daily sync could not merge \`${upstreamRepo}\` into the fork. The merge was aborted and nothing was pushed.`,
@@ -211,9 +240,10 @@ export function buildConflictReport({
   ].join("\n");
 
   return {
-    title: `Upstream sync conflict: ${files.length} ${files.length === 1 ? "file" : "files"} (upstream ${newSha})`,
+    title: `${test ? "[test] " : ""}Upstream sync conflict: ${files.length} ${files.length === 1 ? "file" : "files"} (upstream ${newSha})`,
     body,
     files,
+    machine,
   };
 }
 
@@ -225,12 +255,14 @@ if (isMainModule(import.meta.url)) {
       "run-url": { type: "string" },
       repo: { type: "string" },
       date: { type: "string" },
+      "upstream-ref": { type: "string" },
+      test: { type: "boolean" },
     },
   });
   for (const key of ["body-out", "title-out", "run-url", "repo"]) {
     if (!values[key]) {
       console.error(
-        "Usage: node scripts/fork-sync-conflict-report.mjs --body-out <file> --title-out <file> --run-url <url> --repo <owner/name> [--date YYYY-MM-DD]",
+        "Usage: node scripts/fork-sync-conflict-report.mjs --body-out <file> --title-out <file> --run-url <url> --repo <owner/name> [--date YYYY-MM-DD] [--upstream-ref <ref>] [--test]",
       );
       process.exit(2);
     }
@@ -239,6 +271,8 @@ if (isMainModule(import.meta.url)) {
     forkRepo: values.repo,
     runUrl: values["run-url"],
     date: values.date,
+    upstreamRef: values["upstream-ref"],
+    test: values.test === true,
   });
   fs.writeFileSync(values["body-out"], report.body);
   fs.writeFileSync(values["title-out"], report.title);
