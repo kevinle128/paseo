@@ -2291,7 +2291,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             fullscreen={isFullscreen}
             compact={isCompact}
             onRenderedLinesChange={setRenderedLines}
-            focusHintVisible={!isFullscreen && !isMinimal && isWeb && !isInputFocused && !hasLiveText}
+            focusHintVisible={
+              !isFullscreen && !isMinimal && isWeb && !isInputFocused && !hasLiveText
+            }
             focusInputKeys={focusInputKeys}
             focusHintLabel={t("composer.input.focusHint", {
               shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
