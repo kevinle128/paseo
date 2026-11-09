@@ -2,8 +2,8 @@ name: Fork Desktop Build
 
 # Builds the desktop app on GitHub-hosted runners and publishes it as a normal
 # GitHub release of the fork. Installed fork builds read their updates from that
-# release (`/releases/latest` and the latest*.yml assets); a copy of every
-# release goes to the fork's object storage as a private backup. Only the fork
+# release (`/releases/latest` and the latest*.yml assets); a copy of the three
+# newest releases stays in the fork's object storage as a private backup. Only the fork
 # runs this; the tag prefix `mf-desktop-v` matches none of the tag triggers of
 # the upstream workflows (`v*`, `desktop-v*`, `app-v*`, `android-v*`, ...), and
 # the one workflow with a release trigger skips that prefix.
@@ -48,6 +48,12 @@ on:
         required: false
         default: false
         type: boolean
+      # Declared for both triggers so the expressions below see a boolean in each.
+      prune_dry_run:
+        description: "Build nothing; only log which backup versions the prune would keep and delete."
+        required: false
+        default: false
+        type: boolean
     outputs:
       version:
         description: Published version, for example 0.14.0-mf.3.
@@ -65,8 +71,10 @@ on:
         description: Vietnamese changelog in Markdown. Empty when it could not be written.
         value: ${{ jobs.publish.outputs.changelog }}
 
+# A prune dry run only reads the backup listing, so it gets its own group:
+# joining the build group would cancel a release that is waiting in the queue.
 concurrency:
-  group: fork-desktop-build
+  group: fork-desktop-build${{ inputs.prune_dry_run && '-prune-dry-run' || '' }}
   cancel-in-progress: false
 
 permissions:
@@ -534,6 +542,9 @@ jobs:
       download_links: ${{ steps.links.outputs.links }}
       release_url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.setup.outputs.tag }}
       changelog: ${{ steps.changelog.outputs.text }}
+      # `outcome`, not `conclusion`: the backup step continues on error, so its
+      # conclusion is success even when the upload failed.
+      backup_outcome: ${{ steps.backup.outcome }}
     env:
       UPSTREAM_URL: https://github.com/getpaseo/paseo.git
       VERSION: ${{ needs.setup.outputs.version }}
@@ -728,6 +739,7 @@ jobs:
       # Private backup copy. Clients never read it, so a failure here must not
       # undo or block a release that is already published.
       - name: Back up release files to Wasabi
+        id: backup
         continue-on-error: true
         shell: bash
         run: |
@@ -749,11 +761,11 @@ jobs:
   # Keeps only the newest versions in the private Wasabi backup. Clients read
   # updates and installers from GitHub Releases, so nothing they use is deleted;
   # GitHub releases stay as they are. Only whole version folders go, never a
-  # file at the backup root, and nothing goes unless the new version's backup
-  # is among the newest. A dry run builds nothing and deletes nothing.
+  # file at the backup root, and only after the new version's backup uploaded
+  # completely. A dry run builds nothing and deletes nothing.
   prune-backups:
     needs: [setup, publish]
-    if: ${{ always() && github.repository == 'kevinle128/paseo' && (inputs.prune_dry_run || needs.publish.result == 'success') }}
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && (inputs.prune_dry_run || (needs.publish.result == 'success' && needs.publish.outputs.backup_outcome == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     continue-on-error: true
@@ -766,6 +778,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.setup.outputs.sha || github.sha }}
           sparse-checkout: scripts
 
       - name: Delete older backup versions
@@ -786,6 +799,9 @@ jobs:
           args=(--listing "$listing" --keep "$KEEP" --out "$delete_list")
           if [[ -n "$CURRENT" ]]; then
             args+=(--current "$CURRENT")
+          elif [[ "$DRY_RUN" != "true" ]]; then
+            echo "::error::No version for this release; nothing is deleted."
+            exit 1
           fi
           node scripts/fork-desktop-backup-prune.mjs "${args[@]}"
           if [[ "$DRY_RUN" == "true" ]]; then

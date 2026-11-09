@@ -8,6 +8,9 @@ import { isMainModule } from "./is-main-module.mjs";
 // version folders: files at the backup root are never touched.
 
 const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$/;
+// The only names the fork build publishes (`Resolve version and tag`). Any
+// other folder is left alone, so a stray name can never take a keep slot.
+const FORK_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+\.mf\.\d+|-mf\.\d+)$/;
 
 function parseVersion(name) {
   const match = VERSION_PATTERN.exec(name);
@@ -59,18 +62,17 @@ export function planBackupPrune({ entries, keep, current }) {
   if (!Number.isInteger(keep) || keep < 1) {
     throw new Error(`keep must be a positive integer, got ${keep}`);
   }
-  const ignored = entries.filter((name) => parseVersion(name) === null);
-  const versions = entries
-    .filter((name) => parseVersion(name) !== null)
-    .sort((a, b) => compareVersions(b, a));
+  const isForkVersion = (name) => FORK_VERSION_PATTERN.test(name);
+  const ignored = entries.filter((name) => !isForkVersion(name));
+  const versions = entries.filter(isForkVersion).sort((a, b) => compareVersions(b, a));
   const kept = versions.slice(0, keep);
   const nothing = (reason) => ({ kept: versions, removed: [], ignored, reason });
 
   if (versions.length <= keep) {
     return nothing(`only ${versions.length} versions, keeping all`);
   }
-  // The backup of the new version must be there and among the newest before
-  // anything older goes; otherwise a failed upload could leave too few copies.
+  // The new version's backup must be among the newest before anything older
+  // goes. The workflow also runs this only after that upload succeeded.
   if (current && !kept.includes(current)) {
     return nothing(`${current} is not among the ${keep} newest backups, deleting nothing`);
   }

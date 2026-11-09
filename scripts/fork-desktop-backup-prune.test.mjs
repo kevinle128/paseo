@@ -61,6 +61,7 @@ test("removes nothing when the backup holds no more than the kept versions", () 
     keep: 3,
     current: "0.15.3-mf.7",
   });
+  assert.deepEqual(plan.kept, ["0.15.3-mf.7", "0.15.3-mf.6"]);
   assert.deepEqual(plan.removed, []);
   assert.match(plan.reason, /only 2 versions/);
 });
@@ -71,6 +72,7 @@ test("removes nothing when the version just uploaded is not among the newest", (
     keep: 3,
     current: "0.15.3-mf.8",
   });
+  assert.deepEqual(plan.kept, ["0.15.3-mf.7", "0.15.3-mf.6", "0.15.3-mf.5", "0.15.3-mf.4"]);
   assert.deepEqual(plan.removed, []);
   assert.match(plan.reason, /0\.15\.3-mf\.8 is not among the 3 newest/);
 });
@@ -82,6 +84,17 @@ test("never removes a folder whose name is not a version", () => {
   });
   assert.deepEqual(plan.removed, ["0.15.3-mf.4"]);
   assert.deepEqual(plan.ignored, ["notes"]);
+});
+
+test("a name the fork build never publishes cannot take a keep slot", () => {
+  const plan = planBackupPrune({
+    entries: ["0.15.3-mf.5", "0.15.3-mf..1", "0.15.3", "0.15.3-mf.6", "0.15.3-mf.7", "0.15.3-mf.4"],
+    keep: 3,
+    current: "0.15.3-mf.7",
+  });
+  assert.deepEqual(plan.kept, ["0.15.3-mf.7", "0.15.3-mf.6", "0.15.3-mf.5"]);
+  assert.deepEqual(plan.removed, ["0.15.3-mf.4"]);
+  assert.deepEqual(plan.ignored, ["0.15.3-mf..1", "0.15.3"]);
 });
 
 test("refuses to keep fewer than one version", () => {

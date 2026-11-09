@@ -1186,6 +1186,7 @@ function workflowStepScript(source, id) {
   const idLine = lines.findIndex((line) => line.trim() === `id: ${id}`);
   assert.ok(idLine >= 0, `step ${id} exists`);
   const runLine = lines.findIndex((line, index) => index > idLine && /^\s+run: \|$/.test(line));
+  assert.ok(runLine > idLine, `step ${id} has a run script`);
   const keyIndent = lines[runLine].search(/\S/);
   const body = [];
   for (const line of lines.slice(runLine + 1)) {
@@ -1204,9 +1205,15 @@ test("the fork backup prune deletes only old version folders and fails safe", as
   const prune = workflowStepScript(workflow, "prune");
   const job = jobBlocks(workflow).get("prune-backups").join("\n");
   assert.match(job, /continue-on-error: true/);
+  // Text checks: there is no local Actions runtime to prove these gates.
   assert.match(
     job,
-    /if: \$\{\{ always\(\) && github\.repository == 'kevinle128\/paseo' && \(inputs\.prune_dry_run \|\| needs\.publish\.result == 'success'\) \}\}/,
+    /if: \$\{\{ always\(\) && github\.repository == 'kevinle128\/paseo' && \(inputs\.prune_dry_run \|\| \(needs\.publish\.result == 'success' && needs\.publish\.outputs\.backup_outcome == 'success'\)\) \}\}/,
+  );
+  assert.match(workflow, /backup_outcome: \$\{\{ steps\.backup\.outcome \}\}/);
+  assert.match(
+    workflow,
+    /group: fork-desktop-build\$\{\{ inputs\.prune_dry_run && '-prune-dry-run' \|\| '' \}\}/,
   );
   assert.match(
     jobBlocks(workflow).get("setup").join("\n"),
@@ -1228,23 +1235,54 @@ test("the fork backup prune deletes only old version folders and fails safe", as
       listing: folders([...versions, "0.15.3-mf.8"]),
       current: "0.15.3-mf.8",
       dryRun: "false",
+      status: 0,
       removed: ["0.15.3-mf.5", "0.15.3-mf.4", "0.14.0-beta.1.mf.2"],
+      log: /delete: 0\.15\.3-mf\.5, 0\.15\.3-mf\.4, 0\.14\.0-beta\.1\.mf\.2/,
     },
-    { name: "dry run", listing: folders(versions), current: "", dryRun: "true", removed: [] },
-    { name: "listing fails", listing: null, current: "0.15.3-mf.8", dryRun: "false", removed: [] },
+    {
+      name: "dry run",
+      listing: folders(versions),
+      current: "",
+      dryRun: "true",
+      status: 0,
+      removed: [],
+      log: /delete: 0\.15\.3-mf\.4, 0\.14\.0-beta\.1\.mf\.2\n[\s\S]*Dry run: nothing is deleted/,
+    },
+    {
+      name: "listing fails",
+      listing: null,
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      status: 0,
+      removed: [],
+      log: /Could not list the backup; nothing is deleted/,
+    },
     {
       name: "new backup missing",
       listing: folders(versions),
       current: "0.15.3-mf.8",
       dryRun: "false",
+      status: 0,
       removed: [],
+      log: /0\.15\.3-mf\.8 is not among the 3 newest backups, deleting nothing/,
+    },
+    {
+      name: "no release version",
+      listing: folders(versions),
+      current: "",
+      dryRun: "false",
+      status: 1,
+      removed: [],
+      log: /No version for this release; nothing is deleted/,
     },
     {
       name: "root files stay",
       listing: `${folders(versions.slice(1))}\n2026-11-09 10:00:00 512 latest.yml`,
       current: "0.15.3-mf.7",
       dryRun: "false",
+      status: 0,
       removed: ["0.15.3-mf.4"],
+      log: /keep: 0\.15\.3-mf\.7, 0\.15\.3-mf\.6, 0\.15\.3-mf\.5/,
     },
   ]) {
     await t.test(scenario.name, () => {
@@ -1279,7 +1317,8 @@ fi
           },
           timeout: 10000,
         });
-        assert.equal(result.status, 0, result.stdout + result.stderr);
+        assert.equal(result.status, scenario.status, result.stdout + result.stderr);
+        assert.match(result.stdout, scenario.log);
         const removed = readFileSync(callsPath, "utf8")
           .split("\n")
           .filter((line) => line.startsWith("s3 rm "))
@@ -1288,7 +1327,6 @@ fi
           removed,
           scenario.removed.map((version) => `${prefix}/${version}/`),
         );
-        if (scenario.dryRun === "true") assert.match(result.stdout, /Dry run: nothing is deleted/);
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
