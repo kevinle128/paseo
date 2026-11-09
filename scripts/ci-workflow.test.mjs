@@ -950,6 +950,10 @@ test("fork sync test runs need both replay shas and never push or build", async 
     });
   }
 
+  assert.match(
+    source,
+    /ref: \$\{\{ \(inputs\.test_fork_sha != '' \|\| inputs\.test_upstream_sha != ''\) && github\.sha \|\| 'main' \}\}/,
+  );
   const merge = stepRunScript(source, "merge");
   assert.match(merge, /git worktree add --detach "\$\{RUNNER_TEMP\}\/replay" "\$TEST_FORK_SHA"/);
   const jobs = jobBlocks(source);

@@ -59,9 +59,12 @@ jobs:
       merged_sha: ${{ steps.push.outputs.sha }}
       upstream_range: ${{ steps.merge.outputs.range }}
     steps:
+      # A real run always merges into main and pushes HEAD:main, so it checks
+      # out main. A test run checks out the commit it was started from, so it
+      # uses the scripts of that commit and never pushes.
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ (inputs.test_fork_sha != '' || inputs.test_upstream_sha != '') && github.sha || 'main' }}
           fetch-depth: 0
 
       # A test run replays a known conflict to prove the conflict path. It never
