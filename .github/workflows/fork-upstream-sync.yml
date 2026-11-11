@@ -61,11 +61,13 @@ jobs:
     steps:
       # A real run always merges into main and pushes HEAD:main, so it checks
       # out main. A test run checks out the commit it was started from, so it
-      # uses the scripts of that commit and never pushes.
+      # uses the scripts of that commit and never pushes. Only the push step
+      # gets a token that can write the repository.
       - uses: actions/checkout@v4
         with:
           ref: ${{ (inputs.test_fork_sha != '' || inputs.test_upstream_sha != '') && github.sha || 'main' }}
           fetch-depth: 0
+          persist-credentials: false
 
       # A test run replays a known conflict to prove the conflict path. It never
       # pushes and never builds, so both test SHAs must be given together.
@@ -366,13 +368,22 @@ jobs:
         if: steps.merge.outputs.changed == 'true'
         run: npm run lint
 
-      # A test run never writes main.
+      # A test run never writes main. Upstream merges often change files under
+      # .github/workflows, which a GITHUB_TOKEN push may not do, so this one
+      # step uses a token with the Workflows permission. The token stays in the
+      # environment of this step only.
       - name: Push main
         id: push
         if: steps.merge.outputs.changed == 'true' && steps.inputs.outputs.test != 'true'
+        env:
+          SYNC_PUSH_TOKEN: ${{ secrets.SYNC_PUSH_TOKEN }}
         run: |
           set -euo pipefail
-          git push origin HEAD:main
+          if [[ -z "$SYNC_PUSH_TOKEN" ]]; then
+            echo "::error::The SYNC_PUSH_TOKEN secret is not set; main is not pushed."
+            exit 1
+          fi
+          git push "https://x-access-token:${SYNC_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # The conflict is resolved once a sync merges and pushes cleanly. A failure

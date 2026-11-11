@@ -967,6 +967,13 @@ test("fork sync test runs need both replay shas and never push or build", async 
     /needs\.sync\.outputs\.changed == 'true' && inputs\.test_fork_sha == '' && inputs\.test_upstream_sha == ''/,
   );
   assert.match(sync, /id: merge\n\s+if: steps\.pause\.outputs\.paused != 'true'/);
+  // Only the push step may hold a token that writes the repository.
+  assert.match(sync, /fetch-depth: 0\n\s+persist-credentials: false/);
+  assert.equal(source.split("secrets.SYNC_PUSH_TOKEN").length, 2, "one use of the push token");
+  assert.match(
+    sync,
+    /- name: Push main\n\s+id: push\n[^\n]+\n\s+env:\n\s+SYNC_PUSH_TOKEN: \$\{\{ secrets\.SYNC_PUSH_TOKEN \}\}/,
+  );
 });
 
 test("a scheduled sync pauses for a real conflict issue and a test run only for a test issue", async (t) => {
