@@ -462,7 +462,10 @@ jobs:
             security list-keychains -d user -s $(cat "$KEYCHAIN_LIST_BACKUP")
           fi
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          rm -rf "$RUNNER_TEMP/job-cache" "$RUNNER_TEMP/desktop-smoke" "$RUNNER_TEMP/private_keys" "${KEYCHAIN_LIST_BACKUP:-/nonexistent}"
+          # The npm cache stays: the setup-node post step saves it after this
+          # step. The runner's job-completed hook removes the job temp folder.
+          rm -rf "$RUNNER_TEMP/job-cache/electron" "$RUNNER_TEMP/job-cache/electron-builder" \
+            "$RUNNER_TEMP/desktop-smoke" "$RUNNER_TEMP/private_keys" "${KEYCHAIN_LIST_BACKUP:-/nonexistent}"
           if [[ -s "${MINI_BUILD_LOCK_PID_FILE:-}" ]]; then
             kill "$(cat "$MINI_BUILD_LOCK_PID_FILE")" 2> /dev/null || true
             rm -f "$MINI_BUILD_LOCK_PID_FILE"
