@@ -250,13 +250,11 @@ jobs:
       matrix:
         include:
           # GitHub-hosted macOS arm64 jobs of the fork are often never given a
-          # machine, so arm64 builds on the self-hosted mac mini, as Buzz does.
+          # machine, so macOS builds on the self-hosted mac mini, as Buzz does.
+          # The fork ships Apple silicon only; Intel Macs get no build.
           - runner: [self-hosted, macOS, ARM64, paseo]
             electron_arch: arm64
             node_heap_mb: 4096
-          - runner: macos-15-intel
-            electron_arch: x64
-            node_heap_mb: 8192
     permissions:
       contents: read
       packages: read
@@ -858,10 +856,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p merged feed
-          node scripts/merge-mac-manifest.mjs \
-            manifests/fork-manifest-macos-arm64/latest-mac.yml \
-            manifests/fork-manifest-macos-x64/latest-mac.yml \
-            merged/latest-mac.yml > /dev/null
+          # Apple silicon only: latest-mac.yml lists only arm64 files, so an
+          # Intel Mac finds no zip and stops updating instead of installing an
+          # older x64 build.
+          cp manifests/fork-manifest-macos-arm64/latest-mac.yml merged/latest-mac.yml
           cp manifests/fork-manifest-windows-x64/latest.yml merged/latest.yml
           cp manifests/fork-manifest-linux-x64/latest-linux.yml merged/latest-linux.yml
           for name in latest-mac.yml latest.yml latest-linux.yml; do
@@ -1081,10 +1079,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p merged feed
-          node scripts/merge-mac-manifest.mjs \
-            manifests/fork-manifest-macos-arm64/latest-mac.yml \
-            manifests/fork-manifest-macos-x64/latest-mac.yml \
-            merged/latest-mac.yml > /dev/null
+          # Apple silicon only: latest-mac.yml lists only arm64 files, so an
+          # Intel Mac finds no zip and stops updating instead of installing an
+          # older x64 build.
+          cp manifests/fork-manifest-macos-arm64/latest-mac.yml merged/latest-mac.yml
           cp manifests/fork-manifest-windows-x64/latest.yml merged/latest.yml
           cp manifests/fork-manifest-linux-x64/latest-linux.yml merged/latest-linux.yml
           for name in latest-mac.yml latest.yml latest-linux.yml; do

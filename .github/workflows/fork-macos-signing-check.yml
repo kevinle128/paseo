@@ -15,17 +15,19 @@ permissions:
 jobs:
   check:
     if: github.repository == 'kevinle128/paseo'
-    # Same runner image as the x64 job in fork-desktop-build.yml. GitHub often
-    # has no capacity for macOS arm64 machines, and this check does not depend
-    # on the CPU architecture.
-    runs-on: macos-15-intel
+    # The Mac mini that runs the macOS job of fork-desktop-build.yml. It is a
+    # persistent machine, so the last step restores its keychain search list.
+    runs-on: [self-hosted, macOS, ARM64, paseo]
     environment: desktop-signing
     timeout-minutes: 15
     steps:
       - name: Set temporary paths
         run: |
-          echo "KEYCHAIN_PATH=$RUNNER_TEMP/signing-check.keychain-db" >> "$GITHUB_ENV"
-          echo "KEY_DIR=$RUNNER_TEMP/private_keys" >> "$GITHUB_ENV"
+          {
+            echo "KEYCHAIN_PATH=$RUNNER_TEMP/signing-check.keychain-db"
+            echo "KEY_DIR=$RUNNER_TEMP/private_keys"
+            echo "KEYCHAIN_LIST_BACKUP=$RUNNER_TEMP/keychain-search-list.txt"
+          } >> "$GITHUB_ENV"
 
       - name: Import the Developer ID certificate
         env:
@@ -53,7 +55,8 @@ jobs:
             -k "$keychain_password" "$KEYCHAIN_PATH" > /dev/null
           # Put the temporary keychain first in the search list so the chain
           # resolves the way a signing build would see it.
-          existing=$(security list-keychains -d user | tr -d '"' | xargs)
+          security list-keychains -d user | tr -d '"' | xargs -n1 > "$KEYCHAIN_LIST_BACKUP"
+          existing=$(xargs < "$KEYCHAIN_LIST_BACKUP")
           # shellcheck disable=SC2086
           security list-keychains -d user -s "$KEYCHAIN_PATH" $existing
 
@@ -151,5 +154,10 @@ jobs:
       - name: Remove the keychain and the key file
         if: always()
         run: |
+          if [[ -s "${KEYCHAIN_LIST_BACKUP:-}" ]]; then
+            # shellcheck disable=SC2046
+            security list-keychains -d user -s $(cat "$KEYCHAIN_LIST_BACKUP")
+            rm -f "$KEYCHAIN_LIST_BACKUP"
+          fi
           security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
           rm -rf "$KEY_DIR" "$RUNNER_TEMP/signing-check.p12"
