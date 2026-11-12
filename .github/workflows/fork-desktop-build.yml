@@ -410,6 +410,16 @@ jobs:
             export APPLE_API_KEY_ID="$FORK_APPLE_API_KEY_ID" APPLE_API_ISSUER="$FORK_APPLE_API_ISSUER"
           fi
           unset FORK_CSC_LINK FORK_CSC_KEY_PASSWORD
+          # electron-builder 26.18 applies the hardened runtime to ad-hoc builds
+          # too, and library validation then refuses to load the ad-hoc signed
+          # Electron framework (dyld "Library not loaded", SIGABRT in the smoke
+          # test). An unsigned build therefore turns the hardened runtime off,
+          # as builds before 26.18 effectively had; a signed build keeps it.
+          if [[ "$MACOS_SIGNING" != true ]]; then
+            printf 'extends: ./%s\nmac:\n  hardenedRuntime: false\n' "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" \
+              > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-adhoc.yml"
+            export DESKTOP_BUILDER_CONFIG=electron-builder.fork-adhoc.yml
+          fi
           # Hosted macOS runners sometimes keep the scratch DMG volume busy, so
           # dmgbuild cannot detach it (actions/runner-images#7522). Only that
           # failure is retried. The whole build runs again, so the packaged smoke
