@@ -476,7 +476,8 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+            # The signing overlay renames the config on macOS, so ask the input.
+            if [[ "${{ inputs.channel }}" == canary ]]; then
               expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
             else
               expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
@@ -617,7 +618,8 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+            # The signing overlay renames the config on macOS, so ask the input.
+            if [[ "${{ inputs.channel }}" == canary ]]; then
               expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
             else
               expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
@@ -736,7 +738,8 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+            # The signing overlay renames the config on macOS, so ask the input.
+            if [[ "${{ inputs.channel }}" == canary ]]; then
               expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
             else
               expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
