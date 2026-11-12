@@ -234,8 +234,15 @@ export class DiffSubscriptions {
       throw error;
     }
     const matches = createRealpathAwarePathMatcher(root);
-    for (const target of this.targets.values())
-      if (matches(target.compare.cwd)) this.invalidate(target);
+    for (const target of this.targets.values()) {
+      if (!matches(target.compare.cwd)) continue;
+      if (target.timer) {
+        clearTimeout(target.timer);
+        target.timer = null;
+      }
+      target.dirty = true;
+      void this.refresh(target);
+    }
   }
   private invalidateInterpretation(target: Target): void {
     if (target.closed) return;
