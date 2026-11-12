@@ -170,7 +170,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          # GitHub-hosted macOS arm64 jobs of the fork are often never given a
+          # machine, so arm64 builds on the self-hosted mac mini, as Buzz does.
+          - runner: [self-hosted, macOS, ARM64, paseo]
             electron_arch: arm64
             node_heap_mb: 4096
           - runner: macos-15-intel
@@ -184,6 +186,61 @@ jobs:
     env:
       DESKTOP_VERSION: ${{ needs.setup.outputs.version }}
     steps:
+      # The mini also runs the Buzz desktop build through its own runner. Both
+      # jobs take this lock, so only one desktop build runs on the mini at a
+      # time. lockf holds the lock while its child sleeps; the last step kills
+      # the child, and the runner kills it when the job ends, so a cancelled
+      # job also frees the lock.
+      - name: Wait for the mini build lock
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          lock="$HOME/.mini-desktop-build.lock"
+          ready="$RUNNER_TEMP/mini-build-lock.pid"
+          rm -f "$ready"
+          # shellcheck disable=SC2016 # $$ and $1 expand in the child shell.
+          nohup /usr/bin/lockf -k -t 3600 "$lock" /bin/sh -c 'echo $$ > "$1"; exec sleep 21600' sh "$ready" \
+            > /dev/null 2>&1 &
+          holder=$!
+          for _ in $(seq 3600); do
+            [[ -s "$ready" ]] && break
+            kill -0 "$holder" 2> /dev/null || { echo "::error::Gave up waiting for the mini build lock after 1 hour"; exit 1; }
+            sleep 1
+          done
+          [[ -s "$ready" ]] || { echo "::error::The mini build lock was not taken"; exit 1; }
+          echo "MINI_BUILD_LOCK_PID_FILE=$ready" >> "$GITHUB_ENV"
+          echo "Took the mini build lock."
+
+      - name: Check free disk space
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          min_gib=25
+          free_gib=$(( $(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}') / 1024 / 1024 ))
+          echo "Free space for the workspace: ${free_gib} GiB (need ${min_gib} GiB)."
+          if (( free_gib < min_gib )); then
+            echo "::error::Only ${free_gib} GiB free on the mini; a desktop build needs ${min_gib} GiB"
+            exit 1
+          fi
+
+      # The mini keeps its home folder between jobs. Downloads and caches go to
+      # the job temp folder so the last step removes them, and the keychain
+      # search list is saved so the last step can undo what signing adds.
+      - name: Use job-local caches
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "npm_config_cache=$RUNNER_TEMP/job-cache/npm"
+            echo "ELECTRON_CACHE=$RUNNER_TEMP/job-cache/electron"
+            echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/job-cache/electron-builder"
+            echo "KEYCHAIN_LIST_BACKUP=$RUNNER_TEMP/keychain-search-list.txt"
+          } >> "$GITHUB_ENV"
+          security list-keychains -d user | tr -d '"' | xargs -n1 > "$RUNNER_TEMP/keychain-search-list.txt"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -310,6 +367,27 @@ jobs:
           path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/latest-mac.yml
           if-no-files-found: error
           retention-days: 3
+
+      - name: Clean the mini
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          # Undo keychain changes: drop every keychain that is not in the saved
+          # list, then put the saved list back.
+          if [[ -s "${KEYCHAIN_LIST_BACKUP:-}" ]]; then
+            security list-keychains -d user | tr -d '"' | xargs -n1 | while IFS= read -r keychain; do
+              grep -Fxq "$keychain" "$KEYCHAIN_LIST_BACKUP" || security delete-keychain "$keychain" 2> /dev/null || true
+            done
+            # shellcheck disable=SC2046
+            security list-keychains -d user -s $(cat "$KEYCHAIN_LIST_BACKUP")
+          fi
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          rm -rf "$RUNNER_TEMP/job-cache" "$RUNNER_TEMP/desktop-smoke" "${KEYCHAIN_LIST_BACKUP:-/nonexistent}"
+          if [[ -s "${MINI_BUILD_LOCK_PID_FILE:-}" ]]; then
+            kill "$(cat "$MINI_BUILD_LOCK_PID_FILE")" 2> /dev/null || true
+            rm -f "$MINI_BUILD_LOCK_PID_FILE"
+            echo "Released the mini build lock."
+          fi
 
   build-windows:
     needs: [setup]
