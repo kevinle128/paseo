@@ -84,7 +84,10 @@ jobs:
           echo "Team ID in the certificate matches APPLE_TEAM_ID."
           printf '%s\n' "$identities" | tail -1
 
+      # Independent of the certificate, so it runs even when the identity
+      # check fails and one run reports both results.
       - name: Check the notary service with the API key
+        if: ${{ !cancelled() }}
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
