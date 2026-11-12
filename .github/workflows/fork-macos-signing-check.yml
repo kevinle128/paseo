@@ -73,8 +73,12 @@ jobs:
           name=$(printf '%s\n' "$line" | sed -E 's/^.*"(.*)"$/\1/')
           echo "Identity: $name"
           team=$(printf '%s\n' "$name" | sed -nE 's/.*\(([A-Z0-9]{10})\)$/\1/p')
-          if [[ "$team" != "$APPLE_TEAM_ID" ]]; then
-            echo "::error::Team ID in the certificate does not match APPLE_TEAM_ID"
+          trimmed=$(printf '%s' "$APPLE_TEAM_ID" | tr -d '[:space:]')
+          if [[ "$trimmed" != "$APPLE_TEAM_ID" ]]; then
+            echo "::warning::APPLE_TEAM_ID has whitespace or a line break (${#APPLE_TEAM_ID} chars, ${#trimmed} without whitespace). Set the secret again without it."
+          fi
+          if [[ "$team" != "$trimmed" ]]; then
+            echo "::error::Team ID in the certificate does not match APPLE_TEAM_ID (secret has ${#trimmed} characters without whitespace; a Team ID has 10)"
             exit 1
           fi
           echo "Team ID in the certificate matches APPLE_TEAM_ID."
@@ -88,6 +92,14 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          for var in APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            value=${!var}
+            trimmed=$(printf '%s' "$value" | tr -d '[:space:]')
+            if [[ "$trimmed" != "$value" ]]; then
+              echo "::warning::$var has whitespace or a line break (${#value} chars, ${#trimmed} without whitespace). Set the secret again without it."
+            fi
+            printf -v "$var" '%s' "$trimmed"
+          done
           mkdir -p "$KEY_DIR"
           key_path="$KEY_DIR/AuthKey_${APPLE_API_KEY_ID}.p8"
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
