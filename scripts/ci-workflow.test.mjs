@@ -700,7 +700,7 @@ test("fork macOS build retries only a busy DMG volume and removes partial images
     .replace(/^ {10}/gm, "");
   assert.match(
     workflow,
-    /"\$retry_bin\/retry-busy-dmg" \\\n {12}npm run build:desktop -- --config electron-builder\.fork\.yml/,
+    /"\$retry_bin\/retry-busy-dmg" \\\n {12}npm run build:desktop -- --config "\$\{DESKTOP_BUILDER_CONFIG:-electron-builder\.fork\.yml\}"/,
   );
   const busy =
     'dmgbuild.core.DMGError: Unable to detach device cleanly: hdiutil: couldn\'t eject "disk2" - Resource busy';

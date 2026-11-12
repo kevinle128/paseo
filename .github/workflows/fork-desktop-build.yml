@@ -31,6 +31,16 @@ on:
         required: false
         default: false
         type: boolean
+      publish:
+        description: "Publish the release, back it up and notify. False builds only the macOS apps and keeps them as workflow artifacts."
+        required: false
+        default: true
+        type: boolean
+      macos_signing:
+        description: "Sign the macOS apps with the Developer ID certificate and notarize them."
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       version:
@@ -51,6 +61,16 @@ on:
       # Declared for both triggers so the expressions below see a boolean in each.
       prune_dry_run:
         description: "Build nothing; only log which backup versions the prune would keep and delete."
+        required: false
+        default: false
+        type: boolean
+      publish:
+        description: "Publish the release, back it up and notify. False builds only the macOS apps."
+        required: false
+        default: true
+        type: boolean
+      macos_signing:
+        description: "Sign the macOS apps with the Developer ID certificate and notarize them."
         required: false
         default: false
         type: boolean
@@ -182,6 +202,8 @@ jobs:
       contents: read
       packages: read
     runs-on: ${{ matrix.runner }}
+    # Holds the Apple signing secrets; they are read only when macos_signing is on.
+    environment: desktop-signing
     timeout-minutes: 120
     env:
       DESKTOP_VERSION: ${{ needs.setup.outputs.version }}
@@ -272,11 +294,41 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-      # No Developer ID: the fork config signs ad hoc and skips notarization.
+      # Without macos_signing the fork config signs ad hoc and skips
+      # notarization. With it, an overlay picks the Developer ID identity by
+      # Team ID and turns notarization on; the API key goes to notarytool as a
+      # file path.
+      - name: Prepare Developer ID signing
+        if: inputs.macos_signing
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_TEAM_ID is not a 10-character Team ID"; exit 1; }
+          key_dir="$RUNNER_TEMP/private_keys"
+          mkdir -p "$key_dir"
+          key_path="$key_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          printf 'extends: ./electron-builder.fork.yml\nmac:\n  identity: "%s"\n  notarize: true\n' "$APPLE_TEAM_ID" \
+            > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-signed.yml"
+          {
+            echo "APPLE_API_KEY=$key_path"
+            echo "DESKTOP_BUILDER_CONFIG=electron-builder.fork-signed.yml"
+          } >> "$GITHUB_ENV"
+
       - name: Build desktop app
         shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ inputs.macos_signing && 'true' || 'false' }}
+          CSC_LINK: ${{ inputs.macos_signing && secrets.APPLE_CERTIFICATE || '' }}
+          CSC_KEY_PASSWORD: ${{ inputs.macos_signing && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ inputs.macos_signing && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ inputs.macos_signing && secrets.APPLE_API_ISSUER || '' }}
           PASEO_DESKTOP_SMOKE: "1"
           PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
           # Metro's jest workers OOM on the generated ws-outbound.aot.js validator,
@@ -314,7 +366,35 @@ jobs:
           DMGRETRY
           chmod +x "$retry_bin/retry-busy-dmg"
           DMG_RELEASE_DIR="${DESKTOP_PACKAGE_PATH}/release" "$retry_bin/retry-busy-dmg" \
-            npm run build:desktop -- --config electron-builder.fork.yml --publish never --mac --${{ matrix.electron_arch }}
+            npm run build:desktop -- --config "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" --publish never --mac --${{ matrix.electron_arch }}
+
+      # electron-builder only warns and goes on when it cannot notarize, so the
+      # signed build is checked here and fails unless Apple accepted it.
+      - name: Verify the Developer ID signature and notarization
+        if: inputs.macos_signing
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          app="$(find "${DESKTOP_PACKAGE_PATH}/release" -maxdepth 2 -name Paseo.app -type d | head -1)"
+          [[ -n "$app" ]] || { echo "::error::No Paseo.app in the release folder"; exit 1; }
+          echo "Checking ${app#"$GITHUB_WORKSPACE"/}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          team="$(codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+          [[ "$team" == "$APPLE_TEAM_ID" ]] || { echo "::error::The app is not signed by the APPLE_TEAM_ID team"; exit 1; }
+          codesign -dv "$app" 2>&1 | grep -E '^(Authority|Runtime Version|flags)=' || true
+          echo "Entitlements:"
+          codesign -d --entitlements - --xml "$app" 2>/dev/null | plutil -p - || true
+          spctl_out="$(spctl -a -vvv -t exec "$app" 2>&1)" || true
+          echo "$spctl_out"
+          grep -q 'source=Notarized Developer ID' <<< "$spctl_out" \
+            || { echo "::error::Gatekeeper does not report a notarized Developer ID app"; exit 1; }
+          xcrun stapler validate "$app"
+          for dmg in "${DESKTOP_PACKAGE_PATH}"/release/*.dmg; do
+            codesign --verify --verbose=2 "$dmg" || echo "::warning::$(basename "$dmg") has no valid signature"
+            xcrun stapler validate "$dmg" || echo "::warning::$(basename "$dmg") has no stapled ticket"
+          done
 
       # The packaged app reads this file to find its updates. A wrong owner here
       # ships a build that updates from another project.
@@ -382,7 +462,7 @@ jobs:
             security list-keychains -d user -s $(cat "$KEYCHAIN_LIST_BACKUP")
           fi
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          rm -rf "$RUNNER_TEMP/job-cache" "$RUNNER_TEMP/desktop-smoke" "${KEYCHAIN_LIST_BACKUP:-/nonexistent}"
+          rm -rf "$RUNNER_TEMP/job-cache" "$RUNNER_TEMP/desktop-smoke" "$RUNNER_TEMP/private_keys" "${KEYCHAIN_LIST_BACKUP:-/nonexistent}"
           if [[ -s "${MINI_BUILD_LOCK_PID_FILE:-}" ]]; then
             kill "$(cat "$MINI_BUILD_LOCK_PID_FILE")" 2> /dev/null || true
             rm -f "$MINI_BUILD_LOCK_PID_FILE"
@@ -391,7 +471,7 @@ jobs:
 
   build-windows:
     needs: [setup]
-    if: github.repository == 'kevinle128/paseo'
+    if: github.repository == 'kevinle128/paseo' && inputs.publish
     permissions:
       contents: read
       packages: read
@@ -496,7 +576,7 @@ jobs:
 
   build-linux:
     needs: [setup]
-    if: github.repository == 'kevinle128/paseo'
+    if: github.repository == 'kevinle128/paseo' && inputs.publish
     permissions:
       contents: read
       packages: read
@@ -608,7 +688,7 @@ jobs:
   # last, so a client never sees a release that is still missing files.
   publish:
     needs: [setup, build-macos, build-windows, build-linux]
-    if: github.repository == 'kevinle128/paseo'
+    if: github.repository == 'kevinle128/paseo' && inputs.publish
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -896,7 +976,7 @@ jobs:
   # Manual runs report their own result; a calling workflow reports its own.
   notify:
     needs: [setup, publish]
-    if: ${{ always() && github.repository == 'kevinle128/paseo' && inputs.notify && needs.setup.result != 'skipped' }}
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && inputs.notify && inputs.publish && needs.setup.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
