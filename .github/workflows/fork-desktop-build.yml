@@ -41,6 +41,14 @@ on:
         required: false
         default: false
         type: boolean
+      channel:
+        description: "Update feed. canary publishes to the paseo-desktop-canary/ folder of the CDN for update tests; it needs macos_signing and creates no release."
+        required: false
+        default: production
+        type: choice
+        options:
+          - production
+          - canary
   workflow_call:
     inputs:
       version:
@@ -74,6 +82,11 @@ on:
         required: false
         default: false
         type: boolean
+      channel:
+        description: "Update feed: production or canary."
+        required: false
+        default: production
+        type: string
     outputs:
       version:
         description: Published version, for example 0.14.0-mf.3.
@@ -105,6 +118,26 @@ env:
   WASABI_ENDPOINT: https://s3.ap-southeast-1.wasabisys.com
   WASABI_BUCKET: game-mobile-registry
   WASABI_PREFIX: paseo-desktop
+  # Canary builds read their updates from this CDN folder (the bucket root is
+  # served by the CDN) instead of the GitHub releases. Production never uses it.
+  CANARY_PREFIX: paseo-desktop-canary
+  CANARY_FEED_URL: https://gamestudio.mobigame.vn/paseo-desktop-canary
+  # Same as electron-builder.fork.yml except the generic canary feed and no
+  # notify-only macOS mode, so a signed canary updates itself on macOS.
+  CANARY_BUILDER_CONFIG: |
+    extends: ./electron-builder.yml
+    extraMetadata:
+      paseoFork:
+        downloadBaseUrl: https://gamestudio.mobigame.vn/paseo-desktop-canary
+    publish:
+      - provider: generic
+        url: https://gamestudio.mobigame.vn/paseo-desktop-canary
+        channel: latest
+    mac:
+      identity: "-"
+      notarize: false
+    win:
+      verifyUpdateCodeSignature: false
 
 jobs:
   setup:
@@ -150,9 +183,35 @@ jobs:
         id: resolve
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          MACOS_SIGNING: ${{ inputs.macos_signing }}
         run: |
           set -euo pipefail
           version="$INPUT_VERSION"
+          if [[ "$CHANNEL" == canary ]]; then
+            # A canary build is a signed update test; it has no tag or release.
+            if [[ "$MACOS_SIGNING" != true ]]; then
+              echo "::error::channel=canary needs macos_signing=true"
+              exit 1
+            fi
+            if [[ -z "$version" ]]; then
+              base="$(node -p "require('./${DESKTOP_PACKAGE_PATH}/package.json').version")"
+              base="${base%%-*}"
+              # The run number grows, so each canary build is newer than the last.
+              version="${base}-canary.${GITHUB_RUN_NUMBER}"
+            fi
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+$ ]]; then
+              echo "::error::Canary version '$version' must look like X.Y.Z-canary.N"
+              exit 1
+            fi
+            {
+              echo "version=${version}"
+              echo "tag="
+              echo "sha=$(git rev-parse HEAD)"
+            } >> "$GITHUB_OUTPUT"
+            echo "Building canary ${version} from $(git rev-parse HEAD)"
+            exit 0
+          fi
           if [[ -z "$version" ]]; then
             base="$(node -p "require('./${DESKTOP_PACKAGE_PATH}/package.json').version")"
             if [[ "$base" == *-* ]]; then
@@ -294,6 +353,13 @@ jobs:
           fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
+      - name: Use the canary feed
+        if: inputs.channel == 'canary'
+        shell: bash
+        run: |
+          printf '%s' "$CANARY_BUILDER_CONFIG" > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-canary.yml"
+          echo "DESKTOP_BUILDER_CONFIG=electron-builder.fork-canary.yml" >> "$GITHUB_ENV"
+
       # Without macos_signing the fork config signs ad hoc and skips
       # notarization. With it, an overlay picks the Developer ID identity by
       # Team ID and turns notarization on; the API key goes to notarytool as a
@@ -314,7 +380,8 @@ jobs:
           key_path="$key_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
           chmod 600 "$key_path"
-          printf 'extends: ./electron-builder.fork.yml\nmac:\n  identity: "%s"\n  notarize: true\n' "$APPLE_TEAM_ID" \
+          printf 'extends: ./%s\nmac:\n  identity: "%s"\n  notarize: true\n' \
+            "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" "$APPLE_TEAM_ID" \
             > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-signed.yml"
           {
             echo "APPLE_API_KEY=$key_path"
@@ -409,7 +476,12 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+              expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
+            else
+              expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
+            fi
+            for expected in "${expected_lines[@]}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
             # updaterCacheDirName is a local cache folder electron-builder derives
@@ -515,6 +587,13 @@ jobs:
           NODE
 
       # Unsigned: the fork config turns off update signature verification.
+      - name: Use the canary feed
+        if: inputs.channel == 'canary'
+        shell: bash
+        run: |
+          printf '%s' "$CANARY_BUILDER_CONFIG" > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-canary.yml"
+          echo "DESKTOP_BUILDER_CONFIG=electron-builder.fork-canary.yml" >> "$GITHUB_ENV"
+
       - name: Build desktop app
         shell: bash
         env:
@@ -523,7 +602,7 @@ jobs:
           PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
         run: |
           set -euo pipefail
-          npm run build:desktop -- --config electron-builder.fork.yml --publish never --win --x64
+          npm run build:desktop -- --config "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" --publish never --win --x64
 
       # The packaged app reads this file to find its updates. A wrong owner here
       # ships a build that updates from another project.
@@ -538,7 +617,12 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+              expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
+            else
+              expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
+            fi
+            for expected in "${expected_lines[@]}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
             # updaterCacheDirName is a local cache folder electron-builder derives
@@ -622,6 +706,13 @@ jobs:
       - name: Install Linux smoke display and rpm tooling
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth rpm
 
+      - name: Use the canary feed
+        if: inputs.channel == 'canary'
+        shell: bash
+        run: |
+          printf '%s' "$CANARY_BUILDER_CONFIG" > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-canary.yml"
+          echo "DESKTOP_BUILDER_CONFIG=electron-builder.fork-canary.yml" >> "$GITHUB_ENV"
+
       - name: Build desktop app
         shell: bash
         env:
@@ -630,7 +721,7 @@ jobs:
           PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
         run: |
           set -euo pipefail
-          npm run build:desktop -- --config electron-builder.fork.yml --publish never --linux --x64
+          npm run build:desktop -- --config "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" --publish never --linux --x64
 
       # The packaged app reads this file to find its updates. A wrong owner here
       # ships a build that updates from another project.
@@ -645,7 +736,12 @@ jobs:
           fi
           while IFS= read -r file; do
             cat "$file"
-            for expected in "provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}"; do
+            if [[ "${DESKTOP_BUILDER_CONFIG:-}" == electron-builder.fork-canary.yml ]]; then
+              expected_lines=("provider: generic" "url: ${CANARY_FEED_URL}")
+            else
+              expected_lines=("provider: github" "owner: ${GITHUB_REPOSITORY%/*}" "repo: ${GITHUB_REPOSITORY#*/}")
+            fi
+            for expected in "${expected_lines[@]}"; do
               grep -Fxq "$expected" "$file" || { echo "::error::${file} lacks '${expected}'"; exit 1; }
             done
             # updaterCacheDirName is a local cache folder electron-builder derives
@@ -691,7 +787,7 @@ jobs:
   # last, so a client never sees a release that is still missing files.
   publish:
     needs: [setup, build-macos, build-windows, build-linux]
-    if: github.repository == 'kevinle128/paseo' && inputs.publish
+    if: github.repository == 'kevinle128/paseo' && inputs.publish && inputs.channel != 'canary'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -924,6 +1020,96 @@ jobs:
   # GitHub releases stay as they are. Only whole version folders go, never a
   # file at the backup root, and only after the new version's backup uploaded
   # completely. A dry run builds nothing and deletes nothing.
+  # A canary build goes only to the CDN canary folder: every file at the folder
+  # root, where the generic feed reads it, and a copy under <version>/ so an
+  # older canary stays installable after a newer one replaces the root files.
+  # The feed manifests go up last. No release, tag, backup, prune or notice.
+  publish-canary:
+    needs: [setup, build-macos, build-windows, build-linux]
+    if: github.repository == 'kevinle128/paseo' && inputs.publish && inputs.channel == 'canary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.WASABI_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.WASABI_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ap-southeast-1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            package.json
+            package-lock.json
+            scripts
+          ref: ${{ needs.setup.outputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fork-desktop-*
+          path: release
+          merge-multiple: true
+
+      - name: Download manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fork-manifest-*
+          path: manifests
+
+      - name: Build feed manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p merged feed
+          node scripts/merge-mac-manifest.mjs \
+            manifests/fork-manifest-macos-arm64/latest-mac.yml \
+            manifests/fork-manifest-macos-x64/latest-mac.yml \
+            merged/latest-mac.yml > /dev/null
+          cp manifests/fork-manifest-windows-x64/latest.yml merged/latest.yml
+          cp manifests/fork-manifest-linux-x64/latest-linux.yml merged/latest-linux.yml
+          for name in latest-mac.yml latest.yml latest-linux.yml; do
+            node scripts/fork-desktop-manifest.mjs "merged/${name}" "$VERSION" release "feed/${name}"
+          done
+          ls -la release feed
+
+      - name: Publish to the canary folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="s3://${WASABI_BUCKET}/${CANARY_PREFIX}"
+          aws s3 cp release "${root}/${VERSION}/" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          aws s3 cp feed "${root}/${VERSION}/" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          aws s3 cp release "${root}/" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          aws s3 cp feed "${root}/" --recursive --endpoint-url "$WASABI_ENDPOINT" --only-show-errors
+          for name in latest-mac.yml latest.yml latest-linux.yml; do
+            served="$(curl -fsS --retry 3 "${CANARY_FEED_URL}/${name}" | sed -n 's/^version: //p')"
+            echo "${CANARY_FEED_URL}/${name}: ${served}"
+            [[ "$served" == "$VERSION" ]] || echo "::warning::${name} on the CDN still shows ${served}; the CDN cache may lag"
+          done
+          {
+            echo "### Canary ${VERSION}"
+            for file in release/*.dmg release/*.exe release/*.AppImage release/*.deb release/*.rpm; do
+              [[ -e "$file" ]] && echo "- ${CANARY_FEED_URL}/${VERSION}/$(basename "$file")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
   prune-backups:
     needs: [setup, publish]
     if: ${{ always() && github.repository == 'kevinle128/paseo' && (inputs.prune_dry_run || (needs.publish.result == 'success' && needs.publish.outputs.backup_outcome == 'success')) }}
@@ -979,7 +1165,7 @@ jobs:
   # Manual runs report their own result; a calling workflow reports its own.
   notify:
     needs: [setup, publish]
-    if: ${{ always() && github.repository == 'kevinle128/paseo' && inputs.notify && inputs.publish && needs.setup.result != 'skipped' }}
+    if: ${{ always() && github.repository == 'kevinle128/paseo' && inputs.notify && inputs.publish && inputs.channel != 'canary' && needs.setup.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
