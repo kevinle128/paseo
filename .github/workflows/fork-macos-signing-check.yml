@@ -109,15 +109,42 @@ jobs:
           chmod 600 "$key_path"
           head -1 "$key_path" | grep -q 'BEGIN PRIVATE KEY' \
             || { echo "::error::APPLE_API_KEY_P8_BASE64 does not decode to a .p8 private key"; exit 1; }
-          if ! out=$(xcrun notarytool history --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER" --output-format json 2>&1); then
-            echo "::error::notarytool history failed"
-            # notarytool errors name the failure (401, key not found) and hold no key material.
-            printf '%s\n' "$out" | tail -5
+          # Only lengths, formats and the curve name are printed; the curve
+          # comes from the public half of the key.
+          if ! openssl pkey -in "$key_path" -noout 2>/dev/null; then
+            echo "::error::The .p8 does not parse as a private key"
             exit 1
           fi
-          count=$(printf '%s\n' "$out" | jq '.history | length')
-          echo "notarytool history OK: $count earlier submission(s)."
+          curve=$(openssl pkey -in "$key_path" -pubout 2>/dev/null \
+            | openssl pkey -pubin -noout -text 2>/dev/null \
+            | sed -nE 's/^(ASN1 OID|NIST CURVE): *//p' | sort -u | xargs)
+          echo "The .p8 parses as a private key; curve: ${curve:-unknown} (App Store Connect keys are prime256v1 / P-256)."
+          if [[ "$APPLE_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]; then key_id_format=ok; else key_id_format="not 10 uppercase letters or digits"; fi
+          echo "APPLE_API_KEY_ID: ${#APPLE_API_KEY_ID} characters, format $key_id_format."
+          if [[ "$APPLE_API_ISSUER" =~ ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$ ]]; then issuer_format=ok; else issuer_format="not a UUID"; fi
+          echo "APPLE_API_ISSUER: ${#APPLE_API_ISSUER} characters, format $issuer_format."
+
+          # notarytool errors name the failure (401, key not found) and hold no key material.
+          if out=$(xcrun notarytool history --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" --output-format json 2>&1); then
+            count=$(printf '%s\n' "$out" | jq '.history | length')
+            echo "notarytool history OK as a team key: $count earlier submission(s)."
+            exit 0
+          fi
+          echo "::error::notarytool history failed as a team key (with --issuer)"
+          printf '%s\n' "$out" | tail -3
+
+          # An individual API key has no issuer. If this call works, the key
+          # came from the Individual Keys tab; Tauri and electron-builder need
+          # a team key with an issuer, so the check still fails.
+          if out=$(xcrun notarytool history --key "$key_path" --key-id "$APPLE_API_KEY_ID" \
+              --output-format json 2>&1); then
+            echo "::error::notarytool history works WITHOUT --issuer: this is an individual API key. Create a Team key (App Store Connect > Users and Access > Integrations > Team Keys, access Developer) and set APPLE_API_KEY_ID, APPLE_API_KEY_P8_BASE64 and APPLE_API_ISSUER from it."
+          else
+            echo "::error::notarytool history also failed without --issuer (individual-key mode)"
+            printf '%s\n' "$out" | tail -3
+          fi
+          exit 1
 
       - name: Remove the keychain and the key file
         if: always()
