@@ -15,8 +15,10 @@ permissions:
 jobs:
   check:
     if: github.repository == 'kevinle128/paseo'
-    # Same runner image as the arm64 job in fork-desktop-build.yml.
-    runs-on: macos-15
+    # Same runner image as the x64 job in fork-desktop-build.yml. GitHub often
+    # has no capacity for macOS arm64 machines, and this check does not depend
+    # on the CPU architecture.
+    runs-on: macos-15-intel
     environment: desktop-signing
     timeout-minutes: 15
     steps:
