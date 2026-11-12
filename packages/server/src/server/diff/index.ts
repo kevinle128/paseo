@@ -234,7 +234,6 @@ export class DiffSubscriptions {
       throw error;
     }
     const matches = createRealpathAwarePathMatcher(root);
-    const refreshes: Promise<void>[] = [];
     for (const target of this.targets.values()) {
       if (!matches(target.compare.cwd)) continue;
       if (target.timer) {
@@ -242,9 +241,8 @@ export class DiffSubscriptions {
         target.timer = null;
       }
       target.dirty = true;
-      refreshes.push(this.refresh(target));
+      void this.refresh(target);
     }
-    await Promise.all(refreshes);
   }
   private invalidateInterpretation(target: Target): void {
     if (target.closed) return;
