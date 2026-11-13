@@ -3,6 +3,7 @@ import { DaemonClient, type DaemonTransport } from "@getpaseo/client/internal/da
 import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
+  CATCH_UP_AUTO_RETRY_DELAYS_MS,
   consumeForcedTimelineTailReplacement,
   createViewedTimelineSync,
   FRESHNESS_CHECK_QUIET_MS,
@@ -414,6 +415,62 @@ test("falls back to the latest tail when a restored cursor has more than one cat
     }).reset,
   ).toBe(true);
   fallback.respond({ hasNewer: false });
+});
+
+test("a failed latest-tail fallback retries without a user press and then settles ready", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const world = new TimelineWorld();
+    world.cursors.set("agent-a", { epoch: "epoch-agent-a", endSeq: 42 });
+    world.sync.setConnected(true);
+    world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+    (await world.nextMembership()).succeed();
+
+    (await world.nextFetch("agent-a")).respond({ hasNewer: true, seq: 82 });
+    (await world.nextFetch("agent-a")).fail("tail unavailable");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.errors).toEqual([]);
+    world.expectNoPendingFetch();
+
+    await vi.advanceTimersByTimeAsync(CATCH_UP_AUTO_RETRY_DELAYS_MS[0]);
+    const retryProbe = await world.nextFetch("agent-a");
+    expect(retryProbe.request.direction).toBe("after");
+    retryProbe.respond({ hasNewer: true, seq: 90 });
+    const retryTail = await world.nextFetch("agent-a");
+    expect(retryTail.request.direction).toBe("tail");
+    retryTail.respond({ hasNewer: false });
+    await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+    expect(world.errors).toEqual([]);
+    world.sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a latest-tail fallback that keeps failing reports the error after its retries", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const world = new TimelineWorld();
+    world.cursors.set("agent-a", { epoch: "epoch-agent-a", endSeq: 42 });
+    world.sync.setConnected(true);
+    world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
+    (await world.nextMembership()).succeed();
+
+    (await world.nextFetch("agent-a")).respond({ hasNewer: true, seq: 82 });
+    (await world.nextFetch("agent-a")).fail("tail unavailable");
+    for (const delay of CATCH_UP_AUTO_RETRY_DELAYS_MS) {
+      await vi.advanceTimersByTimeAsync(delay);
+      (await world.nextFetch("agent-a")).respond({ hasNewer: true, seq: 90 });
+      (await world.nextFetch("agent-a")).fail("tail unavailable");
+    }
+    await vi.advanceTimersByTimeAsync(60_000);
+    world.expectNoPendingFetch();
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("error");
+    expect(world.errors).toEqual(["tail unavailable"]);
+    world.sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("a gap absorbed by a running tail is recovered after the tail completes", async () => {

@@ -345,6 +345,13 @@ function applyAuthoritativeTimelineResponse(input: {
  */
 export const FRESHNESS_CHECK_QUIET_MS = 500;
 
+/**
+ * Waits before each automatic retry of a failed catch-up. A catch-up that fails after its first
+ * page leaves the chat detached from live events, so a transient failure must not wait for a
+ * user press. After the last retry the error shows and the manual retry takes over.
+ */
+export const CATCH_UP_AUTO_RETRY_DELAYS_MS: readonly number[] = [1_000, 4_000];
+
 export type TimelineFreshness = "current" | "behind";
 
 /** The empty after page the daemon would have returned for a cursor already at the head. */
@@ -623,6 +630,10 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       timer: ReturnType<typeof setTimeout> | null;
     }
   >();
+  const autoRetries = new Map<
+    string,
+    { attempt: number; timer: ReturnType<typeof setTimeout> | null }
+  >();
   const listeners = new Set<() => void>();
   let active = true;
   let connected = false;
@@ -670,6 +681,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     const wasPending = visibilityCatchUpPending.delete(agentId);
     const hadError = visibilityCatchUpErrors.delete(agentId);
     const wasRetrying = manualRetries.delete(agentId);
+    autoRetries.delete(agentId);
     ports.onCatchUpSettled(agentId);
     ports.onCatchUpEnded(agentId);
     if (wasPending || hadError || wasRetrying) notifyListeners();
@@ -725,10 +737,41 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     for (const agentId of freshnessChecks.keys()) endFreshnessCheck(agentId);
   };
 
+  const clearAutoRetry = (agentId: string) => {
+    const retry = autoRetries.get(agentId);
+    if (retry?.timer) clearTimeout(retry.timer);
+    autoRetries.delete(agentId);
+  };
+
   const cancelCatchUp = (agentId: string) => {
+    clearAutoRetry(agentId);
     catchUpGenerations.set(agentId, (catchUpGenerations.get(agentId) ?? 0) + 1);
     catchUps.delete(agentId);
     pendingCatchUps.delete(agentId);
+  };
+
+  // The retry resumes from the stored cursor, so it falls back to the latest tail again when the
+  // gap is still large. A caller-chosen request is retried as it was.
+  const scheduleAutoRetry = (
+    agentId: string,
+    request: ProjectedTimelineForwardFetchPlan,
+    resumesFromCursor: boolean,
+  ): boolean => {
+    const attempt = autoRetries.get(agentId)?.attempt ?? 0;
+    const delay = CATCH_UP_AUTO_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return false;
+    const timer = setTimeout(() => {
+      const retry = autoRetries.get(agentId);
+      if (!retry) return;
+      retry.timer = null;
+      if (catchUps.get(agentId)?.status !== "error") return;
+      startCatchUp(agentId, {
+        request: resumesFromCursor ? undefined : request,
+        supersede: true,
+      });
+    }, delay);
+    autoRetries.set(agentId, { attempt: attempt + 1, timer });
+    return true;
   };
 
   const fetchUntilCurrent = async (
@@ -736,12 +779,17 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     generation: number,
     request: ProjectedTimelineForwardFetchPlan,
     fallbackToLatestTailOnOverflow: boolean,
+    afterNewerPage = false,
   ): Promise<void> => {
     if (!ownsCatchUp(agentId, generation)) return;
 
+    // A page with newer entries leaves the chat detached from live events until the catch-up
+    // ends, so only a failure after such a page is retried on its own.
+    let detachedFromLive = afterNewerPage;
     try {
       const page = await ports.fetchPage(agentId, request);
       if (!ownsCatchUp(agentId, generation)) return;
+      detachedFromLive ||= page.hasNewer;
       if (page.hasNewer && page.endCursor) {
         if (fallbackToLatestTailOnOverflow) {
           await ports.fetchLatestTail(agentId);
@@ -755,6 +803,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
           generation,
           planTimelineCatchUpAfter(page.endCursor),
           false,
+          true,
         );
         return;
       }
@@ -771,8 +820,13 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     } catch (error) {
       if (catchUps.get(agentId)?.generation === generation) {
         catchUps.set(agentId, { generation, status: "error", request });
-        setVisibilityCatchUpError([agentId], error);
-        ports.reportError(error);
+        if (
+          !detachedFromLive ||
+          !scheduleAutoRetry(agentId, request, fallbackToLatestTailOnOverflow)
+        ) {
+          setVisibilityCatchUpError([agentId], error);
+          ports.reportError(error);
+        }
       }
     } finally {
       startAcknowledgedCatchUps();
@@ -1180,6 +1234,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       visibilityCatchUpPending.clear();
       visibilityCatchUpErrors.clear();
       manualRetries.clear();
+      for (const agentId of autoRetries.keys()) clearAutoRetry(agentId);
       endAllFreshnessChecks();
       notifyListeners();
       listeners.clear();
