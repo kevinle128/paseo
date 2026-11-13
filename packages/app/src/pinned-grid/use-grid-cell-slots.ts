@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { View } from "react-native";
 import { getWorkspaceSelectionKey } from "@/screens/workspace/workspace-deck-retention";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import type { GridCellRect, GridGeometry } from "./geometry";
+import { prefersReducedMotion } from "./grid-cell-frame";
 import { resolveGridSlots } from "./grid-layout";
 import type { GridScrollSignal } from "./grid-scroll-signal";
 import { useGridReorderDrag } from "./use-grid-reorder-drag";
+
+// A little longer than the maximize/restore rect transition in `grid-cell-frame.tsx`.
+const MAXIMIZE_FOLLOW_MS = 320;
 
 const EMPTY_RECT: GridCellRect = { x: 0, y: 0, width: 0, height: 0 };
 
@@ -60,6 +64,31 @@ export function useGridCellSlots(input: {
   useEffect(() => {
     signal.notify("layout");
   }, [signal, slotIndexByKey, cellKeys]);
+
+  // The maximized cell animates to its new rect, so surfaces fixed to it follow frame by frame.
+  const seenMaximizedKeyRef = useRef(maximizedKey);
+  const hasGrid = grid !== null;
+  useEffect(() => {
+    if (seenMaximizedKeyRef.current === maximizedKey) {
+      return undefined;
+    }
+    seenMaximizedKeyRef.current = maximizedKey;
+    if (!hasGrid) {
+      return undefined;
+    }
+    // Without the rect transition the cell lands in one frame, so one signal is enough.
+    const animated = !prefersReducedMotion();
+    const startedAt = performance.now();
+    let frame = 0;
+    const follow = () => {
+      signal.notify("layout");
+      if (animated && performance.now() - startedAt < MAXIMIZE_FOLLOW_MS) {
+        frame = requestAnimationFrame(follow);
+      }
+    };
+    frame = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(frame);
+  }, [hasGrid, maximizedKey, signal]);
 
   const cellRects = useMemo(() => {
     const rects = new Map<string, GridCellRect>();

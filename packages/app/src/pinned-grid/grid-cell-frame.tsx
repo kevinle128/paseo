@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { View, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { isNative } from "@/constants/platform";
 import { WindowChromeRegion } from "@/utils/desktop-window";
@@ -8,6 +8,54 @@ import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "./grid-cell-c
 import type { GridCellRect } from "./geometry";
 
 type ChromeCorners = "both" | "top-left" | "top-right" | "none";
+
+/** Maximize and restore move the cell rect over this long. Drags and resizes never animate. */
+const RECT_TRANSITION_MS = 240;
+const RECT_TRANSITION_EASING = "cubic-bezier(.2, .8, .2, 1)";
+// A little longer than the transition so the style is not removed while the last frame paints.
+const RECT_TRANSITION_CLEAR_MS = RECT_TRANSITION_MS + 60;
+
+// React Native types omit `transition*`; React Native Web passes them to CSS.
+const RECT_TRANSITION_STYLE = {
+  transitionProperty: "left, top, width, height",
+  transitionDuration: `${RECT_TRANSITION_MS}ms`,
+  transitionTimingFunction: RECT_TRANSITION_EASING,
+} as unknown as ViewStyle;
+
+// DOM node of every mounted cell frame, so keyboard navigation can put focus on a frame.
+const frameNodes = new Map<string, HTMLElement>();
+
+/** Moves DOM focus to the frame of a cell. Returns false when the frame is not mounted. */
+export function focusGridCellFrame(key: string): boolean {
+  const node = frameNodes.get(key);
+  if (!node) {
+    return false;
+  }
+  node.focus({ preventScroll: true });
+  return true;
+}
+
+/** Moves DOM focus to the frame that contains `inner`. Returns false when no frame does. */
+export function focusGridCellFrameContaining(inner: Node | null): boolean {
+  if (!inner) {
+    return false;
+  }
+  for (const node of frameNodes.values()) {
+    if (node.contains(inner)) {
+      node.focus({ preventScroll: true });
+      return true;
+    }
+  }
+  return false;
+}
+
+export function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 interface GridCellFrameProps {
   cellKey: string;
@@ -21,6 +69,8 @@ interface GridCellFrameProps {
   /** Other cells dim when more than one cell shows. */
   dimmed: boolean;
   chromeCorners: ChromeCorners;
+  /** Workspace title that assistive technology announces when the cell frame takes focus. */
+  label?: string;
   /** Returns true when the call moved focus to this cell. */
   onFocusCell: (key: string) => boolean;
   onToggleMaximize: (key: string) => void;
@@ -45,6 +95,7 @@ export const GridCellFrame = memo(function GridCellFrame({
   isMaximized,
   dimmed,
   chromeCorners,
+  label,
   onFocusCell,
   onToggleMaximize,
   onHeaderDragStart,
@@ -58,6 +109,22 @@ export const GridCellFrame = memo(function GridCellFrame({
   isCellRef.current = isCell;
   const onFocusCellRef = useRef(onFocusCell);
   onFocusCellRef.current = onFocusCell;
+
+  // The rect transition applies only to the commit that changes `isMaximized`. The state is
+  // adjusted during render so the new rect and the transition style reach the DOM together.
+  const [seenMaximized, setSeenMaximized] = useState(isMaximized);
+  const [rectAnimating, setRectAnimating] = useState(false);
+  if (seenMaximized !== isMaximized) {
+    setSeenMaximized(isMaximized);
+    setRectAnimating(isCell && !isNative && !prefersReducedMotion());
+  }
+  useEffect(() => {
+    if (!rectAnimating) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setRectAnimating(false), RECT_TRANSITION_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [rectAnimating]);
 
   // Focus moves in capture phase and without preventDefault: the click still reaches its target.
   useEffect(() => {
@@ -98,6 +165,25 @@ export const GridCellFrame = memo(function GridCellFrame({
       node.removeEventListener("focusin", handleFocusIn, true);
     };
   }, [cellKey, claim]);
+
+  // A cell frame takes DOM focus (not tab order) so that, after Escape leaves the composer, the
+  // next key still reaches the shortcut pipeline inside the focused cell.
+  useEffect(() => {
+    const node: unknown = frameRef.current;
+    if (!isCell || isNative || !(node instanceof HTMLElement)) {
+      return undefined;
+    }
+    node.tabIndex = -1;
+    node.style.outline = "none";
+    frameNodes.set(cellKey, node);
+    return () => {
+      node.removeAttribute("tabindex");
+      node.style.outline = "";
+      if (frameNodes.get(cellKey) === node) {
+        frameNodes.delete(cellKey);
+      }
+    };
+  }, [cellKey, isCell]);
 
   // DOM focus can only sit in a cell that is not focused after the route moved away from it
   // (a sidebar click), because any focus inside a cell focuses that cell. Typed characters follow
@@ -156,9 +242,11 @@ export const GridCellFrame = memo(function GridCellFrame({
       rect ? styles.cell : styles.single,
       !isVisible && styles.hidden,
       isDragSource && styles.dragSource,
+      rect && rectAnimating && styles.rectAnimating,
       rectStyle,
+      rect && rectAnimating && RECT_TRANSITION_STYLE,
     ],
-    [isDragSource, isVisible, rect, rectStyle],
+    [isDragSource, isVisible, rect, rectAnimating, rectStyle],
   );
   const ringStyle = useMemo(
     () => [styles.ring, isFocused && !isMaximized ? styles.ringFocused : styles.ringIdle],
@@ -184,6 +272,8 @@ export const GridCellFrame = memo(function GridCellFrame({
           ref={frameRef}
           style={frameStyle}
           testID={isCell ? `pinned-grid-cell-${cellKey}` : undefined}
+          role={isCell ? "group" : undefined}
+          aria-label={isCell ? label : undefined}
           onPointerEnter={isCell ? handlePointerEnter : undefined}
           onPointerLeave={isCell ? handlePointerLeave : undefined}
         >
@@ -217,6 +307,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   dragSource: {
     zIndex: 30,
+  },
+  // The cell that grows or shrinks draws above the cells that appear or vanish around it.
+  rectAnimating: {
+    zIndex: 25,
   },
   dim: {
     position: "absolute",

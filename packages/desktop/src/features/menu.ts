@@ -64,12 +64,100 @@ export function reloadActiveBrowserOrWindow({
   win.webContents.reload();
 }
 
+/**
+ * Zoom In and Zoom Out stay off while a shortcut is being recorded and while a pinned grid shows,
+ * because both need Cmd/Ctrl +, = and - to reach the renderer.
+ */
+export function resolveZoomEnabled(input: {
+  capturingShortcut: boolean;
+  gridZoomKeys: boolean;
+}): boolean {
+  return !input.capturingShortcut && !input.gridZoomKeys;
+}
+
+/**
+ * Counts the grid-zoom claims of each window. A window can hold several claims (stacked decks), so
+ * the claim stays until the last holder releases it. Menu state is process-wide, so the caller
+ * reads the claim of the focused window only.
+ */
+export class GridZoomClaims {
+  private readonly counts = new Map<number, number>();
+
+  public add(windowId: number): void {
+    this.counts.set(windowId, (this.counts.get(windowId) ?? 0) + 1);
+  }
+
+  /** Drops one claim. Returns true when the window still holds none afterwards and held one before. */
+  public release(windowId: number): boolean {
+    const count = this.counts.get(windowId);
+    if (count === undefined) {
+      return false;
+    }
+    if (count <= 1) {
+      this.counts.delete(windowId);
+      return true;
+    }
+    this.counts.set(windowId, count - 1);
+    return false;
+  }
+
+  /** Drops every claim of a window. Returns true when the window held any. */
+  public clear(windowId: number): boolean {
+    return this.counts.delete(windowId);
+  }
+
+  public has(windowId: number | null | undefined): boolean {
+    return windowId !== null && windowId !== undefined && this.counts.has(windowId);
+  }
+}
+
+interface NavigationDetails {
+  isMainFrame: boolean;
+  isSameDocument: boolean;
+}
+
+interface ClaimWindow {
+  webContents: {
+    id: number;
+    on(event: "did-start-navigation", listener: (details: NavigationDetails) => void): unknown;
+    on(event: "render-process-gone", listener: () => void): unknown;
+  };
+  on(event: "closed", listener: () => void): unknown;
+}
+
+/**
+ * A claim belongs to the renderer document that made it. It ends when that document goes away: a
+ * cross-document navigation of the main frame, a renderer crash, or the window closing. Iframe
+ * loads and same-document navigations keep it, because the grid still shows.
+ */
+export function releaseGridZoomClaimsOnDocumentEnd(
+  win: ClaimWindow,
+  claims: GridZoomClaims,
+  onReleased: () => void,
+): void {
+  const windowId = win.webContents.id;
+  const release = () => {
+    if (claims.clear(windowId)) {
+      onReleased();
+    }
+  };
+  win.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      release();
+    }
+  });
+  win.webContents.on("render-process-gone", release);
+  win.on("closed", release);
+}
+
 function buildApplicationMenuTemplate(
   options: ApplicationMenuOptions,
-  capturing: boolean,
+  flags: { capturingShortcut: boolean; gridZoomKeys: boolean },
 ): Electron.MenuItemConstructorOptions[] {
   const isMac = process.platform === "darwin";
-  const zoomEnabled = !capturing;
+  const zoomEnabled = resolveZoomEnabled(flags);
+  // Cmd/Ctrl+0 is not a grid key, so it only gives way to shortcut recording.
+  const actualSizeEnabled = !flags.capturingShortcut;
 
   return [
     ...(isMac
@@ -136,7 +224,7 @@ function buildApplicationMenuTemplate(
         {
           label: "Actual Size",
           accelerator: "CmdOrCtrl+0",
-          enabled: zoomEnabled,
+          enabled: actualSizeEnabled,
           click: withBrowserWindow((win) => {
             win.webContents.setZoomLevel(0);
           }),
@@ -183,11 +271,15 @@ function buildApplicationMenuTemplate(
 
 let applicationMenuOptions: ApplicationMenuOptions | null = null;
 let capturingShortcut = false;
+const gridZoomClaims = new GridZoomClaims();
 
 function rebuildApplicationMenu(): void {
   if (!applicationMenuOptions) return;
   const menu = Menu.buildFromTemplate(
-    buildApplicationMenuTemplate(applicationMenuOptions, capturingShortcut),
+    buildApplicationMenuTemplate(applicationMenuOptions, {
+      capturingShortcut,
+      gridZoomKeys: gridZoomClaims.has(BrowserWindow.getFocusedWindow()?.webContents.id),
+    }),
   );
   Menu.setApplicationMenu(menu);
 }
@@ -235,11 +327,29 @@ export function setupApplicationMenu(options: ApplicationMenuOptions): void {
     rebuildApplicationMenu();
   });
 
+  // The pinned grid maximizes and restores cells with Cmd/Ctrl +, = and -, so the zoom items give
+  // up those accelerators while it shows. Normal mode keeps window zoom.
+  ipcMain.handle("paseo:menu:set-grid-zoom-keys", (event, active?: boolean) => {
+    const windowId = event.sender.id;
+    if (active === true) {
+      gridZoomClaims.add(windowId);
+    } else {
+      gridZoomClaims.release(windowId);
+    }
+    rebuildApplicationMenu();
+  });
+
   // If the renderer reloads mid-capture (e.g. Cmd+R) the renderer-side effect
   // never gets to send `false`, so reset the flag from the main process when a
   // main window finishes loading. Workspace browser webviews are not
   // BrowserWindows, so they don't trigger this.
+  // The menu is process-wide, so it follows the window that has focus.
+  app.on("browser-window-focus", rebuildApplicationMenu);
+  app.on("browser-window-blur", rebuildApplicationMenu);
   app.on("browser-window-created", (_event, win) => {
+    // A reload, a crash or a close ends the renderer effect without a `false`; the renderer sends
+    // `true` again after a reload if its grid still shows.
+    releaseGridZoomClaimsOnDocumentEnd(win, gridZoomClaims, rebuildApplicationMenu);
     win.webContents.on("did-finish-load", () => {
       if (!capturingShortcut) return;
       capturingShortcut = false;

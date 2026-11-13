@@ -40,6 +40,8 @@ import {
   type HistoryStartSettleScheduler,
 } from "./history-start-settle-scheduler";
 import { useChatFindSelectedMessageId } from "@/agent-stream/chat-find";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
+import { isUnfocusedGridCell } from "./grid-follow";
 import { useScrollToMessage } from "./use-scroll-to-message.web";
 
 interface CreateWebStreamStrategyInput {
@@ -380,8 +382,11 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     renderLiveAuxiliary,
   } = renderers;
 
+  const alwaysFollowsOutput = isUnfocusedGridCell(useWorkspaceGridCell());
+  const alwaysFollowsOutputRef = useRef(alwaysFollowsOutput);
   isActiveRef.current = isActive;
   followOutputRef.current = followOutput;
+  alwaysFollowsOutputRef.current = alwaysFollowsOutput;
 
   const hasRouteBottomAnchorRequest = routeBottomAnchorRequest !== null;
   const activationKey = routeBottomAnchorRequest?.requestKey ?? props.agentId;
@@ -770,11 +775,21 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const stopFollowingOutputFromUserIntent = useStableEvent(() => {
     finishInitialFill();
     cancelPendingStickToBottom();
-    if (followOutputRef.current) {
+    if (followOutputRef.current && !alwaysFollowsOutputRef.current) {
       setFollowOutput(false);
     }
     rearmHistoryStartFromUserIntent();
   });
+
+  // A grid cell that loses focus returns to the newest message and keeps following, whatever the
+  // reader did in it before.
+  useLayoutEffect(() => {
+    if (!alwaysFollowsOutput || !isActive) {
+      return;
+    }
+    setFollowOutput(true);
+    forceStickToBottom();
+  }, [alwaysFollowsOutput, forceStickToBottom, isActive]);
 
   useEffect(() => {
     if (revealInitialHistory) finishInitialFill();

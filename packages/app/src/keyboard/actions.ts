@@ -56,6 +56,13 @@ export type KeyboardActionId =
   | "workspace.pin"
   | "view.toggle.focus"
   | "workspace.cell.maximize.toggle"
+  | "workspace.cell.maximize.set"
+  | "workspace.cell.maximize.restore"
+  | "workspace.cell.focus.left"
+  | "workspace.cell.focus.right"
+  | "workspace.cell.focus.up"
+  | "workspace.cell.focus.down"
+  | "workspace.cell.composer.focus"
   | "theme.cycle"
   | "message-input.action";
 

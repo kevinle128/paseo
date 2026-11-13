@@ -7,7 +7,7 @@ import { getServerId } from "../support/helpers/server-id";
 import { waitForWorkspaceInSidebar } from "../support/helpers/workspace-ui";
 import { buildHostWorkspaceRoute } from "@/utils/host-routes";
 
-// Heights are far apart on purpose: the slim line is ~40px, the full composer is ~120px.
+// Heights are far apart on purpose: the collapsed composer is its toolbar row (~56px), the full composer is ~120px.
 const MINIMAL_MAX_HEIGHT = 64;
 const FULL_MIN_HEIGHT = 80;
 
@@ -19,15 +19,20 @@ function cellComposerInput(cell: Locator): Locator {
   return cell.getByRole("textbox", { name: "Message agent..." });
 }
 
+// A collapsed composer keeps its toolbar and shows this inline placeholder instead of the editor.
+function cellComposerPlaceholder(cell: Locator): Locator {
+  return cell.getByTestId("composer-inline-placeholder");
+}
+
 async function composerHeight(cell: Locator): Promise<number> {
   const box = await cell.getByTestId("message-input-root").boundingBox();
   return box?.height ?? 0;
 }
 
-test.describe("Minimal composer in pinned grid cells", () => {
+test.describe("Collapsed composer in pinned grid cells", () => {
   test.describe.configure({ timeout: 240_000 });
 
-  test("a click on an unfocused cell's slim composer takes typing and shortcuts at once", async ({
+  test("a press on an unfocused cell's inline placeholder expands and focuses it; Escape leaves, then interrupts", async ({
     page,
   }) => {
     const serverId = getServerId();
@@ -66,18 +71,36 @@ test.describe("Minimal composer in pinned grid cells", () => {
       const otherCell = cellLocator(page, serverId, other.workspaceId);
       await expect(targetCell).toBeVisible({ timeout: 30_000 });
       await expect(otherCell).toBeVisible({ timeout: 30_000 });
-      await expect(cellComposerInput(targetCell)).toBeVisible({ timeout: 30_000 });
-      await expect(cellComposerInput(otherCell)).toBeVisible({ timeout: 30_000 });
+      await expect(cellComposerPlaceholder(targetCell)).toBeVisible({ timeout: 30_000 });
+      await expect(cellComposerPlaceholder(otherCell)).toBeVisible({ timeout: 30_000 });
       await expect(otherCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
 
-      // The unfocused cell's composer is slim while idle.
+      // The unfocused cell's composer is collapsed while idle: it keeps its toolbar and shows the
+      // placeholder in place of the editor.
       await expect.poll(() => composerHeight(targetCell)).toBeLessThan(MINIMAL_MAX_HEIGHT);
 
-      // Click the unfocused cell's slim composer and type, press Shift+Tab and Escape with no
-      // wait in between.
-      await cellComposerInput(targetCell).click();
+      // The collapsed composer of a running agent shows Stop. A first press in an unfocused cell
+      // only focuses it and sends no interrupt.
+      const stop = targetCell.getByRole("button", { name: "Stop agent" });
+      await expect(stop).toBeVisible();
+      await expect(targetCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(0);
+      await stop.click();
+      await expect(targetCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
+      expect(requests.cancelRequests(target.agentId)).toBe(0);
+      await expect.poll(() => composerHeight(targetCell)).toBeLessThan(MINIMAL_MAX_HEIGHT);
+
+      // One press on the placeholder expands the composer and focuses the editor, so the first
+      // typed key lands. Shift+Tab then reaches the same cell.
+      await cellComposerPlaceholder(targetCell).click();
+      await expect(cellComposerInput(targetCell)).toBeFocused();
+      await expect.poll(() => composerHeight(targetCell)).toBeGreaterThan(FULL_MIN_HEIGHT);
       await page.keyboard.type("typed at once");
       await page.keyboard.press("Shift+Tab");
+
+      // The first Escape leaves the composer and sends no interrupt; the second one interrupts.
+      await page.keyboard.press("Escape");
+      await expect(cellComposerInput(targetCell)).not.toBeFocused();
+      expect(requests.cancelRequests(target.agentId)).toBe(0);
       await page.keyboard.press("Escape");
 
       await expect(cellComposerInput(targetCell)).toHaveValue("typed at once");
@@ -102,24 +125,13 @@ test.describe("Minimal composer in pinned grid cells", () => {
       await cellComposerInput(targetCell).fill("");
       await otherCell.click({ position: { x: 24, y: 24 } });
       await expect.poll(() => composerHeight(targetCell)).toBeLessThan(MINIMAL_MAX_HEIGHT);
-
-      // The slim line keeps a small send button. A first press in an unfocused cell sends nothing.
-      const slimSend = targetCell.getByTestId("composer-minimal-send");
-      await expect(slimSend).toBeVisible();
-      const slimSendBox = await slimSend.boundingBox();
-      expect(slimSendBox?.width ?? 0).toBeLessThanOrEqual(28);
-      await expect(targetCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(0);
-      const sendsBefore = requests.sendRequests(target.agentId);
-      await slimSend.click({ force: true });
-      await expect(cellComposerInput(targetCell)).toHaveValue("");
-      expect(requests.sendRequests(target.agentId)).toBe(sendsBefore);
     } finally {
       await other.cleanup();
       await target.cleanup();
     }
   });
 
-  test("a press focuses a cell without expanding its composer; only the text input expands it", async ({
+  test("a press focuses a cell without expanding its composer; only the inline placeholder expands it", async ({
     page,
   }) => {
     const serverId = getServerId();
@@ -147,7 +159,7 @@ test.describe("Minimal composer in pinned grid cells", () => {
       const secondCell = cellLocator(page, serverId, second.workspaceId);
       await expect(firstCell).toBeVisible({ timeout: 30_000 });
       await expect(secondCell).toBeVisible({ timeout: 30_000 });
-      await expect(cellComposerInput(firstCell)).toBeVisible({ timeout: 30_000 });
+      await expect(cellComposerPlaceholder(firstCell)).toBeVisible({ timeout: 30_000 });
       await expect(secondCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
 
       const expectFocusOn = async (cell: Locator, other: Locator) => {
@@ -156,7 +168,7 @@ test.describe("Minimal composer in pinned grid cells", () => {
         await expect.poll(() => composerHeight(cell)).toBeLessThan(MINIMAL_MAX_HEIGHT);
       };
 
-      // Header, transcript and tab bar each move focus and leave the composer slim.
+      // Header, transcript and tab bar each move focus and leave the composer collapsed.
       await firstCell.getByTestId("workspace-header-title").click();
       await expectFocusOn(firstCell, secondCell);
       await secondCell.getByTestId("agent-chat-scroll").click({ position: { x: 40, y: 40 } });
@@ -164,26 +176,26 @@ test.describe("Minimal composer in pinned grid cells", () => {
       await firstCell.locator('[data-testid^="workspace-tab-"]').first().click();
       await expectFocusOn(firstCell, secondCell);
 
-      // Focus A, then B, then A: A's composer stays slim and holds no DOM focus.
+      // Focus A, then B, then A: A's composer stays collapsed and holds no DOM focus.
       await secondCell.getByTestId("workspace-header-title").click();
       await firstCell.getByTestId("workspace-header-title").click();
       await expectFocusOn(firstCell, secondCell);
       await expect(cellComposerInput(firstCell)).not.toBeFocused();
 
-      // A press on the slim bar outside the text input does not expand it. The far-left edge of
-      // the root is padding: neither the input nor the send press area.
+      // A press on the toolbar row outside the placeholder does not expand it. The far-left edge
+      // of the root is padding.
       await secondCell.getByTestId("message-input-root").click({ position: { x: 2, y: 2 } });
       await expectFocusOn(secondCell, firstCell);
       await expect(cellComposerInput(secondCell)).not.toBeFocused();
 
-      // A sidebar press on a pinned row keeps the composer slim.
+      // A sidebar press on a pinned row keeps the composer collapsed.
       await page
         .locator(`[data-testid="sidebar-workspace-row-${serverId}:${first.workspaceId}"]:visible`)
         .first()
         .click();
       await expectFocusOn(firstCell, secondCell);
 
-      // Maximize then restore: slim, and the text input holds no DOM focus.
+      // Maximize then restore: collapsed, and the text input holds no DOM focus.
       await firstCell.getByTestId("workspace-grid-cell-maximize").click();
       await expect(firstCell.getByTestId("workspace-grid-cell-maximize")).toHaveAttribute(
         "aria-label",
@@ -197,8 +209,8 @@ test.describe("Minimal composer in pinned grid cells", () => {
       await expectFocusOn(firstCell, secondCell);
       await expect(cellComposerInput(firstCell)).not.toBeFocused();
 
-      // A press in the text input expands the composer and takes the first typed key.
-      await cellComposerInput(secondCell).click();
+      // A press on the placeholder expands the composer and takes the first typed key.
+      await cellComposerPlaceholder(secondCell).click();
       await expect.poll(() => composerHeight(secondCell)).toBeGreaterThan(FULL_MIN_HEIGHT);
       await page.keyboard.type("x");
       await expect(cellComposerInput(secondCell)).toHaveValue("x");

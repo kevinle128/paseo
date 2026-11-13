@@ -96,3 +96,17 @@ A binding on a key the platform already uses for editing, such as Cmd/Ctrl+Z for
 workspace archive undo, declares `editable: false` and registers its handler with
 `isActive` true only while it has work. An inactive handler leaves the key
 unhandled, so the pipeline skips `preventDefault` and the platform's own undo runs.
+
+## Grid keys
+
+The binding resolver has no notion of the pinned grid: a binding resolves in every layout, and the first match in the table wins. A grid-only key therefore resolves everywhere and relies on its handler. The handler is enabled only while a grid shows, and an unhandled match does not call `preventDefault`, so Normal mode keeps the key. See [pinned-grid.md](pinned-grid.md#maximize) for the keys.
+
+Enter shares its combo with dictation confirm, and the resolver does not try a second binding. The grid handler (priority 100) acts first. When it does not act, the key must still confirm dictation, so the composer also handles the grid Enter action as dictation confirm. This covers screens without a deck, such as `/new`, and Normal mode.
+
+Arrows and Enter in a grid act only when no overlay (menu, popover, dialog, command center) is open and DOM focus is not on a control that uses the key. Enter yields to any button, link, input or tab. Arrows yield only to controls that move with them (inputs, selects, tabs, menu items, options, radios, sliders), so they work again after a click on a header button.
+
+Esc in a grid cell has no binding of its own. The composer's interrupt handler blurs the editor and puts focus on the cell frame first. A second Esc interrupts the agent.
+
+`Cmd/Ctrl +, = and -` collide with window zoom, so they act as maximize and restore only while a grid shows. Electron's zoom menu items own those accelerators. The renderer claims them per window (`paseo:menu:set-grid-zoom-keys`, counted, so several mounts in one window release together), and the main process disables Zoom In and Zoom Out only for the focused window, rebuilding the menu on window focus and blur. A claim ends when the window loads another document in its main frame, the renderer dies, or the window closes. Iframe loads and same-document navigations keep it. The menu code is in `packages/desktop/src/features/menu.ts`, combined with `paseo:menu:set-capturing-shortcut`. Plain web needs only the handler's `preventDefault`.
+
+The combo parser splits on `+`, so it cannot express the `+` key itself. On layouts where `+` is an unshifted key (for example German), neither `Cmd+=` nor `Cmd+Shift+=` matches and maximize has no key there. `Cmd/Ctrl+Shift+Enter` still works.

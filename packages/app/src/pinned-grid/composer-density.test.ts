@@ -3,6 +3,7 @@ import {
   isGridCell,
   isSlimComposerCell,
   resolveComposerDensity,
+  resolvePressHold,
   type ComposerDensityInput,
 } from "./composer-density";
 
@@ -79,5 +80,46 @@ describe("grid cell predicates", () => {
     expect(isSlimComposerCell(null)).toBe(false);
     expect(isSlimComposerCell({ isMaximized: true })).toBe(false);
     expect(isSlimComposerCell({ isMaximized: false })).toBe(true);
+  });
+});
+
+describe("resolvePressHold", () => {
+  const none = { insideTextInput: false, insidePlaceholder: false };
+
+  it("never holds for a press outside the composer", () => {
+    for (const density of ["full", "minimal"] as const) {
+      expect(
+        resolvePressHold({
+          insideRoot: false,
+          density,
+          insideTextInput: true,
+          insidePlaceholder: true,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("holds a full composer for any press inside it", () => {
+    expect(resolvePressHold({ insideRoot: true, density: "full", ...none })).toBe(true);
+  });
+
+  it("expands a minimal composer from the text surface or the placeholder only", () => {
+    expect(resolvePressHold({ insideRoot: true, density: "minimal", ...none })).toBe(false);
+    expect(
+      resolvePressHold({
+        insideRoot: true,
+        density: "minimal",
+        insideTextInput: true,
+        insidePlaceholder: false,
+      }),
+    ).toBe(true);
+    expect(
+      resolvePressHold({
+        insideRoot: true,
+        density: "minimal",
+        insideTextInput: false,
+        insidePlaceholder: true,
+      }),
+    ).toBe(true);
   });
 });

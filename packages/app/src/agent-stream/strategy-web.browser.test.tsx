@@ -5,6 +5,8 @@ import { DEFAULT_CONTENT_MAX_WIDTH } from "@/styles/theme";
 import type { StreamItem } from "@/types/stream";
 import type { DisclosureTriggerEdge, StreamRenderInput, StreamViewportHandle } from "./strategy";
 import { createWebStreamStrategy } from "./strategy-web";
+import { createPointerFocusClaim } from "@/pinned-grid/cell-press-guard";
+import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -77,8 +79,13 @@ function mountTimeline(historyMounted: StreamItem[]) {
     forwardListContentContainerStyle: null,
     contentMaxWidth: DEFAULT_CONTENT_MAX_WIDTH,
   };
+  let cell: WorkspaceGridCell | null = null;
   const render = (segments: Partial<StreamRenderInput["segments"]>) =>
-    root.render(strategy.render({ ...input, segments: { ...input.segments, ...segments } }));
+    root.render(
+      <WorkspaceGridCellProvider value={cell}>
+        {strategy.render({ ...input, segments: { ...input.segments, ...segments } })}
+      </WorkspaceGridCellProvider>,
+    );
   act(() => render({}));
 
   const scrollContainer = host.querySelector<HTMLElement>('[data-testid="agent-chat-scroll"]');
@@ -91,6 +98,10 @@ function mountTimeline(historyMounted: StreamItem[]) {
 
   return {
     render: (segments: Partial<StreamRenderInput["segments"]>) => act(() => render(segments)),
+    setCell: (next: WorkspaceGridCell | null, segments: Partial<StreamRenderInput["segments"]>) => {
+      cell = next;
+      act(() => render(segments));
+    },
     hold: (rowId: string, apply: () => void, triggerEdge: DisclosureTriggerEdge = "top") =>
       act(() => viewportRef.current!.holdRow(rowId, apply, triggerEdge)),
     rowTop: (id: string) =>
@@ -206,5 +217,56 @@ describe("web disclosure hold", () => {
     timeline.render({ liveHead: [row(8)] });
     await timeline.settle();
     expect(timeline.distanceFromEnd()).toBeLessThanOrEqual(1);
+  });
+});
+
+const NOOP = () => {};
+
+function gridCell(isFocused: boolean): WorkspaceGridCell {
+  return {
+    isFocused,
+    isMaximized: false,
+    toggleMaximize: NOOP,
+    focusCell: NOOP,
+    pointerFocusClaim: createPointerFocusClaim(),
+  };
+}
+
+describe("grid cell follow", () => {
+  it("returns an unfocused cell to the end and follows new rows after the reader scrolled up", async () => {
+    const history = [1, 2, 3, 4, 5, 6].map((index) => row(index));
+    const timeline = mountTimeline(history);
+    await timeline.settle();
+    timeline.hold("message-5", () =>
+      timeline.render({ historyMounted: [...history.slice(0, 4), row(5, 240), history[5]!] }),
+    );
+    await timeline.settle();
+    timeline.scrollTo(0);
+    await timeline.settle();
+    expect(timeline.distanceFromEnd()).toBeGreaterThan(1);
+
+    timeline.setCell(gridCell(false), {});
+    await timeline.settle();
+    expect(timeline.distanceFromEnd()).toBeLessThanOrEqual(1);
+
+    timeline.render({ liveHead: [row(8)] });
+    await timeline.settle();
+    expect(timeline.distanceFromEnd()).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps the reader's position in the focused cell", async () => {
+    const history = [1, 2, 3, 4, 5, 6].map((index) => row(index));
+    const timeline = mountTimeline(history);
+    timeline.setCell(gridCell(true), {});
+    await timeline.settle();
+    timeline.hold("message-5", () =>
+      timeline.render({ historyMounted: [...history.slice(0, 4), row(5, 240), history[5]!] }),
+    );
+    await timeline.settle();
+    const triggerTop = timeline.rowTop("message-5");
+
+    timeline.render({ liveHead: [row(8)] });
+    await timeline.settle();
+    expect(timeline.rowTop("message-5")).toBe(triggerTop);
   });
 });

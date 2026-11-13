@@ -20,6 +20,23 @@ describe("reduceMaximize", () => {
     });
   });
 
+  it("maximizes a cell and keeps the same state when it is already maximized", () => {
+    expect(reduceMaximize(INITIAL_MAXIMIZE_STATE, { type: "maximize", key: "s:a" })).toEqual({
+      maximizedKey: "s:a",
+    });
+    const state = { maximizedKey: "s:a" };
+    expect(reduceMaximize(state, { type: "maximize", key: "s:a" })).toBe(state);
+  });
+
+  it("restores the grid on restore and ignores restore when nothing is maximized", () => {
+    expect(reduceMaximize({ maximizedKey: "s:a" }, { type: "restore" })).toEqual({
+      maximizedKey: null,
+    });
+    expect(reduceMaximize(INITIAL_MAXIMIZE_STATE, { type: "restore" })).toBe(
+      INITIAL_MAXIMIZE_STATE,
+    );
+  });
+
   it("restores the grid when the route moves to another cell", () => {
     expect(reduceMaximize({ maximizedKey: "s:a" }, { type: "route-changed", key: "s:b" })).toEqual({
       maximizedKey: null,

@@ -112,6 +112,8 @@ import {
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
+import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
+import { isUnfocusedGridCell } from "./grid-follow";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
@@ -308,11 +310,14 @@ const scrollIndicatorFadeOut = shouldDisableEntryExitAnimations ? undefined : Fa
 function ScrollToBottomButton({
   nearBottom,
   isTimelineDetached,
+  hidden,
   bottomOffset,
   onPress,
 }: {
   nearBottom: NearBottom;
   isTimelineDetached: boolean;
+  /** An unfocused grid cell follows the newest message by itself and has no button. */
+  hidden: boolean;
   bottomOffset: number;
   onPress: () => void;
 }) {
@@ -322,7 +327,7 @@ function ScrollToBottomButton({
     () => [stylesheet.scrollToBottomContainer, { bottom: bottomOffset }],
     [bottomOffset],
   );
-  if (isNearBottom && !isTimelineDetached) return null;
+  if (hidden || (isNearBottom && !isTimelineDetached)) return null;
   return (
     <View style={containerStyle} pointerEvents="box-none">
       <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
@@ -414,6 +419,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const timelineEpoch = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agentTimelineCursor.get(agentId)?.epoch ?? null,
     );
+    const gridCell = useWorkspaceGridCell();
     const isTimelineDetached = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agentTimelineHasNewer.get(agentId) === true,
     );
@@ -1216,6 +1222,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             <ScrollToBottomButton
               nearBottom={nearBottom}
               isTimelineDetached={isTimelineDetached}
+              hidden={isUnfocusedGridCell(gridCell)}
               bottomOffset={scrollToBottomOffset}
               onPress={scrollToBottom}
             />

@@ -91,6 +91,8 @@ export interface DesktopWebUtilsBridge {
 export interface DesktopMenuBridge {
   showContextMenu?: (input?: { kind?: "terminal"; hasSelection?: boolean }) => Promise<void>;
   setCapturingShortcut?: (capturing: boolean) => Promise<void>;
+  /** Frees Cmd/Ctrl +, = and - from window zoom while a pinned grid shows. */
+  setGridZoomKeys?: (active: boolean) => Promise<void>;
 }
 
 export interface DesktopWindowChromeUpdate {

@@ -4,6 +4,8 @@ export interface MaximizeState {
 
 export type MaximizeEvent =
   | { type: "toggle"; key: string }
+  | { type: "maximize"; key: string }
+  | { type: "restore" }
   | { type: "route-changed"; key: string }
   | { type: "cells-changed"; keys: string[] };
 
@@ -19,6 +21,10 @@ export function reduceMaximize(state: MaximizeState, event: MaximizeEvent): Maxi
       return state.maximizedKey === event.key
         ? INITIAL_MAXIMIZE_STATE
         : { maximizedKey: event.key };
+    case "maximize":
+      return state.maximizedKey === event.key ? state : { maximizedKey: event.key };
+    case "restore":
+      return state.maximizedKey === null ? state : INITIAL_MAXIMIZE_STATE;
     case "route-changed":
       return state.maximizedKey === null || state.maximizedKey === event.key
         ? state
