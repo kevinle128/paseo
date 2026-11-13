@@ -338,8 +338,16 @@ test.describe("Pinned grid reorder", () => {
       await expectOrders(page, serverId, all, all);
       expect(requests.cancelRequests(running.agentId)).toBe(0);
 
-      // Outside a drag, Escape in the cell still interrupts the agent.
-      await runningCell.getByRole("textbox", { name: "Message agent..." }).click();
+      // Outside a drag, the first Escape in a cell composer only leaves the composer; the second
+      // Escape interrupts the agent. A collapsed composer covers its editor with the inline
+      // placeholder, so the press goes there.
+      await runningCell.getByTestId("composer-inline-placeholder").click();
+      await expect(runningCell.getByRole("textbox", { name: "Message agent..." })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(
+        runningCell.getByRole("textbox", { name: "Message agent..." }),
+      ).not.toBeFocused();
+      expect(requests.cancelRequests(running.agentId)).toBe(0);
       await page.keyboard.press("Escape");
       await expect.poll(() => requests.cancelRequests(running.agentId)).toBe(1);
     } finally {

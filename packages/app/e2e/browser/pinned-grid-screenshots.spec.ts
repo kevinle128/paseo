@@ -106,10 +106,11 @@ test.describe("Pinned grid screenshots", () => {
       await expect(focusedCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
       await capture(page, "04-focused-cell-highlight.png");
 
-      // Both cells show the slim composer; a press in the input of the focused cell expands it.
+      // Both cells show the collapsed composer; a press on the inline placeholder of the focused
+      // cell expands it.
       await capture(page, "06a-composer-minimal-unfocused-cell.png", idleCell);
       await capture(page, "06c-composer-minimal-focused-cell.png", focusedCell);
-      await focusedCell.getByRole("textbox", { name: "Message agent..." }).click();
+      await focusedCell.getByTestId("composer-inline-placeholder").click();
       await capture(page, "06b-composer-expanded-focused-cell.png", focusedCell);
 
       await focusedCell.getByTestId("workspace-grid-cell-maximize").click();
