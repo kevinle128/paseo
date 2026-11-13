@@ -32,6 +32,7 @@ export function ComposerInputPresentation({
   controlSizing,
   sendIconSize,
   surface,
+  surfaceHidden,
   toolbar,
   send,
   error,
@@ -49,6 +50,11 @@ export function ComposerInputPresentation({
   controlSizing: ControlSizing;
   sendIconSize: number;
   surface: ReactNode;
+  /**
+   * Clips the text surface to no height. The editor stays mounted so it can take focus, and the
+   * toolbar keeps the place it has when the surface shows.
+   */
+  surfaceHidden: boolean;
   toolbar: ReactNode;
   send: ReactNode;
   error: ReactNode;
@@ -112,7 +118,13 @@ export function ComposerInputPresentation({
           pointerEvents={inputPointerEvents}
         >
           {fullscreen ? null : attachmentSlot}
-          <View style={fullscreen ? styles.fullscreenTextSurface : styles.inlineTextSurface}>
+          <View
+            style={
+              fullscreen
+                ? styles.fullscreenTextSurface
+                : [styles.inlineTextSurface, surfaceHidden && styles.inlineTextSurfaceHidden]
+            }
+          >
             {surface}
             {showFullscreenButton && !fullscreen ? (
               <Button
@@ -146,6 +158,8 @@ export function ComposerInputPresentation({
 const styles = StyleSheet.create((theme) => ({
   inline: { flexShrink: 1, position: "relative" },
   inlineTextSurface: { flexShrink: 1, position: "relative" },
+  // The wrapper's flex gap still applies to a zero-height child, so the margin takes it back.
+  inlineTextSurfaceHidden: { height: 0, overflow: "hidden", marginBottom: -theme.spacing[3] },
   iconButton: {
     width: TOOLBAR_CONTROL_HEIGHT,
     height: TOOLBAR_CONTROL_HEIGHT,
