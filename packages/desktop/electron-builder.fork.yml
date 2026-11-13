@@ -3,7 +3,6 @@ extends: ./electron-builder.yml
 extraMetadata:
   # Read by src/features/fork-update-config.ts to pick the updater behavior.
   paseoFork:
-    macUpdateMode: notify
     # Release assets live at <downloadBaseUrl>/<tag>/<file>. Keep in step with
     # the publish entry below.
     downloadBaseUrl: https://github.com/kevinle128/paseo/releases/download
@@ -17,8 +16,9 @@ publish:
     # The app always requests the "latest" channel, so the manifests must be
     # named latest*.yml whatever prerelease id the version has.
     channel: latest
-mac:
-  identity: "-"
-  notarize: false
+# macOS releases are signed with the fork's Developer ID and notarized (the base
+# config's hardened runtime and notarize). The release workflow writes an
+# ad-hoc overlay (identity "-", no notarization, notify-only updates) only for
+# an unsigned test build.
 win:
   verifyUpdateCodeSignature: false

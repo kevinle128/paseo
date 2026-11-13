@@ -37,9 +37,9 @@ on:
         default: true
         type: boolean
       macos_signing:
-        description: "Sign the macOS apps with the Developer ID certificate and notarize them."
+        description: "Sign the macOS app and DMG with the Developer ID certificate and notarize them. Releases are signed; false builds an ad-hoc signed test app."
         required: false
-        default: false
+        default: true
         type: boolean
       channel:
         description: "Update feed. canary publishes to the paseo-desktop-canary/ folder of the CDN for update tests; it needs macos_signing and creates no release."
@@ -78,9 +78,9 @@ on:
         default: true
         type: boolean
       macos_signing:
-        description: "Sign the macOS apps with the Developer ID certificate and notarize them."
+        description: "Sign the macOS app and DMG with the Developer ID certificate and notarize them. Releases are signed; false builds an ad-hoc signed test app."
         required: false
-        default: false
+        default: true
         type: boolean
       channel:
         description: "Update feed: production or canary."
@@ -378,7 +378,7 @@ jobs:
           key_path="$key_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
           chmod 600 "$key_path"
-          printf 'extends: ./%s\nmac:\n  identity: "%s"\n  notarize: true\n' \
+          printf 'extends: ./%s\nmac:\n  identity: "%s"\n  notarize: true\ndmg:\n  sign: true\n' \
             "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" "$APPLE_TEAM_ID" \
             > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-signed.yml"
           {
@@ -410,13 +410,15 @@ jobs:
             export APPLE_API_KEY_ID="$FORK_APPLE_API_KEY_ID" APPLE_API_ISSUER="$FORK_APPLE_API_ISSUER"
           fi
           unset FORK_CSC_LINK FORK_CSC_KEY_PASSWORD
-          # electron-builder 26.18 applies the hardened runtime to ad-hoc builds
-          # too, and library validation then refuses to load the ad-hoc signed
-          # Electron framework (dyld "Library not loaded", SIGABRT in the smoke
-          # test). An unsigned build therefore turns the hardened runtime off,
-          # as builds before 26.18 effectively had; a signed build keeps it.
+          # An unsigned build is ad-hoc signed, not notarized, and cannot update
+          # itself on macOS (Squirrel refuses an ad-hoc app), so it opens the
+          # DMG download instead. electron-builder 26.18 applies the hardened
+          # runtime to ad-hoc builds too, and library validation then refuses
+          # the ad-hoc signed Electron framework (dyld "Library not loaded"), so
+          # the hardened runtime is off. A signed build keeps every default.
           if [[ "$MACOS_SIGNING" != true ]]; then
-            printf 'extends: ./%s\nmac:\n  hardenedRuntime: false\n' "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" \
+            printf 'extends: ./%s\nextraMetadata:\n  paseoFork:\n    macUpdateMode: notify\nmac:\n  identity: "-"\n  notarize: false\n  hardenedRuntime: false\n' \
+              "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" \
               > "${DESKTOP_PACKAGE_PATH}/electron-builder.fork-adhoc.yml"
             export DESKTOP_BUILDER_CONFIG=electron-builder.fork-adhoc.yml
           fi
@@ -451,6 +453,47 @@ jobs:
           DMG_RELEASE_DIR="${DESKTOP_PACKAGE_PATH}/release" "$retry_bin/retry-busy-dmg" \
             npm run build:desktop -- --config "${DESKTOP_BUILDER_CONFIG:-electron-builder.fork.yml}" --publish never --mac --${{ matrix.electron_arch }}
 
+      # electron-builder notarizes the app only. The DMG is notarized and
+      # stapled here so the downloaded DMG itself passes Gatekeeper. Stapling
+      # changes the file, so its sha512 and size in latest-mac.yml are updated,
+      # and its blockmap (unused: macOS updates come from the zip) is removed.
+      - name: Notarize and staple the DMG
+        if: inputs.macos_signing
+        shell: bash
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          release="${DESKTOP_PACKAGE_PATH}/release"
+          for dmg in "$release"/*.dmg; do
+            result="$(xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" --wait --output-format json)"
+            status="$(jq -r .status <<< "$result")"
+            echo "$(basename "$dmg"): notarization ${status} ($(jq -r .id <<< "$result"))"
+            [[ "$status" == Accepted ]] || { echo "::error::Apple did not accept $(basename "$dmg")"; exit 1; }
+            xcrun stapler staple "$dmg"
+            rm -f "${dmg}.blockmap"
+          done
+          node - "$release" <<'MANIFEST'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const crypto = require("node:crypto");
+          const yaml = require("js-yaml");
+          const release = process.argv[2];
+          const manifestPath = path.join(release, "latest-mac.yml");
+          const manifest = yaml.load(fs.readFileSync(manifestPath, "utf8"));
+          for (const file of manifest.files) {
+            if (!file.url.endsWith(".dmg")) continue;
+            const data = fs.readFileSync(path.join(release, file.url));
+            file.sha512 = crypto.createHash("sha512").update(data).digest("base64");
+            file.size = data.length;
+            delete file.blockMapSize;
+            console.log(`${file.url}: sha512 and size updated after stapling`);
+          }
+          fs.writeFileSync(manifestPath, yaml.dump(manifest, { lineWidth: -1, noRefs: true }));
+          MANIFEST
+
       # electron-builder only warns and goes on when it cannot notarize, so the
       # signed build is checked here and fails unless Apple accepted it.
       - name: Verify the Developer ID signature and notarization
@@ -475,8 +518,14 @@ jobs:
             || { echo "::error::Gatekeeper does not report a notarized Developer ID app"; exit 1; }
           xcrun stapler validate "$app"
           for dmg in "${DESKTOP_PACKAGE_PATH}"/release/*.dmg; do
-            codesign --verify --verbose=2 "$dmg" || echo "::warning::$(basename "$dmg") has no valid signature"
-            xcrun stapler validate "$dmg" || echo "::warning::$(basename "$dmg") has no stapled ticket"
+            echo "Checking $(basename "$dmg")"
+            codesign --verify --verbose=2 "$dmg"
+            xcrun stapler validate "$dmg"
+            # The check Gatekeeper runs when a user opens the downloaded DMG.
+            dmg_out="$(spctl -a -vvv -t open --context context:primary-signature "$dmg" 2>&1)" || true
+            echo "$dmg_out"
+            grep -q 'source=Notarized Developer ID' <<< "$dmg_out" \
+              || { echo "::error::Gatekeeper does not accept $(basename "$dmg") as a notarized Developer ID disk image"; exit 1; }
           done
 
       # The packaged app reads this file to find its updates. A wrong owner here
@@ -1209,7 +1258,7 @@ jobs:
             if [[ -n "$CHANGELOG" ]]; then
               text+=$'\n\n'"${CHANGELOG}"
             fi
-            text+=$'\n\n'"Tải về: ${RELEASE_URL}"$'\n'"Windows và Linux (AppImage) tự cập nhật. macOS: tải file DMG và thay Paseo trong thư mục Applications."
+            text+=$'\n\n'"Tải về: ${RELEASE_URL}"$'\n'"Windows, Linux (AppImage) và macOS tự cập nhật. Máy Mac đang chạy bản cũ chưa ký: tải file DMG và thay Paseo trong thư mục Applications một lần."
           else
             event=build.failed
             key=build-failed

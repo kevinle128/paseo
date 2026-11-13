@@ -88,7 +88,8 @@ describe("fork build files", () => {
 
   it("derives the download base from the publish entry and passes the config schema", () => {
     const parsed = parseForkUpdateConfig({ paseoFork: forkBuildConfig.extraMetadata.paseoFork });
-    expect(parsed).toEqual(config);
+    // Releases are signed, so the fork config has no notify-only macOS mode.
+    expect(parsed).toEqual({ downloadBaseUrl: DOWNLOAD_BASE });
     const [publish] = forkBuildConfig.publish;
     expect(parsed?.downloadBaseUrl).toBe(
       `https://github.com/${publish?.owner}/${publish?.repo}/releases/download`,
