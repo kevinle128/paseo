@@ -32,6 +32,7 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isGridCell } from "@/pinned-grid/composer-density";
+import { takeComposerFocusRequest } from "@/pinned-grid/composer-focus-request";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 import { focusGridCellFrameContaining } from "@/pinned-grid/grid-cell-frame";
 import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
@@ -638,6 +639,16 @@ function dispatchComposerKeyboardAction(args: DispatchComposerKeyboardActionArgs
   return true;
 }
 
+function focusMessageInputAtEnd(messageInputRef: { current: MessageInputRef | null }): void {
+  focusWithRetries({
+    focus: () => messageInputRef.current?.focusAtEnd(),
+    isFocused: () => {
+      const el = messageInputRef.current?.getNativeElement?.() ?? null;
+      return Boolean(el) && document.activeElement === el;
+    },
+  });
+}
+
 function ComposerKeyboardRegistration({
   messageInputRef,
   isAgentRunning,
@@ -654,6 +665,12 @@ function ComposerKeyboardRegistration({
 }) {
   const { isActiveComposer } = useComposerKeyboardScope();
   const isGridCellComposer = useWorkspaceGridCell() !== null;
+  // A keyboard move between cells asks the composer of the new cell for the caret. The cell has
+  // not rendered as focused when the key runs, so the composer takes the request once it is active.
+  useEffect(() => {
+    if (!isWeb || !isActiveComposer || !isGridCellComposer) return;
+    if (takeComposerFocusRequest()) focusMessageInputAtEnd(messageInputRef);
+  }, [isActiveComposer, isGridCellComposer, messageInputRef]);
   const handleKeyboardAction = useCallback(
     (action: KeyboardActionDefinition): boolean =>
       dispatchComposerKeyboardAction({

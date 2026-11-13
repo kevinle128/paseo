@@ -27,6 +27,7 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { usePanelStore } from "@/stores/panel-store";
 import { AddPinCell } from "@/pinned-grid/add-pin-cell";
 import { GridCellFrame } from "@/pinned-grid/grid-cell-frame";
+import { useFadeOutPresence } from "@/pinned-grid/use-fade-out-presence";
 import { GridDropIndicator } from "@/pinned-grid/grid-drop-indicator";
 import { useGridCellSlots } from "@/pinned-grid/use-grid-cell-slots";
 import { usePendingPinFocus } from "@/pinned-grid/use-pending-pin-focus";
@@ -305,6 +306,7 @@ export function WorkspaceDeck() {
                 isCell={isCell}
                 rect={isCell ? (cellRects.get(key) ?? null) : null}
                 isMaximized={maximizedKey === key}
+                underMaximized={isCell && maximizedKey !== null && maximizedKey !== key}
                 dimmed={dimCells}
                 chromeCorners={
                   grid && cellIndex !== undefined
@@ -397,6 +399,7 @@ interface WorkspaceDeckEntryProps {
   isCell: boolean;
   rect: GridCellRect | null;
   isMaximized: boolean;
+  underMaximized: boolean;
   dimmed: boolean;
   chromeCorners: "both" | "top-left" | "top-right" | "none";
   clock: ReducedFidelityClock;
@@ -409,10 +412,11 @@ interface WorkspaceDeckEntryProps {
 
 const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
   selection,
-  presence,
+  presence: livePresence,
   isCell,
   rect,
   isMaximized,
+  underMaximized,
   dimmed,
   chromeCorners,
   clock,
@@ -422,6 +426,8 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
   onHeaderDragStart,
   isDragSource,
 }: WorkspaceDeckEntryProps) {
+  // A cell that a maximize hides keeps its content on screen while it fades out.
+  const presence = useFadeOutPresence(livePresence, isCell && underMaximized);
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
   const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
   // A string selector, so the entry renders again only when the title changes.
@@ -446,7 +452,7 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
   useCellTimelineSuspension({
     serverId: selection.serverId,
     workspaceId: selection.workspaceId,
-    suspended: isCell && presence === "hidden",
+    suspended: isCell && livePresence === "hidden",
   });
 
   if (!shouldKeepMounted) {
@@ -464,6 +470,7 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
         rect={rect}
         isFocused={presence === "focused"}
         isMaximized={isMaximized}
+        underMaximized={underMaximized}
         dimmed={dimmed}
         chromeCorners={chromeCorners}
         onFocusCell={onFocusCell}

@@ -1156,13 +1156,14 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
-  // --- Move focus between grid cells (grid only, outside text and terminal) ---
-  // `focusScope: "other"` keeps arrows in text fields, the terminal and browser panes untouched.
+  // --- Move focus between grid cells (grid only, outside terminals and browser panes) ---
+  // The composer is in scope, so the user can switch cells while typing. Outside a grid the
+  // handler does not act, and the key keeps its text-editing meaning.
   {
-    id: "workspace-cell-focus-left-arrow",
+    id: "workspace-cell-focus-left-cmd-mac",
     action: "workspace.cell.focus.left",
-    combo: "ArrowLeft",
-    when: { commandCenter: false, focusScope: "other" },
+    combo: "Cmd+ArrowLeft",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
     help: {
       id: "cell-focus-left",
       section: "layout",
@@ -1170,10 +1171,21 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
-    id: "workspace-cell-focus-right-arrow",
+    id: "workspace-cell-focus-left-ctrl-non-mac",
+    action: "workspace.cell.focus.left",
+    combo: "Ctrl+ArrowLeft",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-focus-left",
+      section: "layout",
+      label: "Focus cell left",
+    },
+  },
+  {
+    id: "workspace-cell-focus-right-cmd-mac",
     action: "workspace.cell.focus.right",
-    combo: "ArrowRight",
-    when: { commandCenter: false, focusScope: "other" },
+    combo: "Cmd+ArrowRight",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
     help: {
       id: "cell-focus-right",
       section: "layout",
@@ -1181,10 +1193,21 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
-    id: "workspace-cell-focus-up-arrow",
+    id: "workspace-cell-focus-right-ctrl-non-mac",
+    action: "workspace.cell.focus.right",
+    combo: "Ctrl+ArrowRight",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-focus-right",
+      section: "layout",
+      label: "Focus cell right",
+    },
+  },
+  {
+    id: "workspace-cell-focus-up-cmd-mac",
     action: "workspace.cell.focus.up",
-    combo: "ArrowUp",
-    when: { commandCenter: false, focusScope: "other" },
+    combo: "Cmd+ArrowUp",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
     help: {
       id: "cell-focus-up",
       section: "layout",
@@ -1192,10 +1215,32 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
-    id: "workspace-cell-focus-down-arrow",
+    id: "workspace-cell-focus-up-ctrl-non-mac",
+    action: "workspace.cell.focus.up",
+    combo: "Ctrl+ArrowUp",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-focus-up",
+      section: "layout",
+      label: "Focus cell up",
+    },
+  },
+  {
+    id: "workspace-cell-focus-down-cmd-mac",
     action: "workspace.cell.focus.down",
-    combo: "ArrowDown",
-    when: { commandCenter: false, focusScope: "other" },
+    combo: "Cmd+ArrowDown",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-focus-down",
+      section: "layout",
+      label: "Focus cell down",
+    },
+  },
+  {
+    id: "workspace-cell-focus-down-ctrl-non-mac",
+    action: "workspace.cell.focus.down",
+    combo: "Ctrl+ArrowDown",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
     help: {
       id: "cell-focus-down",
       section: "layout",

@@ -103,7 +103,9 @@ The binding resolver has no notion of the pinned grid: a binding resolves in eve
 
 Enter shares its combo with dictation confirm, and the resolver does not try a second binding. The grid handler (priority 100) acts first. When it does not act, the key must still confirm dictation, so the composer also handles the grid Enter action as dictation confirm. This covers screens without a deck, such as `/new`, and Normal mode.
 
-Arrows and Enter in a grid act only when no overlay (menu, popover, dialog, command center) is open and DOM focus is not on a control that uses the key. Enter yields to any button, link, input or tab. Arrows yield only to controls that move with them (inputs, selects, tabs, menu items, options, radios, sliders), so they work again after a click on a header button.
+Cell moves are `Cmd+Arrow` on macOS and `Ctrl+Arrow` elsewhere. Plain arrows are not bound. The bindings resolve in the `message-input` and `other` focus scopes, so they work while the user types in a composer, and they do not resolve in terminals, browser panes or other text fields. Inside a grid composer they replace the line start and end caret moves on macOS and the word jumps on Windows and Linux. In Normal mode no handler claims them, so the composer keeps those moves. A move that starts in a composer puts the caret in the composer of the target cell; see [pinned-grid.md](pinned-grid.md#keyboard-navigation).
+
+The move keys and Enter in a grid act only when no overlay (menu, popover, dialog, command center) is open and DOM focus is not on a control that uses the key. Enter yields to any button, link, input or tab. The move keys yield only to controls that move with arrows (inputs, selects, tabs, menu items, options, radios, sliders) outside the composer, so they work again after a click on a header button.
 
 Esc in a grid cell has no binding of its own. The composer's interrupt handler blurs the editor and puts focus on the cell frame first. A second Esc interrupts the agent.
 

@@ -232,6 +232,8 @@ export interface MessageInputProps {
 export interface MessageInputRef {
   focus: () => void;
   blur: () => void;
+  /** Focuses the editor with the caret at the end. A collapsed grid composer expands first. */
+  focusAtEnd: () => void;
   /** Ends the hold that a press inside a grid cell composer puts on its expanded state. */
   releaseGridHold: () => void;
   isFocused: () => boolean;
@@ -1542,6 +1544,10 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       isFocused: () => textInputRef.current?.isFocused() ?? false,
       blur: () => {
         textInputRef.current?.blur();
+      },
+      focusAtEnd: () => {
+        if (isMinimal) requestExpand();
+        else focusEditorAtEnd();
       },
       releaseGridHold,
       getText: () => textInputRef.current?.getText() ?? valueRef.current,
