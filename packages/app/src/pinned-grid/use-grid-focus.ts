@@ -61,14 +61,14 @@ const ARROW_OWNING_CONTROL_SELECTOR = [
 ].join(",");
 
 const COMPOSER_SELECTOR = "[data-testid='message-input-root']";
+const TERMINAL_SELECTOR = "[data-testid='terminal-surface'], .xterm";
 
-/** True when DOM focus is in a composer, the one text surface where the move keys act. */
-function isFocusInComposer(): boolean {
+function isFocusWithin(selector: string): boolean {
   if (!isWeb || typeof document === "undefined") {
     return false;
   }
   const active = document.activeElement;
-  return active instanceof Element && active.closest(COMPOSER_SELECTOR) !== null;
+  return active instanceof Element && active.closest(selector) !== null;
 }
 
 /** True when the plain Enter or arrow key is free for grid navigation. */
@@ -220,10 +220,15 @@ export function useGridFocus(input: {
       if (!direction || key === null || gridColumns === null || maximizedKeyRef.current !== null) {
         return false;
       }
-      // The composer is the one text surface where the keys act, so the user can switch cells
-      // while typing. Any other control that moves with the arrows keeps them.
-      const fromComposer = isFocusInComposer();
-      if (hasActiveOverlay() || (!fromComposer && !isKeyFreeForGridNavigation("arrow"))) {
+      // The composer and terminals are the text surfaces where the keys act, so the user can
+      // switch cells while typing. Any other control that moves with the arrows keeps them.
+      // When this handler does not act, the key reaches the terminal or the editor unchanged.
+      const fromComposer = isFocusWithin(COMPOSER_SELECTOR);
+      const fromTerminal = isFocusWithin(TERMINAL_SELECTOR);
+      if (
+        hasActiveOverlay() ||
+        (!fromComposer && !fromTerminal && !isKeyFreeForGridNavigation("arrow"))
+      ) {
         return false;
       }
       const keys = cellKeysRef.current;
