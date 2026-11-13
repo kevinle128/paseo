@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/contexts/toast-context";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
+import { removePinnedOrderKey } from "@/pinned-grid/pinned-order-seed";
+import { selectPinnedEntries } from "@/pinned-grid/use-pinned-workspace-selections";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import { selectWorkspaceDirectoryServerIds } from "@/stores/session-store-hooks/selectors";
 
 // Everything the pin toggle actually needs. Kept narrower than SidebarWorkspaceEntry so the
 // global keyboard handler can build one from the active route selection without a sidebar row.
@@ -18,6 +22,20 @@ export type ToggleSidebarWorkspacePin = (workspace: PinnableWorkspace) => void;
 // hold their own controller instance, and a per-instance guard would let a keypress and a menu
 // click fire two concurrent, opposite setWorkspacePinned calls for the same workspace.
 const pendingWorkspaceKeys = new Set<string>();
+
+function removeFromStoredOrder(workspaceKey: string): void {
+  const pinnedAtByKey: Record<string, string> = {};
+  for (const { serverId, workspaceId, pinnedAt } of selectPinnedEntries(
+    useSessionStore.getState().sessions,
+  )) {
+    pinnedAtByKey[`${serverId}:${workspaceId}`] = pinnedAt;
+  }
+  const serverIds = getHostRuntimeStore()
+    .getHosts()
+    .map((host) => host.serverId);
+  const loadedServerIds = selectWorkspaceDirectoryServerIds(useSessionStore.getState(), serverIds);
+  removePinnedOrderKey(workspaceKey, pinnedAtByKey, { serverIds, loadedServerIds });
+}
 
 export function useSidebarWorkspacePinController(): ToggleSidebarWorkspacePin {
   const { t } = useTranslation();
@@ -36,6 +54,10 @@ export function useSidebarWorkspacePinController(): ToggleSidebarWorkspacePin {
       }
       await client.setWorkspacePinned(workspace.workspaceId, pinned);
     },
+    // A failed unpin keeps the workspace pinned, so it keeps its slot.
+    onSuccess: (_data, { workspace, pinned }) => {
+      if (!pinned) removeFromStoredOrder(workspace.workspaceKey);
+    },
     onError: (error) => {
       toast.error(
         error instanceof Error ? error.message : t("sidebar.workspace.toasts.hostDisconnected"),
@@ -53,7 +75,10 @@ export function useSidebarWorkspacePinController(): ToggleSidebarWorkspacePin {
         return;
       }
       pendingWorkspaceKeys.add(workspace.workspaceKey);
-      mutate({ workspace, pinned: workspace.pinnedAt == null });
+      const pinned = workspace.pinnedAt == null;
+      // Drop a stale slot before the pin lands, or the new pin first shows at its old position.
+      if (pinned) removeFromStoredOrder(workspace.workspaceKey);
+      mutate({ workspace, pinned });
     },
     [mutate],
   );

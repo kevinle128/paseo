@@ -1,5 +1,6 @@
 import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
 import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
+import type { TerminalCharacterWidths } from "@/terminal/character-widths";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { isPresented } from "@/screens/workspace/workspace-presence";
@@ -17,7 +18,6 @@ import Animated, { runOnJS, useAnimatedReaction } from "react-native-reanimated"
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Keyboard as KeyboardIcon, KeyboardOff as KeyboardOffIcon } from "lucide-react-native";
 import type { TerminalKeyInput } from "@getpaseo/protocol/terminal-key-input";
-import type { TerminalState } from "@getpaseo/protocol/messages";
 import {
   DEFAULT_TERMINAL_INPUT_MODE_STATE,
   type TerminalInputModeState,
@@ -62,7 +62,6 @@ import { getDesktopHost } from "@/desktop/host";
 import { routeTerminalDrop } from "@/terminal/drop/terminal-file-drop";
 import { prepareDroppedPathsForTerminal } from "@/terminal/drop/terminal-path";
 import { toErrorMessage } from "@/utils/error-messages";
-import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-terminal-session";
 import {
   EMPTY_FOCUS_CLAIM_STATE,
   canRequestFocusClaim,
@@ -87,10 +86,10 @@ import {
 } from "./terminal-resize-debouncer";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { useKeyboardFocusSurface } from "@/keyboard";
 import {
   applyTerminalRendererReadyChange,
   resolveTerminalStreamTarget,
-  shouldReplayTerminalSnapshotForRenderer,
   shouldShowTerminalLoadingOverlay,
   type TerminalRendererReadyChange,
 } from "@/utils/terminal-renderer-readiness";
@@ -301,7 +300,8 @@ export function TerminalPane({
   // A workspace shown but not owning input (reduced) still renders its terminal and claims its own
   // size. Only focus handling below is tied to the drilled `isWorkspaceFocused` (owns input).
   const workspacePresence = useWorkspacePresence();
-  const isTerminalPresented = retainedPanelActive && isPresented(workspacePresence);
+  const isWorkspacePresented = isPresented(workspacePresence);
+  const isTerminalPresented = retainedPanelActive && isWorkspacePresented;
   const supportsTerminalRestoreModes = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-restore-modes"] === true,
   );
@@ -312,6 +312,11 @@ export function TerminalPane({
   const supportsTerminalSizeOwnership = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-size-ownership"] === true,
   );
+  const characterWidths: TerminalCharacterWidths = useSessionStore((state) =>
+    state.sessions[serverId]?.serverInfo?.features?.["terminal-grapheme-widths"] === true
+      ? "graphemes"
+      : "legacy",
+  );
   const setFocusedTerminalId = useSessionStore((state) => state.setFocusedTerminalId);
 
   const scopeKey = useMemo(() => terminalScopeKey({ serverId, cwd }), [serverId, cwd]);
@@ -321,10 +326,6 @@ export function TerminalPane({
   const measuredTerminalSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const lastSentTerminalSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const streamControllerRef = useRef<TerminalStreamController | null>(null);
-  const workspaceTerminalSession = useMemo(
-    () => getWorkspaceTerminalSession({ scopeKey }),
-    [scopeKey],
-  );
   const [isAttaching, setIsAttaching] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [rendererReadyStreamKey, setRendererReadyStreamKey] = useState<string | null>(null);
@@ -388,7 +389,6 @@ export function TerminalPane({
   const keyboardRefitTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastAutoFocusKeyRef = useRef<string | null>(null);
   const paneFocusResizeClaimRef = useRef(EMPTY_FOCUS_CLAIM_STATE);
-  const initialSnapshot = workspaceTerminalSession.snapshots.get({ terminalId });
 
   useEffect(() => {
     terminalIdRef.current = terminalId;
@@ -446,16 +446,8 @@ export function TerminalPane({
     (change: TerminalRendererReadyChange) => {
       if (!change.isReady && change.streamKey === terminalStreamKey) findRef.current?.reset();
       setRendererReadyStreamKey((current) => applyTerminalRendererReadyChange(current, change));
-      if (!shouldReplayTerminalSnapshotForRenderer({ change, terminalStreamKey })) {
-        return;
-      }
-
-      const snapshot = workspaceTerminalSession.snapshots.get({ terminalId });
-      if (snapshot) {
-        emulatorRef.current?.renderSnapshot(snapshot);
-      }
     },
-    [terminalId, terminalStreamKey, workspaceTerminalSession.snapshots],
+    [terminalStreamKey],
   );
 
   useEffect(() => {
@@ -472,6 +464,13 @@ export function TerminalPane({
       requestTerminalFocus();
     }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
+
+  // Keyboard routing follows input ownership: a reduced grid cell still presents its terminal but
+  // must not declare the terminal surface.
+  useKeyboardFocusSurface(
+    "terminal",
+    retainedPanelActive && isWorkspaceFocused && isPaneFocused && terminalId != null,
+  );
 
   useEffect(() => {
     const canRequest = canRequestFocusClaim({
@@ -569,7 +568,6 @@ export function TerminalPane({
   );
 
   const handleStreamExit = useStableEvent((exitedTerminalId: string) => {
-    workspaceTerminalSession.snapshots.clear({ terminalId: exitedTerminalId });
     if (terminalIdRef.current === exitedTerminalId) emulatorRef.current?.clear();
     setModifiers({ ...EMPTY_MODIFIERS });
   });
@@ -609,29 +607,10 @@ export function TerminalPane({
     },
   );
 
-  const handleStreamRestore = useStableEvent(
-    ({ terminalId: restoreTerminalId, data }: { terminalId: string; data: Uint8Array }) => {
-      workspaceTerminalSession.snapshots.clear({ terminalId: restoreTerminalId });
-      if (terminalIdRef.current !== restoreTerminalId) {
-        return;
-      }
-      emulatorRef.current?.restoreOutput(data);
-    },
-  );
-
-  const handleStreamSnapshot = useStableEvent(
-    ({ terminalId: snapshotTerminalId, state }: { terminalId: string; state: TerminalState }) => {
-      workspaceTerminalSession.snapshots.set({ terminalId: snapshotTerminalId, state });
-      if (terminalIdRef.current !== snapshotTerminalId) {
-        return;
-      }
-      emulatorRef.current?.renderSnapshot(state);
-    },
-  );
-
   const getStreamRestoreOptions = useStableEvent(() =>
     resolveTerminalRestoreOptions({
       supportsTerminalRestoreModes,
+      scrollbackLines: settings.terminalScrollbackLines,
       canClaimSize: canRequestFocusClaim({
         isWorkspaceFocused: terminalPresentedRef.current,
         isPaneFocused,
@@ -658,8 +637,9 @@ export function TerminalPane({
       client,
       getPreferredSize: getPreferredStreamSize,
       onOutput: handleStreamOutput,
-      onRestore: handleStreamRestore,
-      onSnapshot: handleStreamSnapshot,
+      onReplay: ({ terminalId: id, replay }) => {
+        if (terminalIdRef.current === id) emulatorRef.current?.replay(replay);
+      },
       onExit: handleStreamExit,
       getRestoreOptions: getStreamRestoreOptions,
       onStatusChange: handleStreamControllerStatus,
@@ -679,8 +659,6 @@ export function TerminalPane({
     getStreamRestoreOptions,
     handleStreamControllerStatus,
     handleStreamOutput,
-    handleStreamRestore,
-    handleStreamSnapshot,
     handleStreamExit,
     isConnected,
   ]);
@@ -691,7 +669,7 @@ export function TerminalPane({
       terminalId,
       terminalStreamKey,
       rendererReadyStreamKey,
-      isTerminalPresented,
+      isTerminalPresented: isWorkspacePresented,
     });
     streamControllerRef.current?.setTerminal({
       terminalId: nextTerminalId,
@@ -699,7 +677,7 @@ export function TerminalPane({
   }, [
     client,
     isConnected,
-    isTerminalPresented,
+    isWorkspacePresented,
     rendererReadyStreamKey,
     terminalId,
     terminalStreamKey,
@@ -1213,6 +1191,7 @@ export function TerminalPane({
             dom={TERMINAL_EMULATOR_DOM_PROPS}
             streamKey={terminalStreamKey}
             supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
+            characterWidths={characterWidths}
             testId="terminal-surface"
             xtermTheme={xtermTheme}
             scrollbackLines={settings.terminalScrollbackLines}
@@ -1221,7 +1200,6 @@ export function TerminalPane({
             keyboardInset={keyboardInset}
             isKeyboardVisible={isKeyboardVisible}
             swipeGesturesEnabled={swipeGesturesEnabled}
-            initialSnapshot={initialSnapshot}
             onRendererReadyChange={handleRendererReadyChange}
             onSwipeRight={handleSwipeRight}
             onSwipeLeft={handleSwipeLeft}

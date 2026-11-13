@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { relative as relativePath } from "node:path";
@@ -24,7 +24,10 @@ const gatedCiJobs = new Map([
     "server-integration-windows",
     { name: "server-integration (windows-latest)", contract: "server" },
   ],
-  ["server-tests-macos", { name: "server-tests (macos-14, file observation)", contract: "server" }],
+  [
+    "server-tests-macos",
+    { name: "server-tests (macos-latest, file observation)", contract: "server" },
+  ],
   ["desktop-tests-ubuntu", { name: "desktop-tests (ubuntu-latest)", contract: "desktop" }],
   ["desktop-tests-windows", { name: "desktop-tests (windows-latest)", contract: "desktop" }],
   ["app-tests", { name: "app-tests", contract: "app" }],
@@ -134,6 +137,43 @@ test("change gating allows superseded workflow runs to cancel", () => {
       /\$\{\{\s*always\(\)/,
       "always() keeps jobs alive after concurrency cancellation; use !cancelled() for fail-open gating",
     );
+  }
+});
+
+test("published npm packages declare and ship the repository license", () => {
+  const rootManifest = JSON.parse(readFileSync(new URL("package.json", repoRoot), "utf8"));
+  const workspaceArgs = rootManifest.scripts["release:publish"].match(/--workspace=\S+/g);
+  assert.notEqual(workspaceArgs, null, "release:publish must select public packages");
+  const packed = JSON.parse(
+    execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json", ...workspaceArgs], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    }),
+  );
+  const manifests = new Map(
+    rootManifest.workspaces.map((workspace) => {
+      const directory = new URL(`${workspace}/`, repoRoot);
+      const manifest = JSON.parse(readFileSync(new URL("package.json", directory), "utf8"));
+      return [manifest.name, { directory, manifest }];
+    }),
+  );
+  const licenses = packed.map(({ name, files }) => ({
+    name,
+    license: manifests.get(name).manifest.license,
+    files: files.filter((file) => file.path === "LICENSE").map((file) => file.path),
+  }));
+  assert.deepEqual(
+    licenses,
+    workspaceArgs.map((workspace) => ({
+      name: workspace.slice("--workspace=".length),
+      license: "Apache-2.0",
+      files: ["LICENSE"],
+    })),
+  );
+  const repositoryLicense = readFileSync(new URL("LICENSE", repoRoot), "utf8");
+  for (const { name } of packed) {
+    const { directory } = manifests.get(name);
+    assert.equal(readFileSync(new URL("LICENSE", directory), "utf8"), repositoryLicense, name);
   }
 });
 
@@ -643,6 +683,657 @@ process.exit(code);
           Array.from({ length: scenario.attempts }, () => args),
         );
         assert.match(result.stdout, /stapled|network connection was lost|ticket not found/);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test("fork macOS build retries only a busy DMG volume and removes partial images first", async (t) => {
+  const workflow = readFileSync(
+    new URL(".github/workflows/fork-desktop-build.yml", repoRoot),
+    "utf8",
+  );
+  const wrapper = workflow
+    .match(/<<'DMGRETRY'\n([\s\S]*?)\n {10}DMGRETRY/)[1]
+    .replace(/^ {10}/gm, "");
+  assert.match(
+    workflow,
+    /"\$retry_bin\/retry-busy-dmg" \\\n {12}npm run build:desktop -- --config "\$\{DESKTOP_BUILDER_CONFIG:-electron-builder\.fork\.yml\}"/,
+  );
+  const busy =
+    'dmgbuild.core.DMGError: Unable to detach device cleanly: hdiutil: couldn\'t eject "disk2" - Resource busy';
+  const cases = [
+    { name: "success", outcomes: [0], output: "built", expected: 0, attempts: 1 },
+    { name: "busy then success", outcomes: [1, 0], output: busy, expected: 0, attempts: 2 },
+    { name: "busy every time", outcomes: [1, 1, 1, 0], output: busy, expected: 1, attempts: 3 },
+    {
+      name: "other build error",
+      outcomes: [1, 0],
+      output: "Error: tsc failed",
+      expected: 1,
+      attempts: 1,
+    },
+    {
+      name: "busy resource without the detach error",
+      outcomes: [1, 0],
+      output: "hdiutil: create failed - Resource busy",
+      expected: 1,
+      attempts: 1,
+    },
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const directory = mkdtempSync(join(tmpdir(), "dmg-retry-"));
+      try {
+        const statePath = join(directory, "state.json");
+        const releaseDir = join(directory, "release");
+        const build = join(directory, "build");
+        const wrapperPath = join(directory, "retry-busy-dmg");
+        mkdirSync(releaseDir);
+        writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
+        writeFileSync(join(directory, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        writeFileSync(
+          statePath,
+          JSON.stringify({ outcomes: scenario.outcomes, output: scenario.output, calls: [] }),
+        );
+        // Each attempt records which release files it found, then leaves a
+        // partial DMG behind next to the zip that the build always writes.
+        writeFileSync(
+          build,
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const state = JSON.parse(fs.readFileSync(process.env.DMG_STATE, "utf8"));
+state.calls.push(fs.readdirSync(process.env.DMG_RELEASE_DIR).sort());
+const code = state.outcomes.shift();
+for (const name of ["Paseo-x64.dmg", "Paseo-x64.dmg.blockmap", "Paseo-x64.zip"]) {
+  fs.writeFileSync(path.join(process.env.DMG_RELEASE_DIR, name), "partial");
+}
+fs.writeFileSync(process.env.DMG_STATE, JSON.stringify(state));
+console.log(state.output);
+process.exit(code);
+`,
+          { mode: 0o755 },
+        );
+        const result = spawnSync("bash", [wrapperPath, build], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            DMG_RELEASE_DIR: releaseDir,
+            DMG_STATE: statePath,
+            PATH: `${directory}:${process.env.PATH}`,
+          },
+          timeout: 5000,
+        });
+        assert.equal(result.status, scenario.expected, result.stdout + result.stderr);
+        const state = JSON.parse(readFileSync(statePath, "utf8"));
+        assert.deepEqual(state.calls, [
+          [],
+          ...Array.from({ length: scenario.attempts - 1 }, () => ["Paseo-x64.zip"]),
+        ]);
+        assert.match(result.stdout, /built|Resource busy|tsc failed/);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+// GitHub retires macOS 14 on 2026-11-02; brownouts already reject these jobs.
+test("workflows avoid retired macOS 14 runners", () => {
+  for (const path of filesUnder(".github/workflows", (candidate) => /\.ya?ml$/.test(candidate))) {
+    assert.doesNotMatch(
+      readFileSync(new URL(path, repoRoot), "utf8"),
+      /macos-14(?:-large|-xlarge)?\b/,
+      path,
+    );
+  }
+});
+
+test("macOS jobs use latest runners while preserving release architectures", () => {
+  for (const [workflow, jobId] of [
+    [ciWorkflowPath, "server-tests-macos"],
+    [nixWorkflowPath, "build-desktop-darwin"],
+  ]) {
+    assert.match(
+      jobBlocks(readFileSync(workflow, "utf8")).get(jobId).join("\n"),
+      /^    runs-on: macos-latest$/m,
+    );
+  }
+  const release = readFileSync(new URL(".github/workflows/desktop-release.yml", repoRoot), "utf8");
+  assert.match(release, /runner: macos-latest\n\s+electron_arch: arm64/);
+  // GitHub has no standard macos-latest-intel alias; use the newest Intel image.
+  assert.match(release, /runner: macos-26-intel\n\s+electron_arch: x64/);
+});
+
+test("Nix desktop packaging resolves the workspace-local builder", () => {
+  const source = readFileSync(new URL("nix/desktop-package.nix", repoRoot), "utf8");
+  const invocation = source.match(/^\s+([^\n]*electron-builder) \\\n/m)?.[1];
+  assert.ok(invocation, "Nix invokes the desktop packaging tool");
+  const directory = mkdtempSync(join(tmpdir(), "nix-builder-resolution-"));
+  try {
+    const desktop = join(directory, "packages/desktop");
+    mkdirSync(join(desktop, "node_modules/.bin"), { recursive: true });
+    mkdirSync(join(desktop, "node_modules/electron-builder"));
+    writeFileSync(
+      join(desktop, "node_modules/electron-builder/package.json"),
+      JSON.stringify({
+        name: "electron-builder",
+        version: "1.0.0",
+        bin: { "electron-builder": "../.bin/electron-builder" },
+      }),
+    );
+    writeFileSync(
+      join(directory, "package.json"),
+      JSON.stringify({ private: true, workspaces: ["packages/desktop"] }),
+    );
+    writeFileSync(
+      join(desktop, "package.json"),
+      JSON.stringify({
+        name: "desktop-fixture",
+        private: true,
+        devDependencies: { "electron-builder": "1.0.0" },
+      }),
+    );
+    writeFileSync(
+      join(desktop, "node_modules/.bin/electron-builder"),
+      '#!/bin/sh\nprintf "workspace-builder\\n"\n',
+      { mode: 0o755 },
+    );
+    const result = spawnSync("sh", ["-c", `${invocation} --version`], {
+      cwd: desktop,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "workspace-builder");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+const forkSyncWorkflowPath = new URL(".github/workflows/fork-upstream-sync.yml", repoRoot);
+const forkResumeWorkflowPath = new URL(".github/workflows/fork-sync-resume.yml", repoRoot);
+
+// Returns the `run: |` script of the step with this id, without its YAML indent.
+function stepRunScript(source, id) {
+  const lines = source.split("\n");
+  const idLine = lines.findIndex((line) => line.trim() === `id: ${id}`);
+  assert.ok(idLine >= 0, `step ${id} exists`);
+  const runLine = lines.findIndex((line, index) => index > idLine && /^\s+run: \|$/.test(line));
+  const keyIndent = lines[runLine].search(/\S/);
+  const body = [];
+  for (const line of lines.slice(runLine + 1)) {
+    if (line.trim() !== "" && line.search(/\S/) <= keyIndent) break;
+    body.push(line);
+  }
+  const indent = Math.min(...body.filter((line) => line.trim()).map((line) => line.search(/\S/)));
+  return body.map((line) => line.slice(indent)).join("\n");
+}
+
+// A fake `gh` that serves canned issues and pull requests and records each call.
+const fakeGh = `#!/usr/bin/env node
+const fs = require("node:fs");
+const state = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, "utf8"));
+const args = process.argv.slice(2);
+state.calls.push(args);
+fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(state));
+if (args[0] === "issue" && args[1] === "list") {
+  console.log(JSON.stringify(state.issues));
+} else if (args[0] === "issue" && args[1] === "view") {
+  console.log(JSON.stringify({ body: state.issues.find((issue) => String(issue.number) === args[2]).body }));
+} else if (args[0] === "api") {
+  console.log(JSON.stringify(state.pulls));
+}
+`;
+
+function runWithFakeGh(script, { issues = [], pulls = [], env = {}, cwd } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "fork-sync-"));
+  try {
+    const statePath = join(directory, "state.json");
+    const outputPath = join(directory, "output.txt");
+    writeFileSync(join(directory, "gh"), fakeGh, { mode: 0o755 });
+    writeFileSync(join(directory, "script.sh"), script);
+    writeFileSync(outputPath, "");
+    writeFileSync(statePath, JSON.stringify({ issues, pulls, calls: [] }));
+    const result = spawnSync("bash", [join(directory, "script.sh")], {
+      cwd: cwd ?? directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...env,
+        FAKE_GH_STATE: statePath,
+        GITHUB_OUTPUT: outputPath,
+        PATH: `${directory}:${process.env.PATH}`,
+      },
+      timeout: 10000,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout + result.stderr,
+      output: readFileSync(outputPath, "utf8"),
+      calls: JSON.parse(readFileSync(statePath, "utf8")).calls,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+const realIssue = {
+  number: 21,
+  url: "https://github.com/kevinle128/paseo/issues/21",
+  labels: [{ name: "upstream-sync-conflict" }],
+};
+const testIssue = {
+  number: 22,
+  url: "https://github.com/kevinle128/paseo/issues/22",
+  labels: [{ name: "upstream-sync-conflict" }, { name: "sync-test" }],
+};
+
+test("fork sync test runs need both replay shas and never push or build", async (t) => {
+  const source = readFileSync(forkSyncWorkflowPath, "utf8");
+  const guard = stepRunScript(source, "inputs");
+  const sha = "a".repeat(40);
+  for (const scenario of [
+    { name: "real run", fork: "", upstream: "", status: 0, output: "test=false" },
+    { name: "test run", fork: sha, upstream: "b".repeat(40), status: 0, output: "test=true" },
+    { name: "only one sha", fork: sha, upstream: "", status: 1, output: "" },
+    { name: "short sha", fork: sha.slice(1), upstream: sha, status: 1, output: "" },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(guard, {
+        env: { TEST_FORK_SHA: scenario.fork, TEST_UPSTREAM_SHA: scenario.upstream },
+      });
+      assert.equal(result.status, scenario.status, result.stdout);
+      assert.equal(result.output.trim(), scenario.output);
+    });
+  }
+
+  assert.match(
+    source,
+    /ref: \$\{\{ \(inputs\.test_fork_sha != '' \|\| inputs\.test_upstream_sha != ''\) && github\.sha \|\| 'main' \}\}/,
+  );
+  const merge = stepRunScript(source, "merge");
+  assert.match(merge, /git worktree add --detach "\$\{RUNNER_TEMP\}\/replay" "\$TEST_FORK_SHA"/);
+  const jobs = jobBlocks(source);
+  const sync = jobs.get("sync").join("\n");
+  assert.match(
+    sync,
+    /- name: Push main\n\s+id: push\n\s+if: steps\.merge\.outputs\.changed == 'true' && steps\.inputs\.outputs\.test != 'true'/,
+  );
+  assert.match(
+    jobs.get("build").join("\n"),
+    /needs\.sync\.outputs\.changed == 'true' && inputs\.test_fork_sha == '' && inputs\.test_upstream_sha == ''/,
+  );
+  assert.match(sync, /id: merge\n\s+if: steps\.pause\.outputs\.paused != 'true'/);
+  // Only the push step may hold a token that writes the repository.
+  assert.match(sync, /fetch-depth: 0\n\s+persist-credentials: false/);
+  assert.equal(source.split("secrets.SYNC_PUSH_TOKEN").length, 2, "one use of the push token");
+  assert.match(
+    sync,
+    /- name: Push main\n\s+id: push\n[^\n]+\n\s+env:\n\s+SYNC_PUSH_TOKEN: \$\{\{ secrets\.SYNC_PUSH_TOKEN \}\}/,
+  );
+});
+
+test("a scheduled sync pauses for a real conflict issue and a test run only for a test issue", async (t) => {
+  const pause = stepRunScript(readFileSync(forkSyncWorkflowPath, "utf8"), "pause");
+  for (const scenario of [
+    { name: "real issue pauses the schedule", test: "false", issues: [realIssue], paused: 21 },
+    { name: "test issue never pauses the schedule", test: "false", issues: [testIssue], paused: 0 },
+    {
+      name: "test issue pauses a test run",
+      test: "true",
+      issues: [realIssue, testIssue],
+      paused: 22,
+    },
+    { name: "real issue never pauses a test run", test: "true", issues: [realIssue], paused: 0 },
+    { name: "no issue", test: "false", issues: [], paused: 0 },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(pause, {
+        issues: scenario.issues,
+        env: { TEST: scenario.test },
+      });
+      assert.equal(result.status, 0, result.stdout);
+      if (scenario.paused) {
+        assert.equal(result.output.trim(), "paused=true");
+        assert.match(
+          result.stdout,
+          new RegExp(`Sync paused: conflict issue #${scenario.paused} is open`),
+        );
+      } else {
+        assert.equal(result.output.trim(), "");
+      }
+    });
+  }
+});
+
+test("the blocked notice mentions the resolver once, and a test only when asked", async (t) => {
+  const compose = stepRunScript(readFileSync(forkSyncWorkflowPath, "utf8"), "blocked");
+  const mention =
+    "@Tiểu Hổ hãy giải quyết conflict ở issue #21: https://github.com/kevinle128/paseo/issues/21";
+  for (const scenario of [
+    { name: "new real issue", test: "false", created: "true", mention: "", expected: true },
+    { name: "updated real issue", test: "false", created: "false", mention: "", expected: false },
+    { name: "test issue", test: "true", created: "true", mention: "false", expected: false },
+    {
+      name: "test issue that asks",
+      test: "true",
+      created: "true",
+      mention: "true",
+      expected: true,
+    },
+  ]) {
+    await t.test(scenario.name, () => {
+      const result = runWithFakeGh(compose, {
+        env: {
+          TEST: scenario.test,
+          TEST_MENTION: scenario.mention,
+          RESOLVER: "Tiểu Hổ",
+          RANGE: "33faacc05..0e4002251 (210 commits)",
+          FILES: "packages/app/src/composer/input/input.tsx",
+          ISSUE_URL: realIssue.url,
+          ISSUE_NUMBER: "21",
+          CREATED: scenario.created,
+          RUN_URL: "https://example.test/run/1",
+        },
+      });
+      assert.equal(result.status, 0, result.stdout);
+      const text = result.output.split("\n").slice(1, -2).join("\n");
+      assert.equal(text.startsWith("[TEST] "), scenario.test === "true");
+      assert.equal(text.split("\n").includes(mention), scenario.expected, text);
+    });
+  }
+});
+
+test("every fork sync notice goes to the configured Buzz route", () => {
+  const source = readFileSync(forkSyncWorkflowPath, "utf8");
+  const notices = source.split("uses: ./.github/actions/buzz-notify").slice(1);
+  assert.equal(notices.length, 3);
+  for (const notice of notices) {
+    assert.match(
+      notice.split("\n      - ")[0],
+      /repository_name: \$\{\{ vars\.BUZZ_REPOSITORY_NAME \|\| 'paseo' \}\}/,
+    );
+  }
+});
+
+test("the build starts only after a sync pull request merge that contains the issue's upstream commit", async (t) => {
+  const workflow = readFileSync(forkResumeWorkflowPath, "utf8");
+  assert.match(workflow, /on:\n  push:\n    branches: \[main\]\n/);
+  const resume = workflow.match(/<<'RESUME'\n([\s\S]*?)\n {10}RESUME/)[1].replace(/^ {10}/gm, "");
+  const repo = mkdtempSync(join(tmpdir(), "fork-resume-repo-"));
+  try {
+    const gitIn = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    gitIn("init", "-q", "-b", "main");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "upstream",
+    );
+    const upstreamSha = gitIn("rev-parse", "HEAD");
+    gitIn("checkout", "-q", "--orphan", "other");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "unrelated",
+    );
+    const unrelatedSha = gitIn("rev-parse", "HEAD");
+    gitIn("checkout", "-q", "main");
+    gitIn(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "merge",
+    );
+    const mergeSha = gitIn("rev-parse", "HEAD");
+    const block = (sha) =>
+      `<!-- fork-sync-conflict:v1 {"schema":1,"upstream_sha":"${sha}","fork_ref":"main"} -->\n\nreport`;
+    const syncPull = {
+      merged_at: "2026-11-09T00:00:00Z",
+      base: { ref: "main" },
+      head: { ref: "sync/upstream-21-abcdef01" },
+    };
+    const featurePull = { ...syncPull, head: { ref: "feat/pinned-grid" } };
+    const closes = (calls) => calls.filter((call) => call[0] === "issue" && call[1] === "close");
+    const builds = (calls) => calls.filter((call) => call[0] === "workflow" && call[1] === "run");
+    for (const scenario of [
+      {
+        name: "sync merge with the upstream commit",
+        pulls: [syncPull],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [21],
+        built: true,
+      },
+      {
+        name: "feature merge",
+        pulls: [featurePull],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [],
+        built: false,
+      },
+      {
+        name: "squash merge without the upstream commit",
+        pulls: [syncPull],
+        issues: [{ ...realIssue, body: block(unrelatedSha) }],
+        closed: [],
+        built: false,
+      },
+      {
+        name: "test issue is ignored",
+        pulls: [syncPull],
+        issues: [{ ...testIssue, body: block(unrelatedSha) }],
+        closed: [],
+        built: true,
+      },
+      {
+        name: "push without a pull request",
+        pulls: [],
+        issues: [{ ...realIssue, body: block(upstreamSha) }],
+        closed: [],
+        built: false,
+      },
+    ]) {
+      await t.test(scenario.name, () => {
+        const result = runWithFakeGh(resume, {
+          cwd: repo,
+          issues: scenario.issues,
+          pulls: scenario.pulls,
+          env: { GH_REPO: "kevinle128/paseo", SHA: mergeSha },
+        });
+        assert.equal(result.status, 0, result.stdout);
+        assert.deepEqual(
+          closes(result.calls).map((call) => Number(call[2])),
+          scenario.closed,
+        );
+        assert.deepEqual(
+          builds(result.calls),
+          scenario.built
+            ? [
+                [
+                  "workflow",
+                  "run",
+                  "fork-desktop-build.yml",
+                  "--ref",
+                  "main",
+                  "-f",
+                  `ref=${mergeSha}`,
+                ],
+              ]
+            : [],
+        );
+      });
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Returns the `run: |` script of the step with this id, without its YAML indent.
+function workflowStepScript(source, id) {
+  const lines = source.split("\n");
+  const idLine = lines.findIndex((line) => line.trim() === `id: ${id}`);
+  assert.ok(idLine >= 0, `step ${id} exists`);
+  const runLine = lines.findIndex((line, index) => index > idLine && /^\s+run: \|$/.test(line));
+  assert.ok(runLine > idLine, `step ${id} has a run script`);
+  const keyIndent = lines[runLine].search(/\S/);
+  const body = [];
+  for (const line of lines.slice(runLine + 1)) {
+    if (line.trim() !== "" && line.search(/\S/) <= keyIndent) break;
+    body.push(line);
+  }
+  const indent = Math.min(...body.filter((line) => line.trim()).map((line) => line.search(/\S/)));
+  return body.map((line) => line.slice(indent)).join("\n");
+}
+
+test("the fork backup prune deletes only old version folders and fails safe", async (t) => {
+  const workflow = readFileSync(
+    new URL(".github/workflows/fork-desktop-build.yml", repoRoot),
+    "utf8",
+  );
+  const prune = workflowStepScript(workflow, "prune");
+  const job = jobBlocks(workflow).get("prune-backups").join("\n");
+  assert.match(job, /continue-on-error: true/);
+  // Text checks: there is no local Actions runtime to prove these gates.
+  assert.match(
+    job,
+    /if: \$\{\{ always\(\) && github\.repository == 'kevinle128\/paseo' && \(inputs\.prune_dry_run \|\| \(needs\.publish\.result == 'success' && needs\.publish\.outputs\.backup_outcome == 'success'\)\) \}\}/,
+  );
+  assert.match(workflow, /backup_outcome: \$\{\{ steps\.backup\.outcome \}\}/);
+  assert.match(
+    workflow,
+    /group: fork-desktop-build\$\{\{ inputs\.prune_dry_run && '-prune-dry-run' \|\| '' \}\}/,
+  );
+  assert.match(
+    jobBlocks(workflow).get("setup").join("\n"),
+    /if: github\.repository == 'kevinle128\/paseo' && !inputs\.prune_dry_run/,
+  );
+  const folders = (names) =>
+    names.map((name) => `                           PRE ${name}/`).join("\n");
+  const versions = [
+    "0.14.0-beta.1.mf.2",
+    "0.15.3-mf.4",
+    "0.15.3-mf.5",
+    "0.15.3-mf.6",
+    "0.15.3-mf.7",
+  ];
+  const prefix = "s3://bucket/paseo-desktop";
+  for (const scenario of [
+    {
+      name: "after a release",
+      listing: folders([...versions, "0.15.3-mf.8"]),
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      status: 0,
+      removed: ["0.15.3-mf.5", "0.15.3-mf.4", "0.14.0-beta.1.mf.2"],
+      log: /delete: 0\.15\.3-mf\.5, 0\.15\.3-mf\.4, 0\.14\.0-beta\.1\.mf\.2/,
+    },
+    {
+      name: "dry run",
+      listing: folders(versions),
+      current: "",
+      dryRun: "true",
+      status: 0,
+      removed: [],
+      log: /delete: 0\.15\.3-mf\.4, 0\.14\.0-beta\.1\.mf\.2\n[\s\S]*Dry run: nothing is deleted/,
+    },
+    {
+      name: "listing fails",
+      listing: null,
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      status: 0,
+      removed: [],
+      log: /Could not list the backup; nothing is deleted/,
+    },
+    {
+      name: "new backup missing",
+      listing: folders(versions),
+      current: "0.15.3-mf.8",
+      dryRun: "false",
+      status: 0,
+      removed: [],
+      log: /0\.15\.3-mf\.8 is not among the 3 newest backups, deleting nothing/,
+    },
+    {
+      name: "no release version",
+      listing: folders(versions),
+      current: "",
+      dryRun: "false",
+      status: 1,
+      removed: [],
+      log: /No version for this release; nothing is deleted/,
+    },
+    {
+      name: "root files stay",
+      listing: `${folders(versions.slice(1))}\n2026-11-09 10:00:00 512 latest.yml`,
+      current: "0.15.3-mf.7",
+      dryRun: "false",
+      status: 0,
+      removed: ["0.15.3-mf.4"],
+      log: /keep: 0\.15\.3-mf\.7, 0\.15\.3-mf\.6, 0\.15\.3-mf\.5/,
+    },
+  ]) {
+    await t.test(scenario.name, () => {
+      const directory = mkdtempSync(join(tmpdir(), "backup-prune-"));
+      try {
+        const callsPath = join(directory, "calls.txt");
+        writeFileSync(callsPath, "");
+        writeFileSync(
+          join(directory, "aws"),
+          `#!/bin/bash
+echo "$*" >> "${callsPath}"
+if [[ "$1 $2" == "s3 ls" ]]; then
+  ${scenario.listing === null ? "exit 1" : `cat <<'LISTING'\n${scenario.listing}\nLISTING`}
+fi
+`,
+          { mode: 0o755 },
+        );
+        writeFileSync(join(directory, "prune.sh"), prune);
+        const result = spawnSync("bash", [join(directory, "prune.sh")], {
+          cwd: new URL(".", repoRoot).pathname,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CURRENT: scenario.current,
+            DRY_RUN: scenario.dryRun,
+            KEEP: "3",
+            RUNNER_TEMP: directory,
+            WASABI_BUCKET: "bucket",
+            WASABI_PREFIX: "paseo-desktop",
+            WASABI_ENDPOINT: "https://s3.example.test",
+            PATH: `${directory}:${process.env.PATH}`,
+          },
+          timeout: 10000,
+        });
+        assert.equal(result.status, scenario.status, result.stdout + result.stderr);
+        assert.match(result.stdout, scenario.log);
+        const removed = readFileSync(callsPath, "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("s3 rm "))
+          .map((line) => line.split(" ")[2]);
+        assert.deepEqual(
+          removed,
+          scenario.removed.map((version) => `${prefix}/${version}/`),
+        );
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

@@ -53,6 +53,7 @@ function buildInstallResult(
     installed: false,
     version: null,
     message: "Update completed.",
+    downloadOpened: false,
     ...overrides,
   };
 }

@@ -2,6 +2,11 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
+  pluginCombobox: {
+    searching: "Pesquisando…",
+    empty: "Nenhum resultado",
+    failed: "Falha na pesquisa: {{message}}",
+  },
   paneFind: {
     connectionFailure:
       "Não foi possível pesquisar nesta conversa. Verifique a conexão com o host e tente novamente.",
@@ -383,6 +388,24 @@ export const ptBR: TranslationResources = {
       answerPlaceholder: "Digite sua resposta...",
       otherPlaceholder: "Outro...",
     },
+    backgroundWork: {
+      pillOne: "1 tarefa em segundo plano",
+      pillMany: "{{count}} tarefas em segundo plano",
+      notRunning: "Não está mais em execução",
+      dismiss: "Dispensar",
+      stop: "Parar",
+      stopping: "Parando…",
+      stopError: "Não foi possível confirmar a parada.",
+      label: "Segundo plano",
+      title: "Trabalho em segundo plano",
+      waiting: "Aguardando os detalhes",
+      error: "Não foi possível carregar o trabalho em segundo plano",
+      retry: "Tentar novamente",
+      running: "Trabalho em segundo plano em andamento",
+      shell: "Shell",
+      monitor: "Monitor",
+      other: "Outro trabalho",
+    },
     todo: {
       title: "Tarefas",
       empty: "Nenhuma tarefa ainda.",
@@ -447,6 +470,12 @@ export const ptBR: TranslationResources = {
     gridCell: {
       maximize: "Maximizar célula",
       restore: "Restaurar célula",
+      addPin: {
+        label: "Fixar um workspace",
+        searchPlaceholder: "Pesquisar workspaces para fixar",
+        noMatch: "Nenhum workspace corresponde",
+        allPinned: "Todos os workspaces estão fixados",
+      },
     },
     route: {
       loading: "Carregando workspace",
@@ -626,6 +655,7 @@ export const ptBR: TranslationResources = {
     terminal: {
       hostDisconnected: "Host não está conectado",
       updateHost: "Atualize o host para usar o renderizador de terminal nativo.",
+      restoreRequiresUpdate: "Atualize o host para visualizar os terminais.",
       unableToSubscribe: "Não foi possível assinar o terminal",
       fileUploaded: "Arquivo enviado",
       pasteFileFailed: "Falha ao colar o arquivo: {{reason}}",
@@ -956,6 +986,9 @@ export const ptBR: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "Branch base",
+        },
         openChangesTab: "Abrir a aba Alterações",
         openDiffTab: "Abrir a aba Diff",
         closeChangesTab: "Fechar a aba Alterações",
@@ -1180,6 +1213,8 @@ export const ptBR: TranslationResources = {
     title: "Novidades",
     installed: "Instalada",
     showMore: "Mostrar mais",
+    showAllChanges: "Mostrar todas as mudanças",
+    hideAllChanges: "Ocultar todas as mudanças",
     openWebsite: "Changelog completo",
     error: {
       title: "Não foi possível carregar o changelog",
@@ -1187,6 +1222,14 @@ export const ptBR: TranslationResources = {
     },
   },
   sidebar: {
+    view: {
+      failed: "Não foi possível carregar a visualização da barra lateral.",
+      useDefault: "Usar visualização padrão",
+      readFailed: "Não foi possível carregar sua preferência de visualização da barra lateral.",
+      agentUnavailable: "O agente não está mais disponível",
+      terminalUnavailable: "O terminal não está mais disponível",
+      projectUnavailable: "O projeto não está mais disponível",
+    },
     statusGroupAccessibility: "Grupo {{label}}",
     statusBucket: {
       needsInput: "Precisa de resposta",
@@ -1268,6 +1311,7 @@ export const ptBR: TranslationResources = {
       hosts: "Hosts",
       settings: "Configurações",
       closeSidebar: "Fechar barra lateral",
+      moreActions: "Mais ações",
     },
     footer: {
       usage: "Uso",
@@ -1372,6 +1416,9 @@ export const ptBR: TranslationResources = {
         hostDisconnected: "Host não está conectado",
         hideFailed: "Falha ao ocultar workspace",
         archiveFailed: "Falha ao arquivar workspace",
+        archived: "Workspace arquivado",
+        undoArchive: "Desfazer",
+        undoArchiveFailed: "Não foi possível desfazer o arquivamento",
       },
     },
   },
@@ -1502,6 +1549,7 @@ export const ptBR: TranslationResources = {
         availableWithLastChecked:
           "Há uma atualização do app pronta para instalar. Última verificação às {{time}}.",
         installed: "Atualização do app instalada. Reinicialização obrigatória.",
+        downloadOpened: "Download aberto. Substitua o Paseo em Aplicativos e reinicie.",
         failed: "Falha ao atualizar o app.",
         idle: "O status de atualização ainda não foi verificado.",
       },
@@ -1580,6 +1628,9 @@ export const ptBR: TranslationResources = {
       cli: {
         statusFailed: "Não foi possível verificar o status de instalação da CLI.",
         installFailed: "Não foi possível instalar a CLI do Paseo.",
+        uninstallFailed: "Não foi possível desinstalar a CLI do Paseo.",
+        keptForeign:
+          "Um comando paseo que o Paseo não instalou foi mantido. Remova-o manualmente para desinstalar.",
       },
     },
   },
@@ -1631,6 +1682,7 @@ export const ptBR: TranslationResources = {
     openPath: "Abrir caminho",
   },
   branchSwitcher: {
+    failedToLoad: "Não foi possível carregar as branches. Reabra o seletor para tentar novamente.",
     triggerTooltip: "Trocar branch do workspace",
     currentBranch: "Branch atual: {{branchName}}. Pressione para trocar de branch.",
     placeholder: "Trocar branch...",
@@ -1654,7 +1706,11 @@ export const ptBR: TranslationResources = {
     loadingCommands: "Carregando comandos...",
     noFiles: "Nenhum arquivo ou diretório encontrado",
     noCommands: "Nenhum comando encontrado",
-    failedToLoad: "Falha ao carregar",
+    loadingProviderCommands: "Carregando comandos do {{provider}}...",
+    commandsFailed: "Não foi possível carregar os comandos",
+    providerCommandsFailed: "Não foi possível carregar os comandos do {{provider}}",
+    filesFailed: "Não foi possível buscar arquivos",
+    skillTag: "Skill",
     chooseProjectForCommands: "Escolha um projeto para ver os comandos",
     chooseModelForCommands: "Selecione um modelo para ver os comandos",
   },
@@ -1681,6 +1737,60 @@ export const ptBR: TranslationResources = {
     },
   },
   onboarding: {
+    setup: {
+      title: "Paseo",
+      stepCounter: "Etapa {{current}} de {{total}}",
+      skip: "Pular configuração",
+      continue: "Continuar",
+      finish: "Concluir",
+      steps: {
+        appearance: {
+          label: "Aparência",
+          title: "Boas-vindas ao Paseo",
+          description: "Vamos começar escolhendo uma aparência",
+        },
+        providers: {
+          label: "Provedores",
+          title: "Seus agentes",
+          description: "O Paseo usa as CLIs de agentes já instaladas neste computador",
+        },
+        projects: {
+          label: "Projetos",
+          title: "Adicione seus projetos",
+          description: "Onde você quer que seus agentes trabalhem",
+          addProject: "Adicionar projeto",
+          added: "Adicionado",
+          suggestions: {
+            loading: "Procurando pastas em que você trabalhou",
+            empty: "Nenhum projeto recente encontrado",
+            lastUsed: "Último uso {{time}}",
+            addSelected_one: "Adicionar {{count}} projeto",
+            addSelected_other: "Adicionar {{count}} projetos",
+            adding: "Adicionando…",
+            addFailed: "Não foi possível adicionar esta pasta",
+          },
+        },
+        orchestration: {
+          label: "Orquestração",
+          title: "Deixe os agentes usarem o Paseo",
+          description: "Deixe seus agentes criarem workspaces e conversarem com outros agentes",
+        },
+        phone: {
+          label: "Celular",
+          title: "Leve seus agentes com você",
+          description:
+            "O app móvel nativo completo permite controlar qualquer computador com Paseo pelo seu celular",
+          appStore: "App Store",
+          googlePlay: "Google Play",
+          connectTitle: "Escolha como se conectar",
+          connectDocs: "Docs",
+          openConnectDocs: "Abrir documentação de conectividade",
+          recommended: "Recomendado",
+          relay: { title: "Relay", hint: "Criptografia de ponta a ponta, escaneie um código QR" },
+          tailscale: { title: "Tailscale", hint: "Requer alguma configuração" },
+        },
+      },
+    },
     title: "Bem-vindo ao Paseo",
     subtitle: "Conecte seu computador para começar",
     actions: {
@@ -1901,6 +2011,8 @@ export const ptBR: TranslationResources = {
       notNow: "Agora não",
       directConnectionHint:
         "Sem relay, conecte diretamente por TCP, Tailscale ou outra VPN. Nenhum código QR é criado.",
+      tailscaleDocs: "Configurar Tailscale",
+      tailscaleDocsAccessibility: "Ler como conectar pelo Tailscale",
       updateRequired: "Atualize o host para ativar o relay pelo Paseo Desktop.",
       unavailable: "Oferta de pareamento indisponível.",
       hint: "Escaneie este QR code com o Paseo no seu celular ou copie o link abaixo.",
@@ -2056,7 +2168,6 @@ export const ptBR: TranslationResources = {
   toolCallDetails: {
     error: "Erro",
     empty: "Nenhum detalhe adicional disponível",
-    subAgentActivity: "Atividade do subagente",
     input: "Entrada",
     output: "Saída",
   },
@@ -2101,19 +2212,6 @@ export const ptBR: TranslationResources = {
   sidebarCallout: {
     dismiss: "Dispensar",
   },
-  daemonOutdated: {
-    title: "Daemon desatualizado",
-    versions: "{{host}} executa o daemon {{daemonVersion}}. Este app é {{appVersion}}.",
-    terminalsStayOpen: "Atualizar reinicia o daemon. Os terminais continuam abertos.",
-    terminalsClose: "Atualizar reinicia o daemon e fecha os terminais abertos.",
-    desktopUpdateTerminals:
-      "Atualizar o Paseo Desktop mantém os terminais abertos no macOS e no Linux, e os fecha no Windows.",
-    desktopManaged: "O Paseo Desktop gerencia este daemon. Atualize o Paseo nesse computador.",
-    selfUpdateUnsupported:
-      "Este daemon não consegue se atualizar sozinho. Atualize o Paseo nesse computador.",
-    update: "Atualizar",
-    updateFailedTitle: "Falha ao atualizar o daemon",
-  },
   contextWindow: {
     noData: "Sem dados de contexto",
     accessibilityNoData: "Janela de contexto: sem dados de contexto",
@@ -2148,6 +2246,11 @@ export const ptBR: TranslationResources = {
     },
   },
   providerUsage: {
+    checkUsage: "Consultar uso",
+    checkUsageHint: "Aplica-se a {{host}} em todos os dispositivos",
+    off: "O uso está desativado em {{host}}.",
+    turnOn: "Ativar",
+
     options: "Configurações",
     refreshFailed: "Não foi possível atualizar o uso",
     noHosts: "Nenhum host conectado",
@@ -2195,6 +2298,7 @@ export const ptBR: TranslationResources = {
       days: "{{value}} d",
       hours: "{{value}} h",
       minutes: "{{value}} min",
+      pair: "{{first}} {{second}}",
     },
     timing: {
       lastUpdated: "Última atualização {{relativeTime}}",
@@ -2202,6 +2306,8 @@ export const ptBR: TranslationResources = {
       resetTimePassed: "O horário de redefinição passou",
       resettingNow: "redefinindo agora",
       resetsIn: "redefine em {{duration}}",
+      resetsAtWeekday: "{{weekday}} {{time}}",
+      resetsAtDate: "{{date}}, {{time}}",
       runsOutNow: "esgota agora",
       runsOutIn: "esgota em {{duration}}",
       justNow: "agora mesmo",
@@ -2370,6 +2476,11 @@ export const ptBR: TranslationResources = {
     general: {
       title: "Geral",
       sending: "Envio",
+      setup: {
+        label: "Configuração inicial",
+        description: "Rever aparência, provedores, projetos e pareamento do celular",
+        action: "Mostrar configuração novamente",
+      },
       browserData: {
         title: "Dados do navegador",
         siteData: "Cookies e dados de sites",
@@ -2530,6 +2641,13 @@ export const ptBR: TranslationResources = {
         description: "Mostrar uma estrutura para navegar entre prompts",
       },
       sidebar: {
+        view: {
+          title: "Visualização da barra lateral",
+          label: "Visualização",
+          default: "Visualização padrão",
+          unavailable:
+            "A visualização selecionada está indisponível ou desativada. Exibindo a visualização padrão.",
+        },
         header: {
           title: "Cabeçalho",
           description: "Escolha quais itens aparecem no topo da barra lateral e em que ordem",
@@ -2663,11 +2781,7 @@ export const ptBR: TranslationResources = {
       commandLine: {
         title: "Linha de comando",
         description: "Controle agentes e execute scripts pelo terminal",
-      },
-      actions: {
-        install: "Instalar",
-        installing: "Instalando...",
-        installed: "Instalado",
+        accessibilityLabel: "Instalar a CLI do Paseo",
       },
     },
     permissions: {
@@ -2745,10 +2859,9 @@ export const ptBR: TranslationResources = {
         ...en.settings.host.skills,
         sectionTitle: "Skills de orquestração",
         title: "Skills de orquestração",
-        description: "Ensine seus agentes a orquestrar pela CLI",
+        description: "Ensine seus agentes a usar as ferramentas do Paseo",
         updateAvailable: "Atualização disponível",
         updateTitle: "Atualizar Paseo skills?",
-        updateFallback: "Sincronize as skills incluídas com sua máquina.",
         uninstallTitle: "Desinstalar Paseo skills?",
         uninstallMessage:
           "Remove todas as skills de orquestração do Paseo de ~/.agents, ~/.claude e ~/.codex.",
@@ -2767,9 +2880,6 @@ export const ptBR: TranslationResources = {
         uninstallFailed: "Não foi possível desinstalar as skills de orquestração.",
         saveSelectionFailed: "Não foi possível salvar a seleção de skills de orquestração.",
         actions: {
-          install: "Instalar",
-          installing: "Instalando...",
-          installed: "Instalado",
           update: "Atualizar",
           working: "Trabalhando...",
           remove: "Remover",
@@ -2791,6 +2901,7 @@ export const ptBR: TranslationResources = {
           title: "Ativar ferramentas do Paseo",
           hint: "Agentes poderão gerenciar worktrees, agentes e agendamentos",
           accessibilityLabel: "Injetar ferramentas do Paseo",
+          updateFailed: "Não foi possível atualizar as ferramentas do Paseo.",
         },
         systemPrompt: {
           title: "Prompt do sistema",
@@ -2806,6 +2917,14 @@ export const ptBR: TranslationResources = {
       },
       agents: {
         unavailable: "Conecte-se a este host para gerenciar agentes",
+        resumeOnStartup: {
+          title: "Retomar agentes após reiniciar",
+          info: "Reabre os agentes que estavam trabalhando quando o host parou e envia a mensagem de retomada. Aplica-se após reinicializações normais e falhas.",
+          hint: "Continuar automaticamente o trabalho interrompido.",
+          prompt: "Mensagem de retomada",
+          edit: "Editar",
+          editAccessibilityLabel: "Editar mensagem",
+        },
         idleRuntimeCleanup: {
           title: "Liberar agentes ociosos",
           hint: "Libera memória após uma hora de inatividade.",

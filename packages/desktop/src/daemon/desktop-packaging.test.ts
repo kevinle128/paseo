@@ -82,7 +82,7 @@ describe("desktop packaging", () => {
   it("declares the Apple Events entitlement and usage text so agents can automate Mac apps", () => {
     const entitlements = readFileSync(join(packageRoot, "build", "entitlements.mac.plist"), "utf8");
     const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
-    const macSection = config.match(/^mac:\n(?:[ \t].*\n|\n)*/m)?.[0] ?? "";
+    const macSection = config.replace(/\r\n/g, "\n").match(/^mac:\n(?:[ \t].*\n|\n)*/m)?.[0] ?? "";
 
     expect(entitlements).toMatch(
       /<key>com\.apple\.security\.automation\.apple-events<\/key>\s*<true\/>/,

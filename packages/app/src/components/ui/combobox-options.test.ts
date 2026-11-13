@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildVisibleComboboxOptions,
   filterAndRankComboboxOptions,
+  filterComboboxOptionsInOrder,
   getComboboxFallbackIndex,
   orderVisibleComboboxOptions,
 } from "./combobox-options";
@@ -171,5 +172,36 @@ describe("search-only option text", () => {
     ]);
     expect(filterAndRankComboboxOptions([bodyMatch], "unrelated")).toEqual([]);
     expect(filterAndRankComboboxOptions([bodyMatch], "parsing 2024")).toEqual([bodyMatch]);
+  });
+});
+
+describe("filterComboboxOptionsInOrder", () => {
+  const options = [
+    { id: "zeta", label: "Zeta app" },
+    { id: "alpha", label: "Alpha app" },
+    { id: "beta", label: "Beta tool" },
+  ];
+
+  it("returns the input for an empty query", () => {
+    expect(filterComboboxOptionsInOrder(options, "")).toBe(options);
+  });
+
+  it("drops non-matches and keeps the given order", () => {
+    expect(filterComboboxOptionsInOrder(options, "app").map((o) => o.id)).toEqual([
+      "zeta",
+      "alpha",
+    ]);
+  });
+
+  it("is used by the visible options when the order is preserved", () => {
+    const visible = buildVisibleComboboxOptions({
+      options,
+      searchQuery: "app",
+      searchable: true,
+      allowCustomValue: false,
+      customValuePrefix: "Use",
+      preserveOptionOrder: true,
+    });
+    expect(visible.map((o) => o.id)).toEqual(["zeta", "alpha"]);
   });
 });

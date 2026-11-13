@@ -18,7 +18,7 @@ export type { KeyCombo } from "@/keyboard/shortcut-string";
 
 export interface KeyboardShortcutContext {
   isMac: boolean;
-  isDesktop: boolean;
+  usesDesktopBindings: boolean;
   focusScope: KeyboardFocusScope;
   commandCenterOpen: boolean;
 }
@@ -63,14 +63,14 @@ export interface KeyboardShortcutHelpSection {
 
 interface KeyboardShortcutPlatformContext {
   isMac: boolean;
-  isDesktop: boolean;
+  usesDesktopBindings: boolean;
 }
 
 interface ShortcutWhen {
   /** true = mac only, false = non-mac only */
   mac?: boolean;
-  /** true = desktop only, false = web only */
-  desktop?: boolean;
+  /** Desktop keyboard conventions on Electron/native; browser conventions otherwise. */
+  desktopBindings?: boolean;
   /** false = disabled when a text-editing surface is focused */
   editable?: false;
   /** false = disabled when terminal is focused */
@@ -169,6 +169,7 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "workspace-next",
     "pin-workspace",
     "archive-workspace",
+    "undo-archive-workspace",
   ],
   "tabs-panes": [
     "workspace-tab-new",
@@ -368,6 +369,31 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
+  // --- Undo archive workspace ---
+  // Only claims the key while an archive can be undone; otherwise text undo runs as usual.
+  {
+    id: "workspace-archive-undo-cmd-z-mac",
+    action: "workspace.archive.undo",
+    combo: "Cmd+Z",
+    when: { mac: true, commandCenter: false, editable: false, terminal: false },
+    help: {
+      id: "undo-archive-workspace",
+      section: "workspaces",
+      label: "Undo archive workspace",
+    },
+  },
+  {
+    id: "workspace-archive-undo-ctrl-z-non-mac",
+    action: "workspace.archive.undo",
+    combo: "Ctrl+Z",
+    when: { mac: false, commandCenter: false, editable: false, terminal: false },
+    help: {
+      id: "undo-archive-workspace",
+      section: "workspaces",
+      label: "Undo archive workspace",
+    },
+  },
+
   // --- Pin workspace ---
   {
     id: "workspace-pin-cmd-shift-p-mac",
@@ -509,7 +535,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-close-current-cmd-w-mac",
     action: "workspace.tab.close.current",
     combo: "Cmd+W",
-    when: { mac: true, desktop: true, commandCenter: false },
+    when: { mac: true, desktopBindings: true, commandCenter: false },
     help: {
       id: "workspace-tab-close-current",
       section: "tabs-panes",
@@ -520,7 +546,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-close-current-ctrl-w-non-mac",
     action: "workspace.tab.close.current",
     combo: "Ctrl+W",
-    when: { mac: false, desktop: true, commandCenter: false, terminal: false },
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     help: {
       id: "workspace-tab-close-current",
       section: "tabs-panes",
@@ -531,7 +557,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-close-current-alt-shift-w-web",
     action: "workspace.tab.close.current",
     combo: "Alt+Shift+W",
-    when: { desktop: false, commandCenter: false },
+    when: { desktopBindings: false, commandCenter: false },
     help: {
       id: "workspace-tab-close-current",
       section: "tabs-panes",
@@ -544,7 +570,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-index-cmd-digit-mac",
     action: "workspace.navigate.index",
     combo: "Cmd+Digit",
-    when: { mac: true, desktop: true, commandCenter: false },
+    when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "index" },
     help: {
       id: "workspace-jump-index",
@@ -557,7 +583,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-index-ctrl-digit-non-mac",
     action: "workspace.navigate.index",
     combo: "Ctrl+Digit",
-    when: { mac: false, desktop: true, commandCenter: false, terminal: false },
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     payload: { type: "index" },
     help: {
       id: "workspace-jump-index",
@@ -570,7 +596,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-index-alt-digit-web",
     action: "workspace.navigate.index",
     combo: "Alt+Digit",
-    when: { desktop: false, commandCenter: false },
+    when: { desktopBindings: false, commandCenter: false },
     payload: { type: "index" },
     help: {
       id: "workspace-jump-index",
@@ -585,7 +611,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-navigate-index-cmd-alt-digit-mac-desktop",
     action: "workspace.tab.navigate.index",
     combo: "Cmd+Alt+Digit",
-    when: { mac: true, desktop: true, commandCenter: false },
+    when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "index" },
     help: {
       id: "workspace-tab-jump-index",
@@ -598,7 +624,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-navigate-index-alt-digit-desktop",
     action: "workspace.tab.navigate.index",
     combo: "Alt+Digit",
-    when: { mac: false, desktop: true, commandCenter: false },
+    when: { mac: false, desktopBindings: true, commandCenter: false },
     payload: { type: "index" },
     help: {
       id: "workspace-tab-jump-index",
@@ -611,7 +637,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-tab-navigate-index-alt-shift-digit-web",
     action: "workspace.tab.navigate.index",
     combo: "Alt+Shift+Digit",
-    when: { desktop: false, commandCenter: false },
+    when: { desktopBindings: false, commandCenter: false },
     payload: { type: "index" },
     help: {
       id: "workspace-tab-jump-index",
@@ -626,7 +652,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-cmd-left-mac",
     action: "workspace.navigate.relative",
     combo: "Cmd+[",
-    when: { mac: true, desktop: true, commandCenter: false },
+    when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "delta", delta: -1 },
     help: {
       id: "workspace-prev",
@@ -638,7 +664,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-ctrl-left-non-mac",
     action: "workspace.navigate.relative",
     combo: "Ctrl+[",
-    when: { mac: false, desktop: true, commandCenter: false, terminal: false },
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     payload: { type: "delta", delta: -1 },
     help: {
       id: "workspace-prev",
@@ -650,7 +676,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-cmd-right-mac",
     action: "workspace.navigate.relative",
     combo: "Cmd+]",
-    when: { mac: true, desktop: true, commandCenter: false },
+    when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "delta", delta: 1 },
     help: {
       id: "workspace-next",
@@ -662,7 +688,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-ctrl-right-non-mac",
     action: "workspace.navigate.relative",
     combo: "Ctrl+]",
-    when: { mac: false, desktop: true, commandCenter: false, terminal: false },
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     payload: { type: "delta", delta: 1 },
     help: {
       id: "workspace-next",
@@ -674,7 +700,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-alt-left-web",
     action: "workspace.navigate.relative",
     combo: "Alt+[",
-    when: { desktop: false, commandCenter: false },
+    when: { desktopBindings: false, commandCenter: false },
     payload: { type: "delta", delta: -1 },
     help: {
       id: "workspace-prev",
@@ -686,7 +712,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-navigate-relative-alt-right-web",
     action: "workspace.navigate.relative",
     combo: "Alt+]",
-    when: { desktop: false, commandCenter: false },
+    when: { desktopBindings: false, commandCenter: false },
     payload: { type: "delta", delta: 1 },
     help: {
       id: "workspace-next",
@@ -1376,7 +1402,8 @@ export function matchesKeyboardShortcutContext(
 ): boolean {
   if (!when) return true;
   if (when.mac !== undefined && when.mac !== context.isMac) return false;
-  if (when.desktop !== undefined && when.desktop !== context.isDesktop) return false;
+  if (when.desktopBindings !== undefined && when.desktopBindings !== context.usesDesktopBindings)
+    return false;
   if (
     when.editable === false &&
     (context.focusScope === "message-input" || context.focusScope === "editable")
@@ -1441,7 +1468,8 @@ function helpMatchesPlatform(
   context: KeyboardShortcutPlatformContext,
 ): boolean {
   if (when?.mac !== undefined && when.mac !== context.isMac) return false;
-  if (when?.desktop !== undefined && when.desktop !== context.isDesktop) return false;
+  if (when?.desktopBindings !== undefined && when.desktopBindings !== context.usesDesktopBindings)
+    return false;
   return true;
 }
 
@@ -1605,7 +1633,7 @@ export function resolveKeyboardShortcut(input: {
 
 export function getBindingIdForAction(
   actionId: string,
-  platform: { isMac: boolean; isDesktop: boolean },
+  platform: { isMac: boolean; usesDesktopBindings: boolean },
 ): string | null {
   for (const binding of DEFAULT_BINDINGS) {
     if (binding.help?.id !== actionId) {
@@ -1643,7 +1671,7 @@ function displayChordForBinding(binding: ParsedShortcutBinding): ShortcutKey[][]
 
 export function getDefaultKeysForAction(
   actionId: string,
-  platform: { isMac: boolean; isDesktop: boolean },
+  platform: { isMac: boolean; usesDesktopBindings: boolean },
   bindings: readonly ParsedShortcutBinding[] = DEFAULT_BINDINGS,
 ): ShortcutKey[][] | null {
   for (const binding of bindings) {
@@ -1670,7 +1698,7 @@ export function getDefaultKeysForAction(
 export function resolveShortcutKeysForAction(
   actionId: string,
   overrides: ShortcutOverrides,
-  platform: { isMac: boolean; isDesktop: boolean },
+  platform: { isMac: boolean; usesDesktopBindings: boolean },
 ): ShortcutKey[][] | null {
   const bindingId = getBindingIdForAction(actionId, platform);
   if (bindingId === null) {
@@ -1712,7 +1740,7 @@ export function resolveShortcutKeysForAction(
  * the shortcut delivers.
  */
 export function getWorkspaceIndexJumpModifierKey(
-  platform: { isMac: boolean; isDesktop: boolean },
+  platform: { isMac: boolean; usesDesktopBindings: boolean },
   bindings: readonly ParsedShortcutBinding[] = DEFAULT_BINDINGS,
 ): "Alt" | "Meta" | "Control" | null {
   const binding = bindings.find(function (candidate) {

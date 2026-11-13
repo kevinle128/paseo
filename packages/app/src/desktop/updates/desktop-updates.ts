@@ -17,6 +17,7 @@ export interface DesktopAppUpdateInstallResult {
   installed: boolean;
   version: string | null;
   message: string;
+  downloadOpened: boolean;
 }
 
 export interface DesktopRuntimeInfo {
@@ -140,6 +141,7 @@ export async function installDesktopAppUpdate({
     installed: result.installed === true,
     version: toStringOrNull(result.version),
     message: toStringOrNull(result.message) ?? i18n.t("desktop.updates.status.installed"),
+    downloadOpened: result.downloadOpened === true,
   };
 }
 

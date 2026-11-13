@@ -14,10 +14,10 @@ import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { isWeb } from "@/constants/platform";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
-
-// Controls the header double-click must leave alone, so a double-click on a button does nothing.
-const HEADER_INTERACTIVE_SELECTOR =
-  'button, a, input, textarea, select, [role="button"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
+import {
+  HEADER_INTERACTIVE_SELECTOR,
+  useHeaderMaximizeDoubleClick,
+} from "@/pinned-grid/use-header-maximize-double-click";
 
 interface ScreenHeaderProps {
   left?: ReactNode;
@@ -44,26 +44,26 @@ export function ScreenHeader({
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
   const gridCell = useWorkspaceGridCell();
-  const toggleMaximize = gridCell?.toggleMaximize ?? null;
   const innerRef = useRef<View | null>(null);
+  useHeaderMaximizeDoubleClick(innerRef);
+  const beginHeaderDrag = gridCell?.beginHeaderDrag ?? null;
 
-  // A grid cell header maximizes the cell on double-click. Native handlers cannot see nested
-  // controls, so the DOM listener skips targets inside interactive elements.
+  // The press is observed, never prevented, so the header keeps its native double-click.
   useEffect(() => {
     const node: unknown = innerRef.current;
-    if (!isWeb || !toggleMaximize || !(node instanceof HTMLElement)) {
+    if (!isWeb || !beginHeaderDrag || !(node instanceof HTMLElement)) {
       return undefined;
     }
-    const handleDoubleClick = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Element && target.closest(HEADER_INTERACTIVE_SELECTOR)) {
         return;
       }
-      toggleMaximize();
+      beginHeaderDrag(event);
     };
-    node.addEventListener("dblclick", handleDoubleClick);
-    return () => node.removeEventListener("dblclick", handleDoubleClick);
-  }, [toggleMaximize]);
+    node.addEventListener("pointerdown", handlePointerDown);
+    return () => node.removeEventListener("pointerdown", handlePointerDown);
+  }, [beginHeaderDrag]);
 
   // Only add extra padding on mobile for better touch targets; on desktop, only use safe area insets
   const topPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;

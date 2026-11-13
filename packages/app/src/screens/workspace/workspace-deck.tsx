@@ -5,6 +5,7 @@ import {
   type ActiveWorkspaceSelection,
   useActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
+import { WindowChromeRegion } from "@/utils/desktop-window";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
@@ -22,7 +23,11 @@ import { isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { RenderProfile } from "@/utils/render-profiler";
 import { usePanelStore } from "@/stores/panel-store";
+import { AddPinCell } from "@/pinned-grid/add-pin-cell";
 import { GridCellFrame } from "@/pinned-grid/grid-cell-frame";
+import { GridDropIndicator } from "@/pinned-grid/grid-drop-indicator";
+import { useGridCellSlots } from "@/pinned-grid/use-grid-cell-slots";
+import { usePendingPinFocus } from "@/pinned-grid/use-pending-pin-focus";
 import { DormantCellLayer } from "@/pinned-grid/dormant-cell-summary";
 import { resolveDormantCells } from "@/pinned-grid/dormant-cell-state";
 import {
@@ -47,6 +52,7 @@ import {
   MAX_VISIBLE_ROWS,
   MIN_USABLE_CELL_HEIGHT,
   computeGridGeometry,
+  type GridGeometry,
   type GridCellRect,
 } from "@/pinned-grid/geometry";
 import { resolveCellChromeCorners, resolveGridCellPresence } from "@/pinned-grid/grid-layout";
@@ -127,8 +133,23 @@ export function WorkspaceDeck() {
     () => pinnedSelections.map(getWorkspaceSelectionKey),
     [pinnedSelections],
   );
-  const { cellKeys, focusedKey, maximizedKey, gridFocusedKeyRef, focusCell, toggleMaximize } =
-    useGridFocus({ activeKey, pinnedKeys, cells: grid ? grid.cells : null });
+  const {
+    cellKeys,
+    focusedKey,
+    maximizedKey,
+    gridFocusedKeyRef,
+    focusCell: focusCellInGrid,
+    toggleMaximize,
+  } = useGridFocus({ activeKey, pinnedKeys, cells: grid ? grid.cells : null });
+
+  const { handlePicked, focusCell } = usePendingPinFocus({
+    activeKey,
+    pinnedKeys,
+    pinnedSelections,
+    focusCellInGrid,
+  });
+
+  const deckRef = useRef<View | null>(null);
 
   const modeKey = preferences.mode === "3" ? "3" : "2";
   const layoutPreview = useGridLayoutPreview({ preferences, modeKey, updatePreferences });
@@ -140,7 +161,7 @@ export function WorkspaceDeck() {
         ? computeGridGeometry({
             width: viewport.width,
             height: viewport.height,
-            count: grid.cells.length,
+            count: grid.cells.length + 1,
             columns: grid.columns,
             columnRatios,
             rowScales,
@@ -151,25 +172,23 @@ export function WorkspaceDeck() {
         : null,
     [columnRatios, grid, rowScales, viewport.height, viewport.width],
   );
-  const cellRects = useMemo(() => {
-    const rects = new Map<string, GridCellRect>();
-    if (!grid || !geometry) {
-      return rects;
-    }
-    const maximizedRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    grid.cells.forEach((cell, index) => {
-      const key = getWorkspaceSelectionKey(cell);
-      rects.set(key, key === maximizedKey ? maximizedRect : geometry.cellRect(index));
+  const { cellRects, slotIndexByKey, dropSlotIndex, draggedKey, beginHeaderDrag } =
+    useGridCellSlots({
+      deckRef,
+      signal: gridScrollSignal,
+      grid,
+      geometry,
+      cellKeys,
+      maximizedKey,
+      viewport,
+      onDragStart: focusCell,
     });
-    return rects;
-  }, [geometry, grid, maximizedKey, viewport.height, viewport.width]);
   const cellIndexByKey = useMemo(
     () => new Map(cellKeys.map((key, index) => [key, index])),
     [cellKeys],
   );
   const contentHeight = maximizedKey !== null ? viewport.height : (geometry?.contentHeight ?? 0);
 
-  const deckRef = useRef<View | null>(null);
   const reducedClock = useMemo(() => createReducedFidelityClock(), []);
   const { presences: cellPresences, gridCellStates } = useGridCellPresence({
     deckRef,
@@ -288,7 +307,7 @@ export function WorkspaceDeck() {
                 chromeCorners={
                   grid && cellIndex !== undefined
                     ? resolveCellChromeCorners({
-                        index: cellIndex,
+                        index: slotIndexByKey.get(key) ?? cellIndex,
                         columns: grid.columns,
                         isMaximized: maximizedKey === key,
                       })
@@ -298,6 +317,8 @@ export function WorkspaceDeck() {
                 onUnmountInactive={unmountWorkspaceSelection}
                 onFocusCell={focusCell}
                 onToggleMaximize={toggleMaximize}
+                onHeaderDragStart={beginHeaderDrag}
+                isDragSource={key === draggedKey}
               />
             );
           })}
@@ -314,9 +335,57 @@ export function WorkspaceDeck() {
               resetRowScales={layoutPreview.resetRowScales}
             />
           ) : null}
+          <GridDeckTail
+            grid={grid}
+            geometry={geometry}
+            maximizedKey={maximizedKey}
+            draggedKey={draggedKey}
+            dropSlotIndex={dropSlotIndex}
+            onPicked={handlePicked}
+          />
         </View>
       </GridScrollSignalProvider>
     </RenderProfile>
+  );
+}
+
+interface GridDeckTailProps {
+  grid: { cells: ActiveWorkspaceSelection[]; columns: number } | null;
+  geometry: GridGeometry | null;
+  maximizedKey: string | null;
+  draggedKey: string | null;
+  dropSlotIndex: number | null;
+  onPicked: (workspaceKey: string) => void;
+}
+
+/** The "+" tile after the last cell and the drop outline of a header drag. */
+function GridDeckTail({
+  grid,
+  geometry,
+  maximizedKey,
+  draggedKey,
+  dropSlotIndex,
+  onPicked,
+}: GridDeckTailProps) {
+  if (!grid || !geometry) {
+    return null;
+  }
+  const showsDropSlot = draggedKey !== null && dropSlotIndex !== null;
+  return (
+    <>
+      {maximizedKey === null ? (
+        <WindowChromeRegion
+          corners={resolveCellChromeCorners({
+            index: grid.cells.length,
+            columns: grid.columns,
+            isMaximized: false,
+          })}
+        >
+          <AddPinCell rect={geometry.cellRect(grid.cells.length)} onPicked={onPicked} />
+        </WindowChromeRegion>
+      ) : null}
+      {showsDropSlot ? <GridDropIndicator rect={geometry.cellRect(dropSlotIndex)} /> : null}
+    </>
   );
 }
 
@@ -332,6 +401,8 @@ interface WorkspaceDeckEntryProps {
   onUnmountInactive: (selection: ActiveWorkspaceSelection) => void;
   onFocusCell: (key: string) => boolean;
   onToggleMaximize: (key: string) => void;
+  onHeaderDragStart: (key: string, event: PointerEvent, node: HTMLElement) => void;
+  isDragSource: boolean;
 }
 
 const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
@@ -346,6 +417,8 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
   onUnmountInactive,
   onFocusCell,
   onToggleMaximize,
+  onHeaderDragStart,
+  isDragSource,
 }: WorkspaceDeckEntryProps) {
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
   const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
@@ -387,6 +460,8 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
         chromeCorners={chromeCorners}
         onFocusCell={onFocusCell}
         onToggleMaximize={onToggleMaximize}
+        onHeaderDragStart={onHeaderDragStart}
+        isDragSource={isDragSource}
       >
         <StreamFidelityProvider
           fidelity={presence === "reduced" ? "reduced" : "full"}

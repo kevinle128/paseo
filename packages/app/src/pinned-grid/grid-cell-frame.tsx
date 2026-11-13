@@ -24,6 +24,10 @@ interface GridCellFrameProps {
   /** Returns true when the call moved focus to this cell. */
   onFocusCell: (key: string) => boolean;
   onToggleMaximize: (key: string) => void;
+  /** Starts a header drag for this cell. The cell cannot be reordered when missing. */
+  onHeaderDragStart?: (key: string, event: PointerEvent, node: HTMLElement) => void;
+  /** The cell being dragged. It draws above the other cells. */
+  isDragSource?: boolean;
   children: ReactNode;
 }
 
@@ -43,6 +47,8 @@ export const GridCellFrame = memo(function GridCellFrame({
   chromeCorners,
   onFocusCell,
   onToggleMaximize,
+  onHeaderDragStart,
+  isDragSource = false,
   children,
 }: GridCellFrameProps) {
   const frameRef = useRef<View | null>(null);
@@ -111,6 +117,17 @@ export const GridCellFrame = memo(function GridCellFrame({
     onFocusCell(cellKey);
   }, [cellKey, onFocusCell]);
   const toggleMaximize = useCallback(() => onToggleMaximize(cellKey), [cellKey, onToggleMaximize]);
+  const beginHeaderDrag = useMemo(() => {
+    if (!onHeaderDragStart) {
+      return null;
+    }
+    return (event: PointerEvent) => {
+      const node: unknown = frameRef.current;
+      if (node instanceof HTMLElement) {
+        onHeaderDragStart(cellKey, event, node);
+      }
+    };
+  }, [cellKey, onHeaderDragStart]);
   const cellValue = useMemo<WorkspaceGridCell | null>(
     () =>
       isCell
@@ -120,9 +137,10 @@ export const GridCellFrame = memo(function GridCellFrame({
             toggleMaximize,
             focusCell,
             pointerFocusClaim: claim,
+            beginHeaderDrag,
           }
         : null,
-    [claim, focusCell, isCell, isFocused, isMaximized, toggleMaximize],
+    [beginHeaderDrag, claim, focusCell, isCell, isFocused, isMaximized, toggleMaximize],
   );
 
   const handlePointerEnter = useCallback(() => setHovered(true), []);
@@ -134,8 +152,13 @@ export const GridCellFrame = memo(function GridCellFrame({
     [rect],
   );
   const frameStyle = useMemo(
-    () => [rect ? styles.cell : styles.single, !isVisible && styles.hidden, rectStyle],
-    [isVisible, rect, rectStyle],
+    () => [
+      rect ? styles.cell : styles.single,
+      !isVisible && styles.hidden,
+      isDragSource && styles.dragSource,
+      rectStyle,
+    ],
+    [isDragSource, isVisible, rect, rectStyle],
   );
   const ringStyle = useMemo(
     () => [styles.ring, isFocused && !isMaximized ? styles.ringFocused : styles.ringIdle],
@@ -191,6 +214,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   hidden: {
     display: "none",
+  },
+  dragSource: {
+    zIndex: 30,
   },
   dim: {
     position: "absolute",

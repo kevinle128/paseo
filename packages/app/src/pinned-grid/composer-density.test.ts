@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveComposerDensity, type ComposerDensityInput } from "./composer-density";
+import {
+  isGridCell,
+  isSlimComposerCell,
+  resolveComposerDensity,
+  type ComposerDensityInput,
+} from "./composer-density";
 
 const BOOLEAN_KEYS = [
   "inGridCell",
@@ -60,5 +65,19 @@ describe("resolveComposerDensity", () => {
         hasAttachments: false,
       }),
     ).toBe("full");
+  });
+});
+
+describe("grid cell predicates", () => {
+  it("isGridCell is true for any cell, maximized or not", () => {
+    expect(isGridCell(null)).toBe(false);
+    expect(isGridCell({ isMaximized: true })).toBe(true);
+    expect(isGridCell({ isMaximized: false })).toBe(true);
+  });
+
+  it("isSlimComposerCell is true only for a cell that is not maximized", () => {
+    expect(isSlimComposerCell(null)).toBe(false);
+    expect(isSlimComposerCell({ isMaximized: true })).toBe(false);
+    expect(isSlimComposerCell({ isMaximized: false })).toBe(true);
   });
 });

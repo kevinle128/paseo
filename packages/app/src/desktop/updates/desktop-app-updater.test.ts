@@ -340,6 +340,36 @@ describe("desktop app updater — install", () => {
     expect(updater.getSnapshot().status).toBe("up-to-date");
   });
 
+  it("shows the download-opened state and keeps the callout away for that version", async () => {
+    const { updater, port } = createUpdater();
+    const ready = buildFakeCheckResult({
+      hasUpdate: true,
+      readyToInstall: true,
+      latestVersion: "0.14.0-mf.2",
+    });
+    port.nextCheckResult(ready);
+    await updater.checkForUpdates({ releaseChannel: "stable", intent: "automatic", silent: true });
+    expect(updater.getSnapshot().status).toBe("available");
+
+    port.nextInstallResult(buildFakeInstallResult({ installed: false, downloadOpened: true }));
+    await updater.installUpdate({ releaseChannel: "stable" });
+    expect(updater.getSnapshot()).toMatchObject({
+      status: "download-opened",
+      availableUpdate: null,
+    });
+
+    port.nextCheckResult(ready);
+    await updater.checkForUpdates({ releaseChannel: "stable", intent: "automatic", silent: true });
+    expect(updater.getSnapshot()).toMatchObject({
+      status: "download-opened",
+      availableUpdate: null,
+    });
+
+    port.nextCheckResult({ ...ready, latestVersion: "0.14.0-mf.3" });
+    await updater.checkForUpdates({ releaseChannel: "stable", intent: "automatic", silent: true });
+    expect(updater.getSnapshot()).toMatchObject({ status: "available" });
+  });
+
   it("reports the install error and moves to 'error' when the install throws", async () => {
     const { updater, port, reportedInstallErrors } = createUpdater();
     const error = new Error("install failed");
@@ -447,6 +477,19 @@ describe("formatStatusText", () => {
         formatLastCheckedAt,
       }),
     ).toBe("An app update is ready to install.");
+  });
+
+  it("tells the user to replace the app in the 'download-opened' state", () => {
+    expect(
+      formatStatusText({
+        status: "download-opened",
+        availableUpdate: null,
+        installMessage: null,
+        lastCheckedAt: null,
+        formatVersion,
+        formatLastCheckedAt,
+      }),
+    ).toBe("Download opened. Replace Paseo in Applications, then restart.");
   });
 
   it("uses the install message in the 'installed' state when present", () => {

@@ -14,6 +14,7 @@ export type DesktopAppUpdateStatus =
   | "available"
   | "installing"
   | "installed"
+  | "download-opened"
   | "error";
 
 export const PENDING_RECHECK_MS = 10_000;
@@ -102,6 +103,12 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+const FIXED_STATUS_TEXT_KEYS: Partial<Record<DesktopAppUpdateStatus, string>> = {
+  checking: "desktop.updates.status.checking",
+  installing: "desktop.updates.status.installing",
+  "download-opened": "desktop.updates.status.downloadOpened",
+};
+
 export function formatStatusText(input: {
   status: DesktopAppUpdateStatus;
   availableUpdate: DesktopAppUpdateCheckResult | null;
@@ -119,12 +126,9 @@ export function formatStatusText(input: {
     formatLastCheckedAt,
   } = input;
 
-  if (status === "checking") {
-    return i18n.t("desktop.updates.status.checking");
-  }
-
-  if (status === "installing") {
-    return i18n.t("desktop.updates.status.installing");
+  const fixedTextKey = FIXED_STATUS_TEXT_KEYS[status];
+  if (fixedTextKey) {
+    return i18n.t(fixedTextKey);
   }
 
   if (status === "up-to-date") {
@@ -189,10 +193,30 @@ export function formatStatusText(input: {
   return i18n.t("desktop.updates.status.idle");
 }
 
+function resolveCheckOutcome(
+  result: DesktopAppUpdateCheckResult,
+  downloadOpenedVersion: string | null,
+): { status: DesktopAppUpdateStatus; availableUpdate: DesktopAppUpdateCheckResult | null } {
+  if (
+    result.hasUpdate &&
+    downloadOpenedVersion !== null &&
+    result.latestVersion === downloadOpenedVersion
+  ) {
+    return { status: "download-opened", availableUpdate: null };
+  }
+  if (result.readyToInstall) return { status: "available", availableUpdate: result };
+  if (result.hasUpdate) return { status: "pending", availableUpdate: result };
+  return { status: "up-to-date", availableUpdate: null };
+}
+
 export function createDesktopAppUpdater(deps: DesktopAppUpdaterDeps): DesktopAppUpdater {
   let state: InternalState = { ...INITIAL_STATE };
   let cachedSnapshot: DesktopAppUpdaterSnapshot = buildSnapshot(state);
   const listeners = new Set<() => void>();
+  // Version whose download was opened for the user this session. The update
+  // stays unapplied until the user replaces the app by hand, so later checks
+  // keep finding it; they must not bring the callout back.
+  let downloadOpenedVersion: string | null = null;
 
   function commit(next: InternalState): void {
     state = next;
@@ -248,19 +272,10 @@ export function createDesktopAppUpdater(deps: DesktopAppUpdaterDeps): DesktopApp
         return result;
       }
 
-      let nextStatus: DesktopAppUpdateStatus;
-      let nextAvailable: DesktopAppUpdateCheckResult | null;
-
-      if (result.readyToInstall) {
-        nextStatus = "available";
-        nextAvailable = result;
-      } else if (result.hasUpdate) {
-        nextStatus = "pending";
-        nextAvailable = result;
-      } else {
-        nextStatus = "up-to-date";
-        nextAvailable = null;
-      }
+      const { status: nextStatus, availableUpdate: nextAvailable } = resolveCheckOutcome(
+        result,
+        downloadOpenedVersion,
+      );
 
       commit({
         ...state,
@@ -307,9 +322,14 @@ export function createDesktopAppUpdater(deps: DesktopAppUpdaterDeps): DesktopApp
         releaseChannel: options.releaseChannel,
       });
       const nextLastCheckedAt = deps.now();
+      let nextStatus: DesktopAppUpdateStatus = result.installed ? "installed" : "up-to-date";
+      if (result.downloadOpened) {
+        nextStatus = "download-opened";
+        downloadOpenedVersion = state.availableUpdate?.latestVersion ?? null;
+      }
       commit({
         ...state,
-        status: result.installed ? "installed" : "up-to-date",
+        status: nextStatus,
         availableUpdate: null,
         installMessage: result.message,
         lastCheckedAt: nextLastCheckedAt,

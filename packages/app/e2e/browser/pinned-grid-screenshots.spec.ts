@@ -106,8 +106,10 @@ test.describe("Pinned grid screenshots", () => {
       await expect(focusedCell.getByTestId("pinned-grid-focus-ring")).toHaveCount(1);
       await capture(page, "04-focused-cell-highlight.png");
 
-      // The unfocused cell shows the slim composer; the focused one shows the full composer.
+      // Both cells show the slim composer; a press in the input of the focused cell expands it.
       await capture(page, "06a-composer-minimal-unfocused-cell.png", idleCell);
+      await capture(page, "06c-composer-minimal-focused-cell.png", focusedCell);
+      await focusedCell.getByRole("textbox", { name: "Message agent..." }).click();
       await capture(page, "06b-composer-expanded-focused-cell.png", focusedCell);
 
       await focusedCell.getByTestId("workspace-grid-cell-maximize").click();
@@ -130,6 +132,90 @@ test.describe("Pinned grid screenshots", () => {
       await capture(page, "03-grid-3-columns.png");
     } finally {
       for (const agent of agents.toReversed()) {
+        await agent.cleanup();
+      }
+    }
+  });
+
+  test("add cell, picker and header drag", async ({ page }) => {
+    const serverId = getServerId();
+    await page.setViewportSize(WIDE_VIEWPORT);
+    const pinned: MockAgentWorkspace[] = [];
+    const free: MockAgentWorkspace[] = [];
+
+    try {
+      for (const title of ["Alpha", "Bravo", "Charlie", "Delta"]) {
+        pinned.push(
+          await seedMockAgentWorkspace({
+            repoPrefix: `grid-shot-${title.toLowerCase()}-`,
+            title: `Grid ${title}`,
+            initialPrompt: `Say hello from ${title}`,
+          }),
+        );
+      }
+      for (const title of ["Echo", "Foxtrot"]) {
+        free.push(
+          await seedMockAgentWorkspace({
+            repoPrefix: `grid-shot-${title.toLowerCase()}-`,
+            title: `Grid ${title}`,
+            initialPrompt: `Say hello from ${title}`,
+          }),
+        );
+      }
+      await gotoAppShell(page);
+      for (const agent of [...pinned, ...free]) {
+        await waitForWorkspaceInSidebar(page, { serverId, workspaceId: agent.workspaceId });
+      }
+      // Pinning after the app loaded keeps the cells in pin order.
+      for (const agent of pinned) {
+        await agent.client.setWorkspacePinned(agent.workspaceId, true);
+      }
+      await switchWorkspaceViaSidebar({
+        page,
+        serverId,
+        workspaceId: pinned[0].workspaceId,
+      });
+      await chooseGridMode(page, "2");
+      for (const agent of pinned) {
+        await expect(cellLocator(page, serverId, agent.workspaceId)).toBeVisible({
+          timeout: 30_000,
+        });
+      }
+
+      // Four pins in two columns put the "+" tile alone on a new row.
+      const addCell = page.getByTestId("pinned-grid-add-cell");
+      await addCell.scrollIntoViewIfNeeded();
+      await expect(addCell).toBeVisible();
+      await capture(page, "11-add-cell-on-new-row.png");
+
+      await addCell.click();
+      await expect(
+        page.getByTestId(`pinned-grid-add-option-${serverId}:${free[0].workspaceId}`),
+      ).toBeVisible({ timeout: 30_000 });
+      await capture(page, "12-add-pin-picker-open.png");
+      await page.keyboard.press("Escape");
+
+      // Drag the first cell by its title toward the last cell and keep the button down.
+      const deck = page.getByTestId("workspace-deck");
+      await deck.evaluate((node) => {
+        node.scrollTop = 0;
+      });
+      const source = cellLocator(page, serverId, pinned[0].workspaceId);
+      const target = cellLocator(page, serverId, pinned[3].workspaceId);
+      const title = await source.getByTestId("workspace-header-title").boundingBox();
+      const targetBox = await target.boundingBox();
+      if (!title || !targetBox) {
+        throw new Error("Cell header or target cell is not laid out");
+      }
+      await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 80, { steps: 12 });
+      await expect(page.getByTestId("pinned-grid-drop-indicator")).toBeVisible();
+      await capture(page, "13-drag-in-progress-drop-outline.png");
+      await page.keyboard.press("Escape");
+      await page.mouse.up();
+    } finally {
+      for (const agent of [...free, ...pinned].toReversed()) {
         await agent.cleanup();
       }
     }

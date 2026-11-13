@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { app } from "electron";
+import { app, shell } from "electron";
 import { UUID } from "builder-util-runtime";
 import log from "electron-log/main";
 import { autoUpdater } from "electron-updater";
@@ -9,12 +10,21 @@ import {
   createAppUpdateService,
   type AppUpdateCheckResult,
   type AppUpdateInstallRequest,
+  type AppUpdateService,
   type AppUpdateInstallResult,
   type AppUpdateRuntime,
   type AppUpdateRuntimeConfiguration,
   type RuntimeUpdateCheckResult,
   type RuntimeUpdateInfo,
 } from "./app-update-service.js";
+import {
+  createNotifyOnlyUpdateService,
+  isNotifyOnlyUpdateMode,
+  parseForkUpdateConfig,
+  resolveAllowPrerelease,
+  resolveFeedChannel,
+  type ForkUpdateConfig,
+} from "./fork-update-mode.js";
 import {
   bucketFromStagingUserId,
   rolloutManifestSchema,
@@ -34,6 +44,26 @@ export {
 };
 
 let cachedStagingUserIdPromise: Promise<string> | null = null;
+let cachedForkUpdateConfig: ForkUpdateConfig | null | undefined;
+
+function getForkUpdateConfig(): ForkUpdateConfig | null {
+  if (cachedForkUpdateConfig === undefined) {
+    try {
+      const packageJson = JSON.parse(
+        readFileSync(path.join(app.getAppPath(), "package.json"), "utf8"),
+      );
+      cachedForkUpdateConfig = parseForkUpdateConfig(packageJson);
+    } catch (error) {
+      console.warn(`[auto-updater] Couldn't read fork update config: ${error}`);
+      cachedForkUpdateConfig = null;
+    }
+  }
+  return cachedForkUpdateConfig;
+}
+
+function isNotifyOnly(): boolean {
+  return isNotifyOnlyUpdateMode(getForkUpdateConfig(), process.platform);
+}
 
 const UPDATE_CHANNEL_NOT_PUBLISHED_CODE = "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND";
 
@@ -142,16 +172,20 @@ export function shouldInstallAppUpdateOnQuit(input: {
 
 class ElectronAppUpdateRuntime implements AppUpdateRuntime {
   private configured = false;
+  lastUpdateInfo: RuntimeUpdateInfo | null = null;
 
   configure(input: AppUpdateRuntimeConfiguration): void {
-    autoUpdater.autoDownload = true;
+    autoUpdater.autoDownload = !isNotifyOnly();
     autoUpdater.autoRunAppAfterInstall = true;
     // Paseo revalidates the current manifest before explicitly installing on quit.
     // Electron's built-in handler would install an older download without checking
     // whether a newer release has superseded it.
     autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.allowPrerelease = input.releaseChannel === "beta";
-    autoUpdater.channel = input.releaseChannel === "beta" ? "beta" : "latest";
+    autoUpdater.allowPrerelease = resolveAllowPrerelease(
+      input.releaseChannel,
+      getForkUpdateConfig(),
+    );
+    autoUpdater.channel = resolveFeedChannel(input.releaseChannel, getForkUpdateConfig());
     autoUpdater.allowDowngrade = false;
     autoUpdater.isUserWithinRollout = async (info) => {
       try {
@@ -196,9 +230,10 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
     try {
       const result = await autoUpdater.checkForUpdates();
       if (!result) return null;
+      this.lastUpdateInfo = result.updateInfo as RuntimeUpdateInfo;
       return {
         isUpdateAvailable: result.isUpdateAvailable,
-        updateInfo: result.updateInfo as RuntimeUpdateInfo,
+        updateInfo: this.lastUpdateInfo,
       };
     } catch (error) {
       if (isUpdateChannelNotPublished(error)) return null;
@@ -222,8 +257,10 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
   }
 }
 
-const appUpdateService = createAppUpdateService({
-  runtime: new ElectronAppUpdateRuntime(),
+const updateRuntime = new ElectronAppUpdateRuntime();
+
+const defaultAppUpdateService = createAppUpdateService({
+  runtime: updateRuntime,
   isPackaged: () => app.isPackaged,
   now: () => Date.now(),
   bucket: async () => bucketFromStagingUserId(await getStagingUserId()),
@@ -237,6 +274,21 @@ const appUpdateService = createAppUpdateService({
     console.error("[auto-updater] Failed to download/install update:", message);
   },
 });
+
+let notifyOnlyAppUpdateService: AppUpdateService | null = null;
+
+function getAppUpdateService(): AppUpdateService {
+  const config = getForkUpdateConfig();
+  if (!config || !isNotifyOnlyUpdateMode(config, process.platform)) return defaultAppUpdateService;
+  notifyOnlyAppUpdateService ??= createNotifyOnlyUpdateService({
+    service: defaultAppUpdateService,
+    getLastUpdateInfo: () => updateRuntime.lastUpdateInfo,
+    config,
+    arch: () => (process.arch === "x64" && !app.runningUnderARM64Translation ? "x64" : "arm64"),
+    openExternal: (url) => shell.openExternal(url),
+  });
+  return notifyOnlyAppUpdateService;
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -252,7 +304,7 @@ export async function checkForAppUpdate({
   intent: AppUpdateCheckIntent;
 }): Promise<AppUpdateCheckResult> {
   updateLifecycleLog.checkStarted({ currentVersion, releaseChannel, intent });
-  const result = await appUpdateService.checkForAppUpdate({
+  const result = await getAppUpdateService().checkForAppUpdate({
     currentVersion,
     releaseChannel,
     intent,
@@ -279,7 +331,7 @@ export async function downloadAndInstallUpdate(
   },
   onBeforeQuit?: () => Promise<void>,
 ): Promise<AppUpdateInstallResult> {
-  return appUpdateService.downloadAndInstallUpdate(
+  return getAppUpdateService().downloadAndInstallUpdate(
     { currentVersion, releaseChannel },
     onBeforeQuit,
   );
@@ -303,5 +355,5 @@ export async function installAppUpdateOnQuit({
     return false;
   }
 
-  return appUpdateService.installUpdateOnQuit({ currentVersion, releaseChannel, signal });
+  return getAppUpdateService().installUpdateOnQuit({ currentVersion, releaseChannel, signal });
 }
