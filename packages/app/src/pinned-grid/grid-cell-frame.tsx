@@ -1,26 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { View, type ViewStyle } from "react-native";
+import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { isNative } from "@/constants/platform";
 import { WindowChromeRegion } from "@/utils/desktop-window";
 import { createPointerFocusClaim } from "./cell-press-guard";
-import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "./grid-cell-context";
 import type { GridCellRect } from "./geometry";
+import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "./grid-cell-context";
+import { useCellMotion } from "./use-cell-motion";
 
 type ChromeCorners = "both" | "top-left" | "top-right" | "none";
-
-/** Maximize and restore move the cell rect over this long. Drags and resizes never animate. */
-const RECT_TRANSITION_MS = 240;
-const RECT_TRANSITION_EASING = "cubic-bezier(.2, .8, .2, 1)";
-// A little longer than the transition so the style is not removed while the last frame paints.
-const RECT_TRANSITION_CLEAR_MS = RECT_TRANSITION_MS + 60;
-
-// React Native types omit `transition*`; React Native Web passes them to CSS.
-const RECT_TRANSITION_STYLE = {
-  transitionProperty: "left, top, width, height",
-  transitionDuration: `${RECT_TRANSITION_MS}ms`,
-  transitionTimingFunction: RECT_TRANSITION_EASING,
-} as unknown as ViewStyle;
 
 // DOM node of every mounted cell frame, so keyboard navigation can put focus on a frame.
 const frameNodes = new Map<string, HTMLElement>();
@@ -49,14 +37,6 @@ export function focusGridCellFrameContaining(inner: Node | null): boolean {
   return false;
 }
 
-export function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
 interface GridCellFrameProps {
   cellKey: string;
   /** True when the pinned grid shows and this entry is one of its cells. */
@@ -66,6 +46,8 @@ interface GridCellFrameProps {
   rect: GridCellRect | null;
   isFocused: boolean;
   isMaximized: boolean;
+  /** Another cell is maximized. This cell fades out and, when the grid returns, fades in. */
+  underMaximized?: boolean;
   /** Other cells dim when more than one cell shows. */
   dimmed: boolean;
   chromeCorners: ChromeCorners;
@@ -93,6 +75,7 @@ export const GridCellFrame = memo(function GridCellFrame({
   rect,
   isFocused,
   isMaximized,
+  underMaximized = false,
   dimmed,
   chromeCorners,
   label,
@@ -110,21 +93,14 @@ export const GridCellFrame = memo(function GridCellFrame({
   const onFocusCellRef = useRef(onFocusCell);
   onFocusCellRef.current = onFocusCell;
 
-  // The rect transition applies only to the commit that changes `isMaximized`. The state is
-  // adjusted during render so the new rect and the transition style reach the DOM together.
-  const [seenMaximized, setSeenMaximized] = useState(isMaximized);
-  const [rectAnimating, setRectAnimating] = useState(false);
-  if (seenMaximized !== isMaximized) {
-    setSeenMaximized(isMaximized);
-    setRectAnimating(isCell && !isNative && !prefersReducedMotion());
-  }
-  useEffect(() => {
-    if (!rectAnimating) {
-      return undefined;
-    }
-    const timer = setTimeout(() => setRectAnimating(false), RECT_TRANSITION_CLEAR_MS);
-    return () => clearTimeout(timer);
-  }, [rectAnimating]);
+  const { layoutRect, isMoving } = useCellMotion({
+    frameRef,
+    isCell,
+    isVisible,
+    rect,
+    isMaximized,
+    underMaximized,
+  });
 
   // Focus moves in capture phase and without preventDefault: the click still reaches its target.
   useEffect(() => {
@@ -234,19 +210,25 @@ export const GridCellFrame = memo(function GridCellFrame({
 
   const rectStyle = useMemo(
     () =>
-      rect ? { left: rect.x, top: rect.y, width: rect.width, height: rect.height } : undefined,
-    [rect],
+      layoutRect
+        ? {
+            left: layoutRect.x,
+            top: layoutRect.y,
+            width: layoutRect.width,
+            height: layoutRect.height,
+          }
+        : undefined,
+    [layoutRect],
   );
   const frameStyle = useMemo(
     () => [
       rect ? styles.cell : styles.single,
       !isVisible && styles.hidden,
       isDragSource && styles.dragSource,
-      rect && rectAnimating && styles.rectAnimating,
+      isMoving && styles.moving,
       rectStyle,
-      rect && rectAnimating && RECT_TRANSITION_STYLE,
     ],
-    [isDragSource, isVisible, rect, rectAnimating, rectStyle],
+    [isDragSource, isVisible, isMoving, rect, rectStyle],
   );
   const ringStyle = useMemo(
     () => [styles.ring, isFocused && !isMaximized ? styles.ringFocused : styles.ringIdle],
@@ -272,6 +254,7 @@ export const GridCellFrame = memo(function GridCellFrame({
           ref={frameRef}
           style={frameStyle}
           testID={isCell ? `pinned-grid-cell-${cellKey}` : undefined}
+          pointerEvents={underMaximized ? "none" : undefined}
           role={isCell ? "group" : undefined}
           aria-label={isCell ? label : undefined}
           onPointerEnter={isCell ? handlePointerEnter : undefined}
@@ -309,7 +292,7 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 30,
   },
   // The cell that grows or shrinks draws above the cells that appear or vanish around it.
-  rectAnimating: {
+  moving: {
     zIndex: 25,
   },
   dim: {
