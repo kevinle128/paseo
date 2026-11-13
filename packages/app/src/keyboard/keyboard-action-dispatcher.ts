@@ -44,6 +44,13 @@ export type KeyboardActionId =
   | "workspace.pane.close"
   | "workspace.focus.toggle"
   | "workspace.cell.maximize.toggle"
+  | "workspace.cell.maximize.set"
+  | "workspace.cell.maximize.restore"
+  | "workspace.cell.focus.left"
+  | "workspace.cell.focus.right"
+  | "workspace.cell.focus.up"
+  | "workspace.cell.focus.down"
+  | "workspace.cell.composer.focus"
   | "workspace.terminal.new"
   | "workspace.browser.new"
   | "sidebar.toggle.right"
@@ -104,6 +111,13 @@ export type KeyboardActionDefinition =
   | { id: "workspace.pane.close"; scope: KeyboardActionScope }
   | { id: "workspace.focus.toggle"; scope: KeyboardActionScope }
   | { id: "workspace.cell.maximize.toggle"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.maximize.set"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.maximize.restore"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.focus.left"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.focus.right"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.focus.up"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.focus.down"; scope: KeyboardActionScope }
+  | { id: "workspace.cell.composer.focus"; scope: KeyboardActionScope }
   | { id: "workspace.terminal.new"; scope: KeyboardActionScope }
   | { id: "workspace.browser.new"; scope: KeyboardActionScope }
   | { id: "sidebar.toggle.right"; scope: KeyboardActionScope }

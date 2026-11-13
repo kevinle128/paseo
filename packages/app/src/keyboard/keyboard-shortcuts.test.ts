@@ -447,6 +447,122 @@ describe("keyboard-shortcuts", () => {
     );
   });
 
+  describe("grid cell maximize with the zoom keys", () => {
+    const zoomKeyCases = [
+      {
+        name: "=",
+        action: "workspace.cell.maximize.set",
+        key: "=",
+        code: "Equal",
+        shiftKey: false,
+      },
+      { name: "+", action: "workspace.cell.maximize.set", key: "+", code: "Equal", shiftKey: true },
+      {
+        name: "-",
+        action: "workspace.cell.maximize.restore",
+        key: "-",
+        code: "Minus",
+        shiftKey: false,
+      },
+    ] as const;
+
+    it.each(zoomKeyCases)("routes Cmd+$name on macOS", ({ action, key, code, shiftKey }) => {
+      expectShortcutResolution({
+        event: { key, code, metaKey: true, shiftKey },
+        context: { isMac: true, focusScope: "message-input" },
+        action,
+      });
+    });
+
+    it.each(zoomKeyCases)("routes Ctrl+$name elsewhere", ({ action, key, code, shiftKey }) => {
+      expectShortcutResolution({
+        event: { key, code, ctrlKey: true, shiftKey },
+        context: { isMac: false, focusScope: "other" },
+        action,
+      });
+    });
+
+    it.each(["editable", "terminal", "browser"] as const)(
+      "leaves the zoom keys alone with %s focused",
+      (focusScope) => {
+        expectNoShortcutResolution({
+          event: { key: "=", code: "Equal", metaKey: true },
+          context: { isMac: true, focusScope },
+        });
+      },
+    );
+
+    it("does not treat Ctrl+= as a maximize key on macOS", () => {
+      expectNoShortcutResolution({
+        event: { key: "=", code: "Equal", ctrlKey: true },
+        context: { isMac: true },
+      });
+    });
+  });
+
+  describe("grid cell focus with plain keys", () => {
+    const arrowCases = [
+      { key: "ArrowLeft", action: "workspace.cell.focus.left" },
+      { key: "ArrowRight", action: "workspace.cell.focus.right" },
+      { key: "ArrowUp", action: "workspace.cell.focus.up" },
+      { key: "ArrowDown", action: "workspace.cell.focus.down" },
+    ] as const;
+
+    it.each(arrowCases)("routes $key outside text and terminals", ({ key, action }) => {
+      for (const isMac of [true, false]) {
+        expectShortcutResolution({
+          event: { key, code: key },
+          context: { isMac, focusScope: "other" },
+          action,
+        });
+      }
+    });
+
+    it.each(["editable", "message-input", "terminal", "browser", "command-center"] as const)(
+      "leaves the arrow keys to the focused %s",
+      (focusScope) => {
+        expectNoShortcutResolution({
+          event: { key: "ArrowLeft", code: "ArrowLeft" },
+          context: { focusScope },
+        });
+      },
+    );
+
+    it("leaves the arrow keys alone while the command center is open", () => {
+      expectNoShortcutResolution({
+        event: { key: "ArrowDown", code: "ArrowDown" },
+        context: { commandCenterOpen: true },
+      });
+    });
+
+    it("routes Enter to the cell composer only outside text and terminals", () => {
+      for (const isMac of [true, false]) {
+        expectShortcutResolution({
+          event: { key: "Enter", code: "Enter" },
+          context: { isMac, focusScope: "other" },
+          action: "workspace.cell.composer.focus",
+        });
+      }
+      for (const focusScope of ["editable", "terminal", "browser"] as const) {
+        expect(
+          resolveShortcut({
+            event: { key: "Enter", code: "Enter" },
+            context: { focusScope },
+          }).match?.action,
+        ).not.toBe("workspace.cell.composer.focus");
+      }
+    });
+
+    it("keeps Enter as dictation confirm in the message input", () => {
+      expectShortcutResolution({
+        event: { key: "Enter", code: "Enter" },
+        context: { focusScope: "message-input" },
+        action: "message-input.action",
+        payload: { kind: "dictation-confirm" },
+      });
+    });
+  });
+
   it("leaves Escape to an editable field", () => {
     expectNoShortcutResolution({
       event: { key: "Escape", code: "Escape" },

@@ -200,6 +200,13 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "toggle-both-sidebars",
     "toggle-focus",
     "toggle-cell-maximize",
+    "cell-maximize",
+    "cell-restore",
+    "cell-focus-left",
+    "cell-focus-right",
+    "cell-focus-up",
+    "cell-focus-down",
+    "cell-focus-composer",
   ],
   "agent-input": [
     "focus-message-input",
@@ -249,6 +256,13 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "toggle-settings": "settings.shortcuts.help.toggleSettings",
   "toggle-focus": "settings.shortcuts.help.toggleFocusMode",
   "toggle-cell-maximize": "settings.shortcuts.help.toggleCellMaximize",
+  "cell-maximize": "settings.shortcuts.help.maximizeCell",
+  "cell-restore": "settings.shortcuts.help.restoreCell",
+  "cell-focus-left": "settings.shortcuts.help.focusCellLeft",
+  "cell-focus-right": "settings.shortcuts.help.focusCellRight",
+  "cell-focus-up": "settings.shortcuts.help.focusCellUp",
+  "cell-focus-down": "settings.shortcuts.help.focusCellDown",
+  "cell-focus-composer": "settings.shortcuts.help.focusCellComposer",
   "cycle-theme": "settings.shortcuts.help.cycleTheme",
   "focus-message-input": "settings.shortcuts.help.focusMessageInput",
   "cycle-agent-mode": "settings.shortcuts.help.cycleAgentMode",
@@ -1082,6 +1096,113 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
+  // --- Maximize and restore with the zoom keys (grid only) ---
+  // The zoom accelerators are free while a grid shows, so Cmd/Ctrl +, = and - maximize and restore
+  // the focused cell. Normal mode leaves the handler unclaimed and the window zoom keeps working.
+  {
+    id: "workspace-cell-maximize-set-cmd-equal-mac",
+    action: "workspace.cell.maximize.set",
+    combo: "Cmd+=",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-maximize",
+      section: "layout",
+      label: "Maximize cell",
+    },
+  },
+  {
+    id: "workspace-cell-maximize-set-cmd-shift-equal-mac",
+    action: "workspace.cell.maximize.set",
+    combo: "Cmd+Shift+=",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+  },
+  {
+    id: "workspace-cell-maximize-restore-cmd-minus-mac",
+    action: "workspace.cell.maximize.restore",
+    combo: "Cmd+-",
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-restore",
+      section: "layout",
+      label: "Restore cell",
+    },
+  },
+  {
+    id: "workspace-cell-maximize-set-ctrl-equal-non-mac",
+    action: "workspace.cell.maximize.set",
+    combo: "Ctrl+=",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-maximize",
+      section: "layout",
+      label: "Maximize cell",
+    },
+  },
+  {
+    id: "workspace-cell-maximize-set-ctrl-shift-equal-non-mac",
+    action: "workspace.cell.maximize.set",
+    combo: "Ctrl+Shift+=",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+  },
+  {
+    id: "workspace-cell-maximize-restore-ctrl-minus-non-mac",
+    action: "workspace.cell.maximize.restore",
+    combo: "Ctrl+-",
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    help: {
+      id: "cell-restore",
+      section: "layout",
+      label: "Restore cell",
+    },
+  },
+
+  // --- Move focus between grid cells (grid only, outside text and terminal) ---
+  // `focusScope: "other"` keeps arrows in text fields, the terminal and browser panes untouched.
+  {
+    id: "workspace-cell-focus-left-arrow",
+    action: "workspace.cell.focus.left",
+    combo: "ArrowLeft",
+    when: { commandCenter: false, focusScope: "other" },
+    help: {
+      id: "cell-focus-left",
+      section: "layout",
+      label: "Focus cell left",
+    },
+  },
+  {
+    id: "workspace-cell-focus-right-arrow",
+    action: "workspace.cell.focus.right",
+    combo: "ArrowRight",
+    when: { commandCenter: false, focusScope: "other" },
+    help: {
+      id: "cell-focus-right",
+      section: "layout",
+      label: "Focus cell right",
+    },
+  },
+  {
+    id: "workspace-cell-focus-up-arrow",
+    action: "workspace.cell.focus.up",
+    combo: "ArrowUp",
+    when: { commandCenter: false, focusScope: "other" },
+    help: {
+      id: "cell-focus-up",
+      section: "layout",
+      label: "Focus cell up",
+    },
+  },
+  {
+    id: "workspace-cell-focus-down-arrow",
+    action: "workspace.cell.focus.down",
+    combo: "ArrowDown",
+    when: { commandCenter: false, focusScope: "other" },
+    help: {
+      id: "cell-focus-down",
+      section: "layout",
+      label: "Focus cell down",
+    },
+  },
+
   // --- Theme cycling ---
   {
     id: "theme-cycle-cmd-shift-t-mac",
@@ -1205,6 +1326,19 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "agent-interrupt",
       section: "agent-input",
       label: "Interrupt agent",
+    },
+  },
+  // Must stay before the dictation confirm binding: the first matching binding wins. The grid
+  // handler passes the key on to dictation confirm when it does not act.
+  {
+    id: "workspace-cell-composer-focus-enter",
+    action: "workspace.cell.composer.focus",
+    combo: "Enter",
+    when: { commandCenter: false, focusScope: "other" },
+    help: {
+      id: "cell-focus-composer",
+      section: "layout",
+      label: "Focus cell composer",
     },
   },
   {

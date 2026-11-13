@@ -67,6 +67,13 @@ const PASSTHROUGH_DISPATCH: Record<string, KeyboardActionDefinition> = {
   "workspace.pane.close": { id: "workspace.pane.close", scope: "workspace" },
   "view.toggle.focus": { id: "workspace.focus.toggle", scope: "workspace" },
   "workspace.cell.maximize.toggle": { id: "workspace.cell.maximize.toggle", scope: "workspace" },
+  "workspace.cell.maximize.set": { id: "workspace.cell.maximize.set", scope: "workspace" },
+  "workspace.cell.maximize.restore": { id: "workspace.cell.maximize.restore", scope: "workspace" },
+  "workspace.cell.focus.left": { id: "workspace.cell.focus.left", scope: "workspace" },
+  "workspace.cell.focus.right": { id: "workspace.cell.focus.right", scope: "workspace" },
+  "workspace.cell.focus.up": { id: "workspace.cell.focus.up", scope: "workspace" },
+  "workspace.cell.focus.down": { id: "workspace.cell.focus.down", scope: "workspace" },
+  "workspace.cell.composer.focus": { id: "workspace.cell.composer.focus", scope: "workspace" },
 };
 
 const SIMPLE_CALLBACKS: Record<string, ShortcutCallbackName> = {

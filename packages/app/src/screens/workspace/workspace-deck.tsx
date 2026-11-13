@@ -7,6 +7,8 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { WindowChromeRegion } from "@/utils/desktop-window";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
+import { useSessionStore } from "@/stores/session-store";
+import { resolveWorkspaceHeader } from "@/screens/workspace/workspace-header-source";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 import {
@@ -140,7 +142,7 @@ export function WorkspaceDeck() {
     gridFocusedKeyRef,
     focusCell: focusCellInGrid,
     toggleMaximize,
-  } = useGridFocus({ activeKey, pinnedKeys, cells: grid ? grid.cells : null });
+  } = useGridFocus({ activeKey, pinnedKeys, grid });
 
   const { handlePicked, focusCell } = usePendingPinFocus({
     activeKey,
@@ -422,6 +424,11 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
 }: WorkspaceDeckEntryProps) {
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
   const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
+  // A string selector, so the entry renders again only when the title changes.
+  const cellLabel = useSessionStore((state) => {
+    const workspace = state.sessions[selection.serverId]?.workspaces.get(selection.workspaceId);
+    return workspace ? resolveWorkspaceHeader({ workspace }).title : undefined;
+  });
   const isPresentedEntry = isPresented(presence);
   const shouldKeepMounted = shouldKeepWorkspaceDeckEntryMounted({
     isActive: isPresentedEntry,
@@ -451,6 +458,7 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
     <HostRouteProvider serverId={selection.serverId}>
       <GridCellFrame
         cellKey={getWorkspaceSelectionKey(selection)}
+        label={cellLabel}
         isCell={isCell}
         isVisible={isPresentedEntry}
         rect={rect}

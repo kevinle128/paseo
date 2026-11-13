@@ -33,6 +33,8 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isGridCell } from "@/pinned-grid/composer-density";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
+import { focusGridCellFrameContaining } from "@/pinned-grid/grid-cell-frame";
+import { useGuardedCellPress } from "@/pinned-grid/use-guarded-cell-press";
 import {
   controlSizingForLayout,
   TOOLBAR_CONTROL_GAP,
@@ -562,31 +564,69 @@ interface DispatchComposerKeyboardActionArgs {
   isConnected: boolean;
   handleCancelAgent: () => void;
   focusMessageInputForKeyboardAction: () => void;
+  /** The composer sits in a pinned grid cell. */
+  isGridCellComposer: boolean;
+  /** True while the autocomplete list is on screen. */
+  isAutocompleteOpen: () => boolean;
 }
 
-function dispatchComposerKeyboardAction(args: DispatchComposerKeyboardActionArgs): boolean {
+/**
+ * Escape in a grid cell composer leaves the composer instead of interrupting the agent. DOM focus
+ * moves to the cell frame, so the next key still reaches the shortcut pipeline of the same cell.
+ */
+function leaveGridCellComposer(messageInputRef: { current: MessageInputRef | null }): boolean {
+  if (!isWeb) {
+    return false;
+  }
+  const active = document.activeElement;
+  // Same test as the "message-input" focus scope, so a focused toolbar control counts too.
+  if (!active?.closest("[data-testid='message-input-root']")) {
+    return false;
+  }
+  if (!focusGridCellFrameContaining(active)) {
+    return false;
+  }
+  messageInputRef.current?.blur();
+  // A press that opened the composer must not keep it open once the user has left it.
+  messageInputRef.current?.releaseGridHold();
+  return true;
+}
+
+function dispatchComposerInterrupt(args: DispatchComposerKeyboardActionArgs): boolean {
   const {
-    action,
-    isPaneFocused,
     messageInputRef,
     isAgentRunning,
     isCancellingAgent,
     isConnected,
     handleCancelAgent,
-    focusMessageInputForKeyboardAction,
+    isGridCellComposer,
+    isAutocompleteOpen,
   } = args;
+  if (messageInputRef.current?.runKeyboardAction("dictation-cancel")) return true;
+  // The first Escape only closes an open suggestion list; the list handles the key itself.
+  if (isGridCellComposer && isAutocompleteOpen()) return false;
+  if (isGridCellComposer && leaveGridCellComposer(messageInputRef)) return true;
+  if (!isAgentRunning || isCancellingAgent || !isConnected) return false;
+  handleCancelAgent();
+  return true;
+}
+
+function dispatchComposerKeyboardAction(args: DispatchComposerKeyboardActionArgs): boolean {
+  const { action, isPaneFocused, messageInputRef, focusMessageInputForKeyboardAction } = args;
   if (!isPaneFocused) return false;
 
   if (action.id === "agent.interrupt") {
-    if (messageInputRef.current?.runKeyboardAction("dictation-cancel")) return true;
-    if (!isAgentRunning || isCancellingAgent || !isConnected) return false;
-    handleCancelAgent();
-    return true;
+    return dispatchComposerInterrupt(args);
   }
 
   if (action.id === "message-input.focus") {
     focusMessageInputForKeyboardAction();
     return true;
+  }
+
+  // Where no grid is mounted, Enter confirms dictation; the grid handler runs first in a grid.
+  if (action.id === "workspace.cell.composer.focus") {
+    return messageInputRef.current?.runKeyboardAction("dictation-confirm") ?? false;
   }
 
   const passthroughAction = resolveMessageInputPassthroughAction(action.id);
@@ -605,13 +645,15 @@ function ComposerKeyboardRegistration({
   isConnected,
   handleCancelAgent,
   focusMessageInputForKeyboardAction,
+  isAutocompleteOpen,
   isMessageInputFocused,
   handlerId,
-}: Omit<DispatchComposerKeyboardActionArgs, "action" | "isPaneFocused"> & {
+}: Omit<DispatchComposerKeyboardActionArgs, "action" | "isPaneFocused" | "isGridCellComposer"> & {
   isMessageInputFocused: boolean;
   handlerId: string;
 }) {
   const { isActiveComposer } = useComposerKeyboardScope();
+  const isGridCellComposer = useWorkspaceGridCell() !== null;
   const handleKeyboardAction = useCallback(
     (action: KeyboardActionDefinition): boolean =>
       dispatchComposerKeyboardAction({
@@ -623,14 +665,18 @@ function ComposerKeyboardRegistration({
         isConnected,
         handleCancelAgent,
         focusMessageInputForKeyboardAction,
+        isGridCellComposer,
+        isAutocompleteOpen,
       }),
     [
+      isAutocompleteOpen,
       focusMessageInputForKeyboardAction,
       handleCancelAgent,
       isActiveComposer,
       isAgentRunning,
       isCancellingAgent,
       isConnected,
+      isGridCellComposer,
       messageInputRef,
     ],
   );
@@ -644,6 +690,7 @@ function ComposerKeyboardRegistration({
       "message-input.dictation-toggle",
       "message-input.dictation-cancel",
       "message-input.dictation-confirm",
+      "workspace.cell.composer.focus",
       "message-input.voice-toggle",
       "message-input.voice-mute-toggle",
     ],
@@ -1014,6 +1061,8 @@ const StableMessageInput = memo(MessageInput);
 
 interface ComposerAutocompleteHandle {
   onKeyPress: (event: ComposerKeyPressEvent) => boolean;
+  /** True while the suggestion list is on screen. */
+  isOpen: () => boolean;
 }
 
 function ComposerAutocompleteBinding({
@@ -1051,10 +1100,15 @@ function ComposerAutocompleteBinding({
   // A recalled message is sent as is; its leading `/command` must not open the picker.
   const isShown = show && !recall.isShowing(userInput);
   const handleKeyPress = autocomplete.onKeyPress;
-  useImperativeHandle(ref, () => ({ onKeyPress: (event) => isShown && handleKeyPress(event) }), [
-    isShown,
-    handleKeyPress,
-  ]);
+  const isListOpen = autocomplete.isVisible && isShown;
+  useImperativeHandle(
+    ref,
+    () => ({
+      onKeyPress: (event) => isShown && handleKeyPress(event),
+      isOpen: () => isListOpen,
+    }),
+    [isShown, handleKeyPress, isListOpen],
+  );
   const selectOption = autocomplete.onSelectOption;
   const onSelect = useCallback(
     (option: AutocompleteOption) => selectOption(option, inputRef.current?.getInputSnapshot()),
@@ -1062,7 +1116,7 @@ function ComposerAutocompleteBinding({
   );
   return (
     <ComposerAutocomplete
-      visible={autocomplete.isVisible && isShown}
+      visible={isListOpen}
       anchorStyle={anchorStyle}
       options={autocomplete.options}
       selectedIndex={autocomplete.selectedIndex}
@@ -1123,10 +1177,12 @@ function ComposerCancelButton({
     <Square size={discGlyphSize} color="white" fill="white" />
   );
   const shortcutNode = agentInterruptKeys ? <Shortcut chord={agentInterruptKeys} /> : null;
+  // A press that only focuses an unfocused grid cell must not cancel the agent.
+  const guardedCancel = useGuardedCellPress(handleCancelAgent);
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger
-        onPress={handleCancelAgent}
+        onPress={guardedCancel}
         disabled={!isConnected || isCancellingAgent}
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
@@ -1176,6 +1232,8 @@ function ComposerVoiceModeButton({
   t,
 }: ComposerVoiceModeButtonProps) {
   const shortcutNode = voiceToggleKeys ? <Shortcut chord={voiceToggleKeys} /> : null;
+  // A press that only focuses an unfocused grid cell must not start voice mode.
+  const guardedToggleVoice = useGuardedCellPress(handleToggleRealtimeVoice);
   const renderTriggerContent = useCallback(
     ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => {
       const colorMapping =
@@ -1201,7 +1259,7 @@ function ComposerVoiceModeButton({
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger
-        onPress={handleToggleRealtimeVoice}
+        onPress={guardedToggleVoice}
         disabled={!isConnected || isVoiceSwitching}
         accessibilityLabel={t("composer.voice.enableVoiceMode")}
         accessibilityRole="button"
@@ -1405,6 +1463,7 @@ function ComposerContentImpl({
   );
   useEffect(() => () => cursorPublication.cancel(), [cursorPublication]);
   const autocompleteRef = useRef<ComposerAutocompleteHandle>(null);
+  const isAutocompleteOpen = useCallback(() => autocompleteRef.current?.isOpen() ?? false, []);
   const recall = useMemo(() => new ComposerRecall(), []);
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFileAttachment[]>([]);
@@ -2556,6 +2615,7 @@ function ComposerContentImpl({
         isConnected={isConnected}
         handleCancelAgent={handleCancelAgent}
         focusMessageInputForKeyboardAction={focusMessageInputForKeyboardAction}
+        isAutocompleteOpen={isAutocompleteOpen}
         isMessageInputFocused={isMessageInputFocused}
       />
       <View
