@@ -199,6 +199,39 @@ describe("terminal-emulator-runtime", () => {
     vi.useRealTimers();
   });
 
+  it("keeps the macOS line-end shortcut for Cmd+ArrowRight that the app did not claim", () => {
+    // The app listens in the capture phase and stops a claimed key before xterm sees it, so a key
+    // that reaches this handler (Normal mode, maximized cell, no neighbor) keeps its terminal meaning.
+    const runtime = new TerminalEmulatorRuntime({ isMac: true });
+    const inputs: string[] = [];
+    const event = {
+      type: "keydown",
+      key: "ArrowRight",
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: false,
+      altKey: false,
+      isComposing: false,
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    } as KeyboardEvent;
+    let passedToXterm: boolean | undefined;
+    runtime.attachKeyEventHandler({
+      attachCustomKeyEventHandler: (handler) => {
+        passedToXterm = handler(event);
+      },
+      hasSelection: () => false,
+      getSelection: () => "",
+      paste: () => {},
+      input: (data) => {
+        inputs.push(data);
+      },
+      scrollToBottom: () => {},
+    });
+    expect(inputs).toEqual(["\x05"]);
+    expect(passedToXterm).toBe(false);
+  });
+
   it.each([
     { isMac: true, ctrlKey: true, metaKey: false, opensFind: false },
     { isMac: true, ctrlKey: false, metaKey: true, opensFind: true },

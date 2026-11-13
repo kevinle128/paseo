@@ -509,9 +509,9 @@ describe("keyboard-shortcuts", () => {
     ] as const;
 
     it.each(arrowCases)(
-      "routes Cmd+$key on macOS from the cell frame and the composer",
+      "routes Cmd+$key on macOS from the cell frame, the composer and a terminal",
       ({ key, action }) => {
-        for (const focusScope of ["other", "message-input"] as const) {
+        for (const focusScope of ["other", "message-input", "terminal"] as const) {
           expectShortcutResolution({
             event: { key, code: key, metaKey: true },
             context: { isMac: true, focusScope },
@@ -522,9 +522,9 @@ describe("keyboard-shortcuts", () => {
     );
 
     it.each(arrowCases)(
-      "routes Ctrl+$key off macOS from the cell frame and the composer",
+      "routes Ctrl+$key off macOS from the cell frame, the composer and a terminal",
       ({ key, action }) => {
-        for (const focusScope of ["other", "message-input"] as const) {
+        for (const focusScope of ["other", "message-input", "terminal"] as const) {
           expectShortcutResolution({
             event: { key, code: key, ctrlKey: true },
             context: { isMac: false, focusScope },
@@ -545,7 +545,7 @@ describe("keyboard-shortcuts", () => {
       });
     });
 
-    it.each(["editable", "terminal", "browser", "command-center"] as const)(
+    it.each(["editable", "browser", "command-center"] as const)(
       "leaves Cmd+Arrow to the focused %s",
       (focusScope) => {
         expectNoShortcutResolution({

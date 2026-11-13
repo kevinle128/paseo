@@ -1156,14 +1156,14 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
-  // --- Move focus between grid cells (grid only, outside terminals and browser panes) ---
-  // The composer is in scope, so the user can switch cells while typing. Outside a grid the
-  // handler does not act, and the key keeps its text-editing meaning.
+  // --- Move focus between grid cells (grid only, outside browser panes) ---
+  // The composer and terminals are in scope, so the user can switch cells while typing. Outside a
+  // grid the handler does not act, so the key reaches the terminal or the editor unchanged.
   {
     id: "workspace-cell-focus-left-cmd-mac",
     action: "workspace.cell.focus.left",
     combo: "Cmd+ArrowLeft",
-    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-left",
       section: "layout",
@@ -1174,7 +1174,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-left-ctrl-non-mac",
     action: "workspace.cell.focus.left",
     combo: "Ctrl+ArrowLeft",
-    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-left",
       section: "layout",
@@ -1185,7 +1185,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-right-cmd-mac",
     action: "workspace.cell.focus.right",
     combo: "Cmd+ArrowRight",
-    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-right",
       section: "layout",
@@ -1196,7 +1196,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-right-ctrl-non-mac",
     action: "workspace.cell.focus.right",
     combo: "Ctrl+ArrowRight",
-    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-right",
       section: "layout",
@@ -1207,7 +1207,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-up-cmd-mac",
     action: "workspace.cell.focus.up",
     combo: "Cmd+ArrowUp",
-    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-up",
       section: "layout",
@@ -1218,7 +1218,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-up-ctrl-non-mac",
     action: "workspace.cell.focus.up",
     combo: "Ctrl+ArrowUp",
-    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-up",
       section: "layout",
@@ -1229,7 +1229,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-down-cmd-mac",
     action: "workspace.cell.focus.down",
     combo: "Cmd+ArrowDown",
-    when: { mac: true, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: true, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-down",
       section: "layout",
@@ -1240,7 +1240,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-cell-focus-down-ctrl-non-mac",
     action: "workspace.cell.focus.down",
     combo: "Ctrl+ArrowDown",
-    when: { mac: false, commandCenter: false, focusScope: ["message-input", "other"] },
+    when: { mac: false, commandCenter: false, focusScope: ["message-input", "terminal", "other"] },
     help: {
       id: "cell-focus-down",
       section: "layout",
