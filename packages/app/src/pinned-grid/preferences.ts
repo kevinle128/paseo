@@ -4,8 +4,11 @@ import { clampNormalizedSizes } from "@/stores/workspace-layout-actions";
 export type PinnedGridMode = "normal" | "2" | "3";
 export type PinnedGridColumnMode = Exclude<PinnedGridMode, "normal">;
 
-export const MIN_ROW_SCALE = 0.5;
-export const MAX_ROW_SCALE = 3;
+// Row scales are relative weights that share the rows' total height (see
+// `distributeRowHeights`). A divider drag clamps rows in pixels, so the stored bounds only
+// reject absurd values and must be wide enough for a clamped drag to survive a reload.
+export const MIN_ROW_SCALE = 0.05;
+export const MAX_ROW_SCALE = 20;
 
 /** Device-local. Ratios and scales are kept per column count so each mode remembers its sizes. */
 export interface PinnedGridPreferences {
@@ -13,7 +16,7 @@ export interface PinnedGridPreferences {
   mode: PinnedGridMode;
   /** Column width ratios per mode. Each array has one entry per column and sums to 1. */
   columnRatios: Record<PinnedGridColumnMode, number[]>;
-  /** Multipliers of the computed base row height per mode. Empty means every row is 1. */
+  /** Relative row height weights per mode. Empty means every row has the same height. */
   rowScales: Record<PinnedGridColumnMode, number[]>;
 }
 

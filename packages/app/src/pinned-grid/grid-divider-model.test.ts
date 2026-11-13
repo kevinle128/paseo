@@ -1,23 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { computeResizeHandleSizes } from "@/components/resize-handle-sizes";
-import {
-  ROW_DRAG_CONTAINER_SIZE,
-  ROW_DRAG_SPAN,
-  rowDragSizes,
-  rowScalesFromDrag,
-} from "./grid-divider-model";
+import { distributeRowHeights } from "./geometry";
+import { ROW_DRAG_CONTAINER_SIZE, rowScalesFromDrag } from "./grid-divider-model";
 
-function dragRow(input: { rowHeight: number; deltaPx: number; rowScales: number[] }) {
-  const sizes = rowDragSizes(input.rowHeight);
+function dragRow(input: { rowHeights: number[]; index: number; deltaPx: number }) {
   const draggedSizes = computeResizeHandleSizes({
-    sizes,
-    index: 0,
+    sizes: input.rowHeights,
+    index: input.index,
     deltaRatio: input.deltaPx / ROW_DRAG_CONTAINER_SIZE,
   });
   return rowScalesFromDrag({
-    rowScales: input.rowScales,
-    index: 0,
-    startHeight: input.rowHeight,
+    rowHeights: input.rowHeights,
+    index: input.index,
     draggedSizes,
     baseRowHeight: 300,
     minRowHeight: 120,
@@ -25,24 +19,27 @@ function dragRow(input: { rowHeight: number; deltaPx: number; rowScales: number[
 }
 
 describe("row divider model", () => {
-  it("grows only the dragged row in pixels", () => {
-    expect(dragRow({ rowHeight: 300, deltaPx: 150, rowScales: [] })).toEqual([1.5]);
+  it("grows the row above the divider and shrinks the row below it", () => {
+    expect(dragRow({ rowHeights: [300, 300], index: 0, deltaPx: 150 })).toEqual([1.5, 0.5]);
   });
 
-  it("keeps the other row scales", () => {
-    expect(dragRow({ rowHeight: 300, deltaPx: 60, rowScales: [1, 2, 0.8] })).toEqual([1.2, 2, 0.8]);
+  it("leaves rows away from the divider unchanged", () => {
+    expect(dragRow({ rowHeights: [300, 300, 300], index: 1, deltaPx: -60 })).toEqual([
+      1,
+      240 / 300,
+      360 / 300,
+    ]);
   });
 
-  it("clamps the row at the minimum height", () => {
-    expect(dragRow({ rowHeight: 300, deltaPx: -1000, rowScales: [] })).toEqual([120 / 300]);
+  it("clamps the dragged rows at the minimum height", () => {
+    expect(dragRow({ rowHeights: [300, 300], index: 0, deltaPx: -1000 })).toEqual([
+      120 / 300,
+      480 / 300,
+    ]);
   });
 
-  it("keeps the virtual pair sum constant", () => {
-    const next = computeResizeHandleSizes({
-      sizes: rowDragSizes(300),
-      index: 0,
-      deltaRatio: 40,
-    });
-    expect((next[0] ?? 0) + (next[1] ?? 0)).toBe(300 + ROW_DRAG_SPAN);
+  it("produces weights that lay the rows out at the dragged heights", () => {
+    const scales = dragRow({ rowHeights: [300, 300, 300], index: 0, deltaPx: 90 });
+    expect(distributeRowHeights(3, 300, scales)).toEqual([390, 210, 300]);
   });
 });

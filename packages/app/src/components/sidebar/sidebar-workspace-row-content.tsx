@@ -106,7 +106,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
   leadingProjectIconDataUri?: string | null;
-  /** Pinned rows sit outside their project group, so they name the project in a badge. */
+  /** Pinned rows sit outside their project group, so they name the project in a tag before the title. */
   projectBadgeName?: string | null;
   serviceSummary?: WorkspaceServiceSummary | null;
   /** The row's current background, so the project status badge can knock out of it. */
@@ -159,9 +159,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         )}
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
-            <Text style={workspaceBranchTextStyle} numberOfLines={1}>
-              {workspaceLabel}
-            </Text>
             {projectBadgeName ? (
               <View style={styles.projectBadge} testID="sidebar-workspace-project-badge">
                 <Text style={styles.projectBadgeText} numberOfLines={1}>
@@ -169,6 +166,9 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                 </Text>
               </View>
             ) : null}
+            <Text style={workspaceBranchTextStyle} numberOfLines={1}>
+              {workspaceLabel}
+            </Text>
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
@@ -533,22 +533,24 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
-  // The title is the only flexible item on the line, so a long title truncates before the
-  // badge or the trailing pin control lose any space.
+  // The tag leads the title so the project names of pinned rows start on one rail and can be
+  // scanned. It is a translucent tint of the muted text rather than a solid fill: it must stay
+  // quieter than the title and stay visible on the hovered and selected row backgrounds.
+  // The cap keeps a long project name from taking the title's space.
   projectBadge: {
-    flexShrink: 1,
+    flexShrink: 0,
     maxWidth: "40%",
     marginTop: 2,
     borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[1.5],
-    paddingVertical: 1,
+    backgroundColor: `${theme.colors.foregroundMuted}24`,
+    paddingHorizontal: theme.spacing[1],
+    paddingVertical: 0,
   },
   projectBadgeText: {
-    color: theme.colors.surface0,
+    color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
-    lineHeight: theme.fontSize.sm + 4,
+    lineHeight: TITLE_LINE_HEIGHT - 4,
   },
   workspaceBranchTextCreating: {
     opacity: 0.92,

@@ -4,7 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
 import type { GridGeometry } from "./geometry";
 import { GRID_GAP } from "./geometry";
-import { ROW_DRAG_CONTAINER_SIZE, rowDragSizes, rowScalesFromDrag } from "./grid-divider-model";
+import { ROW_DRAG_CONTAINER_SIZE, rowScalesFromDrag } from "./grid-divider-model";
 import { MIN_GRID_ROW_HEIGHT } from "./grid-layout";
 
 // Dividers have no identity beyond their position, and a position key keeps a divider mounted
@@ -17,12 +17,11 @@ function dividerSlots(prefix: string, count: number): Array<{ id: string; index:
 }
 
 const COLUMN_GROUP_ID = "pinned-grid-columns";
-const ROW_GROUP_PREFIX = "pinned-grid-row-";
+const ROW_GROUP_ID = "pinned-grid-rows";
 
 interface GridDividersProps {
   geometry: GridGeometry;
   columnRatios: number[];
-  rowScales: number[];
   previewColumnRatios: (ratios: number[]) => void;
   commitColumnRatios: (ratios: number[]) => void;
   resetColumnRatios: () => void;
@@ -38,7 +37,6 @@ interface GridDividersProps {
 export const GridDividers = memo(function GridDividers({
   geometry,
   columnRatios,
-  rowScales,
   previewColumnRatios,
   commitColumnRatios,
   resetColumnRatios,
@@ -94,9 +92,8 @@ export const GridDividers = memo(function GridDividers({
       index={index}
       top={(geometry.rowY[index] ?? 0) + (geometry.rowHeight[index] ?? 0)}
       width={gridWidth}
-      rowHeight={geometry.rowHeight[index] ?? 0}
+      rowHeights={geometry.rowHeight}
       baseRowHeight={geometry.baseRowHeight}
-      rowScales={rowScales}
       previewRowScales={previewRowScales}
       commitRowScales={commitRowScales}
       resetRowScales={resetRowScales}
@@ -115,9 +112,8 @@ interface GridRowDividerProps {
   index: number;
   top: number;
   width: number;
-  rowHeight: number;
+  rowHeights: number[];
   baseRowHeight: number;
-  rowScales: number[];
   previewRowScales: (scales: number[]) => void;
   commitRowScales: (scales: number[]) => void;
   resetRowScales: () => void;
@@ -127,25 +123,22 @@ function GridRowDivider({
   index,
   top,
   width,
-  rowHeight,
+  rowHeights,
   baseRowHeight,
-  rowScales,
   previewRowScales,
   commitRowScales,
   resetRowScales,
 }: GridRowDividerProps) {
-  const sizes = useMemo(() => rowDragSizes(rowHeight), [rowHeight]);
   const toScales = useCallback(
     (draggedSizes: number[]) =>
       rowScalesFromDrag({
-        rowScales,
+        rowHeights,
         index,
-        startHeight: rowHeight,
         draggedSizes,
         baseRowHeight,
         minRowHeight: MIN_GRID_ROW_HEIGHT,
       }),
-    [baseRowHeight, index, rowHeight, rowScales],
+    [baseRowHeight, index, rowHeights],
   );
   const handlePreview = useCallback(
     (_groupId: string, draggedSizes: number[]) => previewRowScales(toScales(draggedSizes)),
@@ -161,9 +154,9 @@ function GridRowDivider({
       <ResizeHandle
         testID={`pinned-grid-row-divider-${index}`}
         direction="vertical"
-        groupId={`${ROW_GROUP_PREFIX}${index}`}
-        index={0}
-        sizes={sizes}
+        groupId={ROW_GROUP_ID}
+        index={index}
+        sizes={rowHeights}
         containerSize={ROW_DRAG_CONTAINER_SIZE}
         onPreviewResizeSplit={handlePreview}
         onResizeSplit={handleCommit}
