@@ -86,6 +86,12 @@ function composerOf(cell: Locator): Locator {
   return cell.getByRole("textbox", { name: "Message agent..." });
 }
 
+// A collapsed cell composer covers its editor with an inline placeholder; pressing it expands the
+// composer and focuses the editor.
+function composerPlaceholderOf(cell: Locator): Locator {
+  return cell.getByTestId("composer-inline-placeholder");
+}
+
 // Keeps one turn running in every agent for as long as the fixture lives: bursty-stream ends after
 // a minute, and each loop starts the next turn as soon as the previous one ends.
 function keepAgentsStreaming(agents: readonly MockAgentWorkspace[]): { stop(): Promise<void> } {
@@ -362,8 +368,10 @@ test.describe("Pinned grid load test", () => {
     report("typing grid", grid.description);
     const focusedId = grid.cells.find((cell) => cell.focused)?.testId;
     expect(focusedId, "a focused cell").toBeTruthy();
-    const composer = composerOf(page.getByTestId(focusedId ?? ""));
-    await composer.click();
+    const focusedCell = page.getByTestId(focusedId ?? "");
+    const composer = composerOf(focusedCell);
+    await composerPlaceholderOf(focusedCell).click();
+    await expect(composer).toBeFocused();
 
     await startKeystrokeProbe(page);
     await startProbe(page);
@@ -427,9 +435,8 @@ test.describe("Pinned grid load test", () => {
     await startProbe(page);
     const moves: number[] = [];
     for (const target of targets) {
-      const composer = composerOf(page.getByTestId(target.testId));
       const pending = observeFocusRing(page, target.testId);
-      await composer.click();
+      await composerPlaceholderOf(page.getByTestId(target.testId)).click();
       moves.push(await pending);
       await page.waitForTimeout(1_500);
     }
