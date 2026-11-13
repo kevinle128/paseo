@@ -117,7 +117,6 @@ export const GridCellFrame = memo(function GridCellFrame({
         ? {
             isFocused,
             isMaximized,
-            showProjectBadge: true,
             toggleMaximize,
             focusCell,
             pointerFocusClaim: claim,

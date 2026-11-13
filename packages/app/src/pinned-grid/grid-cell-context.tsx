@@ -4,8 +4,6 @@ import type { PointerFocusClaim } from "./cell-press-guard";
 export interface WorkspaceGridCell {
   isFocused: boolean;
   isMaximized: boolean;
-  /** The cell header shows the project as a badge because the cell has no project group above it. */
-  showProjectBadge: boolean;
   toggleMaximize: () => void;
   focusCell: () => void;
   pointerFocusClaim: PointerFocusClaim;

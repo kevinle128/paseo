@@ -29,6 +29,7 @@ import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { StatusRing } from "@/components/status-ring";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { DensityIcon } from "@/components/ui/density-icon";
+import { ProjectTag } from "@/components/project-tag";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 
@@ -160,11 +161,11 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
             {projectBadgeName ? (
-              <View style={styles.projectBadge} testID="sidebar-workspace-project-badge">
-                <Text style={styles.projectBadgeText} numberOfLines={1}>
-                  {projectBadgeName}
-                </Text>
-              </View>
+              <ProjectTag
+                name={projectBadgeName}
+                style={styles.projectBadge}
+                testID="sidebar-workspace-project-badge"
+              />
             ) : null}
             <Text style={workspaceBranchTextStyle} numberOfLines={1}>
               {workspaceLabel}
@@ -533,24 +534,9 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
-  // The tag leads the title so the project names of pinned rows start on one rail and can be
-  // scanned. It is a translucent tint of the muted text rather than a solid fill: it must stay
-  // quieter than the title and stay visible on the hovered and selected row backgrounds.
-  // The cap keeps a long project name from taking the title's space.
+  // Centres the 16 px tag on the title's 20 px first line.
   projectBadge: {
-    flexShrink: 0,
-    maxWidth: "40%",
     marginTop: 2,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: `${theme.colors.foregroundMuted}24`,
-    paddingHorizontal: theme.spacing[1],
-    paddingVertical: 0,
-  },
-  projectBadgeText: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    lineHeight: TITLE_LINE_HEIGHT - 4,
   },
   workspaceBranchTextCreating: {
     opacity: 0.92,

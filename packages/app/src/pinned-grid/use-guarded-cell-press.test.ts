@@ -12,7 +12,6 @@ function cellValue(overrides: Partial<WorkspaceGridCell> = {}): WorkspaceGridCel
   return {
     isFocused: false,
     isMaximized: false,
-    showProjectBadge: true,
     toggleMaximize: vi.fn(),
     focusCell: vi.fn(),
     pointerFocusClaim: createPointerFocusClaim(),
