@@ -176,7 +176,6 @@ function gridCell(overrides: Partial<WorkspaceGridCell> = {}): WorkspaceGridCell
   return {
     isFocused: false,
     isMaximized: false,
-    showProjectBadge: true,
     toggleMaximize: vi.fn(),
     focusCell: vi.fn(),
     pointerFocusClaim: createPointerFocusClaim(),

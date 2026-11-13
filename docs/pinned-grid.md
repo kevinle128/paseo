@@ -15,6 +15,14 @@ A second route or a second deck would mount a workspace twice. Floating panels, 
 - Unpinning the focused cell keeps the grid. The cell leaves and focus moves to the cell after it in the previous order, or the one before it when it was last (`resolveFocusAfterCellRemoval`, `packages/app/src/pinned-grid/focus-after-removal.ts`). `useFocusAfterCellRemoval` hands the deck that neighbor as the active workspace in the same render, so the single layout never shows, then moves the route with `focusWorkspaceCell`. With no pinned workspace left, the unpinned workspace shows alone.
 - Focus mode shows one cell, but the other pinned cells stay retained so leaving it brings the grid back without a remount (`workspace-deck.tsx:118-130`).
 
+## Cell size
+
+`computeGridGeometry` (`packages/app/src/pinned-grid/geometry.ts`) sizes cells from the measured deck.
+
+- Columns fill the width by the stored column ratios.
+- One screen shows at most 2 rows (`MAX_VISIBLE_ROWS`), or 1 row when 2 rows of 300 px do not fit. A tall screen makes cells taller instead of adding rows. Rows after the first two scroll.
+- Stored row scales are relative weights. They share the rows' total height and never change it, so a drag cannot push the grid off screen. A row divider moves height between the two rows next to it. Weights stored for a different row count are ignored, as column ratios are. A double-click on a divider resets it.
+
 ## Workspace presence
 
 Every mounted workspace has a presence (`packages/app/src/screens/workspace/workspace-presence.ts:9`):

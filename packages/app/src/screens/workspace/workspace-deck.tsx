@@ -49,16 +49,13 @@ import { useGridFixedSurfaces } from "@/pinned-grid/use-grid-fixed-surfaces";
 import { useGridScrollLayer } from "@/pinned-grid/use-grid-scroll-layer";
 import {
   GRID_GAP,
+  MAX_VISIBLE_ROWS,
   MIN_USABLE_CELL_HEIGHT,
   computeGridGeometry,
   type GridGeometry,
   type GridCellRect,
 } from "@/pinned-grid/geometry";
-import {
-  MIN_GRID_ROW_HEIGHT,
-  resolveCellChromeCorners,
-  resolveGridCellPresence,
-} from "@/pinned-grid/grid-layout";
+import { resolveCellChromeCorners, resolveGridCellPresence } from "@/pinned-grid/grid-layout";
 import {
   GridScrollSignalProvider,
   useCreateGridScrollSignal,
@@ -170,7 +167,7 @@ export function WorkspaceDeck() {
             rowScales,
             gap: GRID_GAP,
             minUsableCellHeight: MIN_USABLE_CELL_HEIGHT,
-            minRowHeight: MIN_GRID_ROW_HEIGHT,
+            maxVisibleRows: MAX_VISIBLE_ROWS,
           })
         : null,
     [columnRatios, grid, rowScales, viewport.height, viewport.width],
@@ -330,7 +327,6 @@ export function WorkspaceDeck() {
             <GridDividers
               geometry={geometry}
               columnRatios={columnRatios}
-              rowScales={rowScales}
               previewColumnRatios={layoutPreview.previewColumnRatios}
               commitColumnRatios={layoutPreview.commitColumnRatios}
               resetColumnRatios={layoutPreview.resetColumnRatios}

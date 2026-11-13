@@ -60,7 +60,10 @@ import {
   CompactWorkspaceHeader,
   MobileWorkspaceTabSwitcher,
 } from "@/screens/workspace/compact-workspace-header";
-import { WorkspaceHeaderProjectRow } from "@/screens/workspace/workspace-header-project-row";
+import {
+  WorkspaceHeaderHostBadge,
+  WorkspaceHeaderProjectTag,
+} from "@/screens/workspace/workspace-header-project-row";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import {
   FloatingPanelPortalHost,
@@ -534,12 +537,9 @@ function WorkspaceHeaderTitleBar({
         </View>
       ) : (
         <View style={styles.headerTitleTextGroup}>
+          <WorkspaceHeaderProjectTag subtitle={subtitle} isSubtitleDistinct={isSubtitleDistinct} />
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
-          <WorkspaceHeaderProjectRow
-            subtitle={subtitle}
-            isSubtitleDistinct={isSubtitleDistinct}
-            serverId={normalizedServerId}
-          />
+          <WorkspaceHeaderHostBadge serverId={normalizedServerId} />
         </View>
       )}
       {actionsInBar ? null : (
@@ -3487,7 +3487,6 @@ function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceSc
           isLoading={isWorkspaceHeaderLoading}
           title={workspaceHeaderTitle}
           subtitle={workspaceHeaderSubtitle}
-          isSubtitleDistinct={isWorkspaceHeaderSubtitleDistinct}
           serverId={normalizedServerId}
           onToggleExplorer={handleToggleExplorerSidebar}
           explorerToggleLabel={explorerSidebarToggleLabel}
@@ -3534,7 +3533,6 @@ function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceSc
       isMobile,
       workspaceOwnsInput,
       isWorkspaceHeaderLoading,
-      isWorkspaceHeaderSubtitleDistinct,
       normalizedServerId,
       normalizedWorkspaceId,
       openImportSheet,

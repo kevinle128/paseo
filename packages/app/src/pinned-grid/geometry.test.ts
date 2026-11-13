@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { computeResizeHandleSizes } from "@/components/resize-handle-sizes";
-import { computeGridGeometry, MIN_USABLE_CELL_HEIGHT, type GridGeometryInput } from "./geometry";
+import {
+  computeGridGeometry,
+  distributeRowHeights,
+  MAX_VISIBLE_ROWS,
+  MIN_USABLE_CELL_HEIGHT,
+  type GridGeometryInput,
+} from "./geometry";
 
 function input(overrides: Partial<GridGeometryInput>): GridGeometryInput {
   const columns = overrides.columns ?? 2;
@@ -13,14 +19,15 @@ function input(overrides: Partial<GridGeometryInput>): GridGeometryInput {
     rowScales: [],
     gap: 8,
     minUsableCellHeight: MIN_USABLE_CELL_HEIGHT,
-    minRowHeight: 120,
+    maxVisibleRows: MAX_VISIBLE_ROWS,
     ...overrides,
   };
 }
 
 describe("computeGridGeometry", () => {
-  it("uses 300 as the usable cell height threshold", () => {
+  it("uses 300 as the usable cell height threshold and shows at most 2 rows", () => {
     expect(MIN_USABLE_CELL_HEIGHT).toBe(300);
+    expect(MAX_VISIBLE_ROWS).toBe(2);
   });
 
   const cases = [
@@ -61,8 +68,8 @@ describe("computeGridGeometry", () => {
       columns: 2,
       count: 7,
       rows: 4,
-      visibleRows: 4,
-      rowHeight: 330,
+      visibleRows: 2,
+      rowHeight: 668,
     },
     {
       name: "2280x1344 three columns",
@@ -71,8 +78,8 @@ describe("computeGridGeometry", () => {
       columns: 3,
       count: 15,
       rows: 5,
-      visibleRows: 4,
-      rowHeight: 330,
+      visibleRows: 2,
+      rowHeight: 668,
     },
   ] as const;
 
@@ -115,24 +122,44 @@ describe("computeGridGeometry", () => {
     expect(geometry.contentHeight).toBe(3 * 200 + 2 * 8);
   });
 
-  it("stretches only the scaled row and moves later rows down", () => {
-    const base = computeGridGeometry(input({ width: 1000, height: 624, count: 7 }));
-    const scaled = computeGridGeometry(
-      input({ width: 1000, height: 624, count: 7, rowScales: [1, 1.5] }),
-    );
-    expect(scaled.rowHeight).toEqual([308, 462, 308, 308]);
-    expect(scaled.rowY[0]).toBe(base.rowY[0]);
-    expect(scaled.rowY[1]).toBe(base.rowY[1]);
-    expect(scaled.rowY[2]).toBe(base.rowY[2] + 154);
-    expect(scaled.contentHeight).toBe(base.contentHeight + 154);
+  it.each([
+    { columns: 2 as const, count: 4 },
+    { columns: 3 as const, count: 6 },
+  ])("fills a 2560x1410 screen with $count cells in $columns columns", ({ columns, count }) => {
+    const geometry = computeGridGeometry(input({ width: 2200, height: 1410, columns, count }));
+    expect(geometry.visibleRows).toBe(2);
+    expect(geometry.rowHeight).toEqual([701, 701]);
+    expect(geometry.contentHeight).toBe(1410);
   });
 
-  it("clamps a shrunk row at the minimum row height", () => {
+  it("scrolls the rows after the first two", () => {
+    const geometry = computeGridGeometry(input({ width: 2200, height: 1410, count: 8 }));
+    expect(geometry.rows).toBe(4);
+    expect(geometry.rowY[2]).toBe(1418);
+    expect(geometry.contentHeight).toBe(4 * 701 + 3 * 8);
+  });
+
+  it("shares the rows' height by weight without changing the total", () => {
     const geometry = computeGridGeometry(
-      input({ width: 1000, height: 624, count: 4, rowScales: [0.1, 1], minRowHeight: 120 }),
+      input({ width: 1000, height: 624, count: 4, rowScales: [1.5, 0.5] }),
     );
-    expect(geometry.rowHeight[0]).toBe(120);
-    expect(geometry.rowHeight[1]).toBe(308);
+    expect(geometry.rowHeight).toEqual([462, 154]);
+    expect(geometry.contentHeight).toBe(624);
+  });
+
+  it("ignores stored weights from a different row count", () => {
+    const geometry = computeGridGeometry(
+      input({ width: 2200, height: 1410, count: 8, rowScales: [2.31, 1.23] }),
+    );
+    expect(geometry.rowHeight).toEqual([701, 701, 701, 701]);
+  });
+
+  it("keeps a full screen with uneven weights", () => {
+    const geometry = computeGridGeometry(
+      input({ width: 2200, height: 1410, count: 4, rowScales: [2.31, 1.23] }),
+    );
+    expect(geometry.rowHeight[0]! + geometry.rowHeight[1]!).toBeCloseTo(1402, 6);
+    expect(geometry.contentHeight).toBeCloseTo(1410, 6);
   });
 
   it.each([
@@ -164,5 +191,13 @@ describe("computeGridGeometry", () => {
     const geometry = computeGridGeometry(input({ width: 1008, count: 4, columnRatios: resized }));
     expect(geometry.columnWidth[0]! + geometry.columnWidth[1]!).toBeCloseTo(1000, 6);
     expect(geometry.columnWidth[0]).toBeCloseTo(700, 6);
+  });
+});
+
+describe("distributeRowHeights", () => {
+  it("treats missing and invalid weights as 1", () => {
+    expect(distributeRowHeights(3, 100, [2, Number.NaN, 1])).toEqual([150, 75, 75]);
+    expect(distributeRowHeights(2, 100, [0, -1])).toEqual([100, 100]);
+    expect(distributeRowHeights(2, 100, [3])).toEqual([100, 100]);
   });
 });

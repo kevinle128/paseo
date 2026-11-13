@@ -43,7 +43,7 @@ describe("PinnedGridPreferencesSchema", () => {
       expect(ratios.every(Number.isFinite)).toBe(true);
       expect(ratios.reduce((a, b) => a + b, 0)).toBeCloseTo(1);
     }
-    expect(parsed.rowScales["2"]).toEqual([0.5, 3, 1]);
+    expect(parsed.rowScales["2"]).toEqual([0.05, 20, 1]);
     expect(parsed.rowScales["3"]).toEqual([]);
   });
 
@@ -55,7 +55,7 @@ describe("PinnedGridPreferencesSchema", () => {
 
 describe("normalizeRowScales", () => {
   it("keeps finite values and clamps them to the allowed range", () => {
-    expect(normalizeRowScales([1, 0.1, 10, 1.5])).toEqual([1, 0.5, 3, 1.5]);
+    expect(normalizeRowScales([1, 0.01, 50, 1.5, 0.2])).toEqual([1, 0.05, 20, 1.5, 0.2]);
   });
 
   it("drops values that are not finite numbers", () => {

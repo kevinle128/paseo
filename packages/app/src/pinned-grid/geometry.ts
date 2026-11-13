@@ -6,6 +6,11 @@ export const GRID_GAP = 8;
 // rows are visible; it is not a fixed cell size.
 export const MIN_USABLE_CELL_HEIGHT = 300;
 
+// One screen shows at most 2 rows: 4 cells in 2 columns, 6 in 3 columns. A tall
+// screen makes the cells taller instead of adding rows, because a cell is a full
+// workspace and a third row of 300 px cells is too small to read. More rows scroll.
+export const MAX_VISIBLE_ROWS = 2;
+
 export interface GridGeometryInput {
   /** Measured grid viewport width in px. */
   width: number;
@@ -15,12 +20,16 @@ export interface GridGeometryInput {
   columns: 2 | 3;
   /** Share of the available width per column. Falls back to equal shares when the length differs. */
   columnRatios: number[];
-  /** Multiplier of the base row height per row. Missing entries mean 1. */
+  /**
+   * Relative height weight per row. Falls back to equal rows when the length differs. The
+   * weights are normalized, so they only share out the rows' total height and never change it.
+   */
   rowScales: number[];
   gap: number;
   /** Threshold that picks the number of visible rows. It is not a cell size. */
   minUsableCellHeight: number;
-  minRowHeight: number;
+  /** Upper bound on the number of rows one screen shows. */
+  maxVisibleRows: number;
 }
 
 export interface GridCellRect {
@@ -72,8 +81,28 @@ function emptyGeometry(): GridGeometry {
   };
 }
 
+/**
+ * Shares `rows * baseRowHeight` between the rows by weight. The total does not depend on the
+ * weights, so when every row fits the screen the rows fill it exactly and a drag can never push
+ * rows off screen. Weights stored for a different row count are ignored, as column ratios are:
+ * they describe rows that no longer exist after a pin or an unpin.
+ */
+export function distributeRowHeights(
+  rows: number,
+  baseRowHeight: number,
+  rowScales: readonly number[],
+): number[] {
+  const stored = rowScales.length === rows ? rowScales : [];
+  const weights = Array.from({ length: rows }, (_, row) => {
+    const weight = stored[row];
+    return weight !== undefined && Number.isFinite(weight) && weight > 0 ? weight : 1;
+  });
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  return weights.map((weight) => (baseRowHeight * rows * weight) / totalWeight);
+}
+
 export function computeGridGeometry(input: GridGeometryInput): GridGeometry {
-  const { width, height, count, columns, gap, minUsableCellHeight, minRowHeight } = input;
+  const { width, height, count, columns, gap, minUsableCellHeight, maxVisibleRows } = input;
   if (!isPositiveFinite(width) || !isPositiveFinite(height) || !(count > 0)) {
     return emptyGeometry();
   }
@@ -87,11 +116,9 @@ export function computeGridGeometry(input: GridGeometryInput): GridGeometry {
   const columnWidth = ratios.map((ratio) => ratio * columnArea);
 
   const fitting = Math.floor((height + gap) / (minUsableCellHeight + gap));
-  const visibleRows = Math.min(rows, Math.max(1, fitting));
+  const visibleRows = Math.min(rows, Math.max(1, Math.min(maxVisibleRows, fitting)));
   const baseRowHeight = Math.max(0, (height - gap * (visibleRows - 1)) / visibleRows);
-  const rowHeight = Array.from({ length: rows }, (_, row) =>
-    Math.max(minRowHeight, baseRowHeight * (input.rowScales[row] ?? 1)),
-  );
+  const rowHeight = distributeRowHeights(rows, baseRowHeight, input.rowScales);
 
   const columnX = accumulate(columnWidth, gap);
   const rowY = accumulate(rowHeight, gap);

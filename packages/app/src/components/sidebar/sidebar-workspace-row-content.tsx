@@ -29,6 +29,7 @@ import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { StatusRing } from "@/components/status-ring";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { DensityIcon } from "@/components/ui/density-icon";
+import { ProjectTag } from "@/components/project-tag";
 import { SCRIM_WIDTH, TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import {
   ARCHIVE_BUTTON_FOOTPRINT,
@@ -114,7 +115,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
   leadingProjectIconDataUri?: string | null;
-  /** Pinned rows sit outside their project group, so they name the project in a badge. */
+  /** Pinned rows sit outside their project group, so they name the project in a tag before the title. */
   projectBadgeName?: string | null;
   serviceSummary?: WorkspaceServiceSummary | null;
   /** The row's current background, so the project status badge can knock out of it. */
@@ -169,6 +170,13 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
         )}
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
+            {projectBadgeName ? (
+              <ProjectTag
+                name={projectBadgeName}
+                style={styles.projectBadge}
+                testID="sidebar-workspace-project-badge"
+              />
+            ) : null}
             {titleEditor ? (
               <View style={styles.workspaceTitleEditorSlot}>{titleEditor}</View>
             ) : (
@@ -180,13 +188,6 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                 {workspaceLabel}
               </Text>
             )}
-            {projectBadgeName ? (
-              <View style={styles.projectBadge} testID="sidebar-workspace-project-badge">
-                <Text style={styles.projectBadgeText} numberOfLines={1}>
-                  {projectBadgeName}
-                </Text>
-              </View>
-            ) : null}
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
           <WorkspaceMetaRow
@@ -582,22 +583,9 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
   },
-  // The title is the only flexible item on the line, so a long title truncates before the
-  // badge or the trailing pin control lose any space.
+  // Centres the 16 px tag on the title's 20 px first line.
   projectBadge: {
-    flexShrink: 1,
-    maxWidth: "40%",
     marginTop: 2,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.foreground,
-    paddingHorizontal: theme.spacing[1.5],
-    paddingVertical: 1,
-  },
-  projectBadgeText: {
-    color: theme.colors.surface0,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    lineHeight: theme.fontSize.sm + 4,
   },
   workspaceBranchTextCreating: {
     opacity: 0.92,

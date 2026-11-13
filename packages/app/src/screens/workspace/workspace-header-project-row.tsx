@@ -1,52 +1,63 @@
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
+import { ProjectTag } from "@/components/project-tag";
 import { HostBadge } from "@/hosts/host-badge";
 import { useHostBadges } from "@/hosts/use-host-badges";
 import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
 
 /**
- * Which project the workspace belongs to, and which machine it runs on.
+ * Which project the workspace belongs to, and which machine it runs on, on the compact header.
  *
- * Compact gets both, on their own line under the workspace name: this header is the only thing on
- * screen that says where the workspace lives, because the sidebar that normally carries the host
- * badge is closed. It still follows the host's own badge setting, so a purely local setup stays
- * quiet. A project name that only repeats the workspace name is dropped on wide, where the two sit
- * side by side, and kept on compact, where the line exists for the host anyway.
+ * Both sit on their own line under the workspace name: this header is the only thing on screen
+ * that says where the workspace lives, because the sidebar that normally carries the host badge is
+ * closed. It still follows the host's own badge setting, so a purely local setup stays quiet.
  */
 export function WorkspaceHeaderProjectRow({
   subtitle,
-  isSubtitleDistinct,
   serverId,
 }: {
   subtitle: string;
-  isSubtitleDistinct: boolean;
   serverId: string;
 }) {
-  const isCompact = useIsCompactFormFactor();
-  const gridCell = useWorkspaceGridCell();
-  // A grid cell has no project group above it, so its header always names the project and host.
-  const isGridCell = gridCell !== null;
-  const hostBadge = useHostBadges({ enabled: isCompact || isGridCell }).get(serverId) ?? null;
-  const showProject = isSubtitleDistinct || isCompact || isGridCell;
-  if (!showProject && !hostBadge) {
-    return null;
-  }
+  const hostBadge = useHostBadges({ enabled: true }).get(serverId) ?? null;
   return (
     <View style={styles.row}>
-      {showProject ? (
-        <Text
-          testID="workspace-header-subtitle"
-          style={gridCell?.showProjectBadge ? styles.projectBadge : styles.project}
-          numberOfLines={1}
-        >
-          {subtitle}
-        </Text>
-      ) : null}
-      {showProject && hostBadge ? <Text style={styles.separator}>·</Text> : null}
+      <Text testID="workspace-header-subtitle" style={styles.project} numberOfLines={1}>
+        {subtitle}
+      </Text>
+      {hostBadge ? <Text style={styles.separator}>·</Text> : null}
       {hostBadge ? <HostBadge badge={hostBadge} /> : null}
     </View>
   );
+}
+
+/**
+ * The project tag that leads the workspace title on the wide header. A project name that only
+ * repeats the workspace name is dropped, except in a grid cell: a cell has no project group above
+ * it, so its header always names the project.
+ */
+export function WorkspaceHeaderProjectTag({
+  subtitle,
+  isSubtitleDistinct,
+}: {
+  subtitle: string;
+  isSubtitleDistinct: boolean;
+}) {
+  const isGridCell = useWorkspaceGridCell() !== null;
+  if (!isSubtitleDistinct && !isGridCell) {
+    return null;
+  }
+  return <ProjectTag name={subtitle} testID="workspace-header-subtitle" />;
+}
+
+/**
+ * The host badge after the workspace title on the wide header. Only a grid cell shows it: in
+ * Normal mode the sidebar row next to the header already carries it.
+ */
+export function WorkspaceHeaderHostBadge({ serverId }: { serverId: string }) {
+  const isGridCell = useWorkspaceGridCell() !== null;
+  const hostBadge = useHostBadges({ enabled: isGridCell }).get(serverId) ?? null;
+  return hostBadge ? <HostBadge badge={hostBadge} /> : null;
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -67,17 +78,6 @@ const styles = StyleSheet.create((theme) => ({
     },
     flexShrink: 1,
     minWidth: 0,
-  },
-  projectBadge: {
-    color: theme.colors.accentForeground,
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.borderRadius.sm,
-    paddingHorizontal: theme.spacing[1.5],
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    flexShrink: 1,
-    minWidth: 0,
-    overflow: "hidden",
   },
   separator: {
     color: theme.colors.foregroundExtraMuted,
