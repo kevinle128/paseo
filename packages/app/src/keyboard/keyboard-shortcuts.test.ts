@@ -500,7 +500,7 @@ describe("keyboard-shortcuts", () => {
     });
   });
 
-  describe("grid cell focus with plain keys", () => {
+  describe("grid cell focus with Cmd/Ctrl+Arrow", () => {
     const arrowCases = [
       { key: "ArrowLeft", action: "workspace.cell.focus.left" },
       { key: "ArrowRight", action: "workspace.cell.focus.right" },
@@ -508,30 +508,75 @@ describe("keyboard-shortcuts", () => {
       { key: "ArrowDown", action: "workspace.cell.focus.down" },
     ] as const;
 
-    it.each(arrowCases)("routes $key outside text and terminals", ({ key, action }) => {
-      for (const isMac of [true, false]) {
-        expectShortcutResolution({
-          event: { key, code: key },
-          context: { isMac, focusScope: "other" },
-          action,
-        });
-      }
+    it.each(arrowCases)(
+      "routes Cmd+$key on macOS from the cell frame and the composer",
+      ({ key, action }) => {
+        for (const focusScope of ["other", "message-input"] as const) {
+          expectShortcutResolution({
+            event: { key, code: key, metaKey: true },
+            context: { isMac: true, focusScope },
+            action,
+          });
+        }
+      },
+    );
+
+    it.each(arrowCases)(
+      "routes Ctrl+$key off macOS from the cell frame and the composer",
+      ({ key, action }) => {
+        for (const focusScope of ["other", "message-input"] as const) {
+          expectShortcutResolution({
+            event: { key, code: key, ctrlKey: true },
+            context: { isMac: false, focusScope },
+            action,
+          });
+        }
+      },
+    );
+
+    it("does not take Ctrl+Arrow on macOS or Cmd+Arrow off macOS", () => {
+      expectNoShortcutResolution({
+        event: { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true },
+        context: { isMac: true, focusScope: "other" },
+      });
+      expectNoShortcutResolution({
+        event: { key: "ArrowLeft", code: "ArrowLeft", metaKey: true },
+        context: { isMac: false, focusScope: "other" },
+      });
     });
 
-    it.each(["editable", "message-input", "terminal", "browser", "command-center"] as const)(
-      "leaves the arrow keys to the focused %s",
+    it.each(["editable", "terminal", "browser", "command-center"] as const)(
+      "leaves Cmd+Arrow to the focused %s",
       (focusScope) => {
         expectNoShortcutResolution({
-          event: { key: "ArrowLeft", code: "ArrowLeft" },
-          context: { focusScope },
+          event: { key: "ArrowLeft", code: "ArrowLeft", metaKey: true },
+          context: { isMac: true, focusScope },
+        });
+        expectNoShortcutResolution({
+          event: { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true },
+          context: { isMac: false, focusScope },
         });
       },
     );
 
-    it("leaves the arrow keys alone while the command center is open", () => {
+    it.each(["other", "message-input", "editable", "terminal", "browser"] as const)(
+      "no longer routes plain arrows to cell focus with %s focused",
+      (focusScope) => {
+        for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+          for (const isMac of [true, false]) {
+            expectNoShortcutResolution({
+              event: { key, code: key },
+              context: { isMac, focusScope },
+            });
+          }
+        }
+      },
+    );
+
+    it("leaves Cmd+Arrow alone while the command center is open", () => {
       expectNoShortcutResolution({
-        event: { key: "ArrowDown", code: "ArrowDown" },
-        context: { commandCenterOpen: true },
+        event: { key: "ArrowDown", code: "ArrowDown", metaKey: true },
+        context: { isMac: true, commandCenterOpen: true },
       });
     });
 

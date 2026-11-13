@@ -11,6 +11,7 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { getWorkspaceSelectionKey } from "@/screens/workspace/workspace-deck-retention";
 import { requestCellReveal } from "./cell-reveal-request";
+import { cancelComposerFocusRequest, requestComposerFocus } from "./composer-focus-request";
 import { focusGridCellFrame } from "./grid-cell-frame";
 import { INITIAL_GRID_FOCUS, reduceGridFocus } from "./grid-focus";
 import { resolveGridFocusedKey } from "./grid-layout";
@@ -58,6 +59,17 @@ const ARROW_OWNING_CONTROL_SELECTOR = [
   '[role="radio"]',
   '[role="slider"]',
 ].join(",");
+
+const COMPOSER_SELECTOR = "[data-testid='message-input-root']";
+
+/** True when DOM focus is in a composer, the one text surface where the move keys act. */
+function isFocusInComposer(): boolean {
+  if (!isWeb || typeof document === "undefined") {
+    return false;
+  }
+  const active = document.activeElement;
+  return active instanceof Element && active.closest(COMPOSER_SELECTOR) !== null;
+}
 
 /** True when the plain Enter or arrow key is free for grid navigation. */
 function isKeyFreeForGridNavigation(key: "arrow" | "enter"): boolean {
@@ -204,11 +216,14 @@ export function useGridFocus(input: {
       const direction = FOCUS_ACTION_DIRECTIONS[action.id];
       const key = focusedKeyRef.current;
       const gridColumns = columnsRef.current;
-      // A maximized cell has no neighbor on screen, and arrows then keep their normal meaning.
+      // A maximized cell has no neighbor on screen, and the keys then keep their normal meaning.
       if (!direction || key === null || gridColumns === null || maximizedKeyRef.current !== null) {
         return false;
       }
-      if (hasActiveOverlay() || !isKeyFreeForGridNavigation("arrow")) {
+      // The composer is the one text surface where the keys act, so the user can switch cells
+      // while typing. Any other control that moves with the arrows keeps them.
+      const fromComposer = isFocusInComposer();
+      if (hasActiveOverlay() || (!fromComposer && !isKeyFreeForGridNavigation("arrow"))) {
         return false;
       }
       const keys = cellKeysRef.current;
@@ -225,6 +240,13 @@ export function useGridFocus(input: {
       focusCell(nextKey);
       requestCellReveal(nextKey);
       focusGridCellFrame(nextKey);
+      // The draft of the cell left behind stays in the draft store. The new cell is not focused
+      // yet, so its composer takes the request when it becomes active.
+      if (fromComposer) {
+        requestComposerFocus();
+      } else {
+        cancelComposerFocusRequest();
+      }
       return true;
     },
   });
