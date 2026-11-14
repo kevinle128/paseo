@@ -454,6 +454,7 @@ const GitHubRepoViewSchema = z.object({
     .nullable()
     .optional(),
   name: z.string().optional(),
+  hasIssuesEnabled: z.boolean().optional(),
   parent: z
     .object({
       owner: z
@@ -965,6 +966,11 @@ interface GitHubServiceDependencies {
    * host included, which `resolveRepoSlug` leaves to `gh`.
    */
   resolveOriginRepository: (cwd: string) => Promise<string | null>;
+  /**
+   * owner/name of the default repository chosen with `gh repo set-default`, or
+   * null when none was chosen.
+   */
+  resolveDefaultRepository: (cwd: string) => Promise<string | null>;
 }
 
 export interface GitHubCommandRunnerOptions {
@@ -1057,6 +1063,7 @@ interface CreateGitHubServiceOptions {
   resolveRepoHost?: (cwd: string) => Promise<string | null>;
   resolveRepoSlug?: (cwd: string) => Promise<string | null>;
   resolveOriginRepository?: (cwd: string) => Promise<string | null>;
+  resolveDefaultRepository?: (cwd: string) => Promise<string | null>;
 }
 
 type PullRequestCheckRunNode = z.infer<typeof PullRequestCheckRunNodeSchema>;
@@ -1140,6 +1147,7 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
     resolveRepoHost: options.resolveRepoHost ?? resolveGitHubEnterpriseHost,
     resolveRepoSlug: options.resolveRepoSlug ?? resolveGitHubSlugFromOrigin,
     resolveOriginRepository: options.resolveOriginRepository ?? resolveOriginRepositoryPath,
+    resolveDefaultRepository: options.resolveDefaultRepository ?? resolveGhDefaultRepositoryPath,
   };
   // A resolved enterprise host is cached permanently; a null resolution (no
   // host, or the auth probe said no) expires so `gh auth login --hostname`
@@ -2562,11 +2570,26 @@ export function createGitHubService(options: CreateGitHubServiceOptions = {}): G
           if (!repo) {
             return null;
           }
+          // The repository the user chose for `gh pr` and `gh issue` owns the numbers.
+          const preferred = await deps.resolveDefaultRepository(input.cwd);
+          if (preferred) {
+            return preferred.toLowerCase() === repo.toLowerCase() ? null : preferred;
+          }
           // A failed lookup must reject: "no parent" is cached as a final answer.
-          const view = await readGitHubRepoView({ cwd: input.cwd, repo, run });
+          const view = await readGitHubRepoView({
+            cwd: input.cwd,
+            repo,
+            run,
+            fields: ["hasIssuesEnabled"],
+          });
           const parentOwner = view.parent?.owner?.login;
           const parentName = view.parent?.name;
-          return parentOwner && parentName ? `${parentOwner}/${parentName}` : null;
+          // GitHub creates forks with issues off. A fork that turned them on tracks its own
+          // issues and pull requests, so its numbers are its own, not the parent's.
+          if (!parentOwner || !parentName || view.hasIssuesEnabled) {
+            return null;
+          }
+          return `${parentOwner}/${parentName}`;
         },
       });
     },
@@ -3252,25 +3275,62 @@ async function resolveGitHubSlugFromOrigin(cwd: string): Promise<string | null> 
   return parseGitHubRemoteUrl(stdout.trim())?.repo ?? null;
 }
 
-async function resolveOriginRepositoryPath(cwd: string): Promise<string | null> {
-  let stdout: string;
+async function readGitConfig(cwd: string, args: string[]): Promise<string | null> {
   try {
-    ({ stdout } = await runGitCommand(["config", "--get", "remote.origin.url"], {
+    const { stdout } = await runGitCommand(["config", ...args], {
       cwd,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       timeout: GIT_ORIGIN_URL_READ_TIMEOUT_MS,
-    }));
+    });
+    return stdout;
   } catch {
     return null;
   }
-  const location = parseGitRemoteLocation(stdout.trim());
+}
+
+async function resolveRemoteRepositoryPath(cwd: string, remote: string): Promise<string | null> {
+  const stdout = await readGitConfig(cwd, ["--get", `remote.${remote}.url`]);
+  const location = stdout ? parseGitRemoteLocation(stdout.trim()) : null;
   return location ? (parseGitHubRemoteIdentity(location.path)?.repo ?? null) : null;
+}
+
+function resolveOriginRepositoryPath(cwd: string): Promise<string | null> {
+  return resolveRemoteRepositoryPath(cwd, "origin");
+}
+
+/**
+ * The repository `gh repo set-default` chose. gh records it as
+ * `remote.<name>.gh-resolved`: the value `base` marks that remote's repository,
+ * and an owner/name value names a repository directly.
+ */
+async function resolveGhDefaultRepositoryPath(cwd: string): Promise<string | null> {
+  const stdout = await readGitConfig(cwd, ["--get-regexp", String.raw`^remote\..*\.gh-resolved$`]);
+  const choice = parseGhResolvedConfig(stdout ?? "");
+  if (!choice) {
+    return null;
+  }
+  return choice.kind === "repo" ? choice.repo : resolveRemoteRepositoryPath(cwd, choice.remote);
+}
+
+export function parseGhResolvedConfig(
+  stdout: string,
+): { kind: "remote"; remote: string } | { kind: "repo"; repo: string } | null {
+  for (const line of stdout.split("\n")) {
+    const match = /^remote\.(.+)\.gh-resolved\s+(\S+)$/.exec(line.trim());
+    if (!match) continue;
+    const [, remote, value] = match;
+    if (value === "base") return { kind: "remote", remote };
+    if (/^[^/\s]+\/[^/\s]+$/.test(value)) return { kind: "repo", repo: value };
+  }
+  return null;
 }
 
 interface GitHubRepoViewOptions {
   cwd: string;
   /** owner/name to ask about; `gh` picks the default repository for the directory when absent. */
   repo?: string;
+  /** JSON fields to read on top of owner, name and parent. */
+  fields?: string[];
   run: (args: string[], options: GitHubCommandRunnerOptions) => Promise<string>;
 }
 
@@ -3282,7 +3342,7 @@ async function readGitHubRepoView(
     "view",
     ...(options.repo ? [options.repo] : []),
     "--json",
-    "owner,name,parent",
+    ["owner", "name", "parent", ...(options.fields ?? [])].join(","),
   ];
   const stdout = await options.run(args, {
     cwd: options.cwd,
