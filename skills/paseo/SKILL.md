@@ -107,6 +107,10 @@ Omit absent values. Do not remember a selected profile or infer drift later; a p
 
 If no profile fits, or no profiles are configured, use the provider discovery tools below rather than guessing. Tell the user when you fall back because no configured profile fits.
 
+**`list_skills`** — skills managed on this host (name, description, whether selected and installed). Pass names to `create_agent` `skills` to have the new agent use them; the names are added to its first prompt, and each must be installed. Local host only.
+
+**`wait_for_agent`** — `{ agentId, timeoutSec? }`. Blocks until the agent finishes, errors, or needs permission, then returns `status`, `attentionReason` (`finished`, `error`, `permission`, `timeout`) and `lastMessage`. The wait is capped at 300 seconds; on `timedOut: true` the agent is still running, so call again. Prefer `notifyOnFinish` when you can continue other work.
+
 **`list_providers`** — compact provider availability and modes.
 
 **`list_models`** — full model list for one provider. Use only when you need model IDs or thinking options; the list can be large.

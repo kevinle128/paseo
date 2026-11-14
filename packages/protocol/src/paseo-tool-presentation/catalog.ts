@@ -51,6 +51,7 @@ const AGENT_FIELDS = [
   "internal",
   "settings",
   "labels",
+  "skills",
 ] as const;
 const AUTOMATION_FIELDS = [
   "name",
@@ -164,6 +165,15 @@ export const PASEO_TOOL_CATALOG = {
     completedLabel: "Checked agent",
     context: targetAgent(),
     detail: { inputOrder: ["agentId"] },
+  },
+  wait_for_agent: {
+    label: "Wait for agent",
+    completedLabel: "Waited for agent",
+    context: targetAgent(),
+    detail: {
+      inputOrder: ["agentId", "timeoutSec"],
+      outputFields: ["status", "attentionReason", "timedOut", "lastMessage", "permission"],
+    },
   },
   get_agent_activity: {
     label: "Read agent activity",
@@ -359,6 +369,7 @@ export const PASEO_TOOL_CATALOG = {
   },
 
   // Providers
+  list_skills: { label: "List skills", completedLabel: "Listed skills" },
   list_providers: { label: "List providers", completedLabel: "Listed providers" },
   list_models: {
     label: "List models",

@@ -77,6 +77,7 @@ import {
   sanitizePermissionRequest,
   serializeSnapshotWithMetadata,
   toScheduleSummary,
+  waitForAgentWithTimeout,
 } from "../mcp-shared.js";
 import {
   type PromptDispatchDisposition,
@@ -116,7 +117,12 @@ import {
   type PaseoToolResult,
 } from "./types.js";
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+import type { OrchestrationSkills } from "../../orchestration-skills/index.js";
 import { isPaseoToolEnabled } from "../paseo-tool-policy.js";
+
+const MAX_CREATE_AGENT_SKILLS = 20;
+const DEFAULT_WAIT_FOR_AGENT_SEC = 60;
+const MAX_WAIT_FOR_AGENT_SEC = 300;
 
 export interface PaseoToolHostDependencies {
   agentMessages?: () => AgentMessageDelivery;
@@ -130,6 +136,7 @@ export interface PaseoToolHostDependencies {
   scheduleService?: ScheduleService | null;
   providerSnapshotManager: ProviderSnapshotManager;
   daemonConfigStore?: Pick<DaemonConfigStore, "get">;
+  orchestrationSkills?: Pick<OrchestrationSkills, "listCatalog">;
   github?: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
@@ -1193,6 +1200,13 @@ function createToolCatalog(
       "Required provider/model pair, for example codex/gpt-5.4.",
     ),
     labels: z.record(z.string(), z.string()).optional().describe("Labels to set on the agent"),
+    skills: z
+      .array(z.string().trim().min(1))
+      .max(MAX_CREATE_AGENT_SKILLS)
+      .optional()
+      .describe(
+        "Names from list_skills the agent must use. Providers discover skills from the host skill directories, so this does not load them into the provider: the names are added to the agent's first prompt as an instruction. Each must be installed on the host. Local host only.",
+      ),
     settings: CreateAgentSettingsInputSchema.optional().describe(
       "Initial runtime settings for the new agent.",
     ),
@@ -1602,6 +1616,61 @@ function createToolCatalog(
     },
   );
 
+  async function resolveRequestedSkills(requested: readonly string[] | undefined) {
+    const names = [...new Set(requested ?? [])];
+    if (names.length === 0) return names;
+    const catalog = await requireSkillCatalog();
+    const byName = new Map(catalog.map((entry) => [entry.name, entry]));
+    const unknown = names.filter((name) => !byName.has(name));
+    if (unknown.length > 0) {
+      throw new PaseoToolInputError(
+        `Unknown skills: ${unknown.join(", ")}. Call list_skills for the names available on this host.`,
+      );
+    }
+    const missing = names.filter((name) => !byName.get(name)?.installed);
+    if (missing.length > 0) {
+      throw new PaseoToolInputError(
+        `Skills not installed on this host: ${missing.join(", ")}. Enable them in the host Agents settings first.`,
+      );
+    }
+    return names;
+  }
+
+  async function requireSkillCatalog() {
+    if (!options.orchestrationSkills) throw new Error("Skill catalog is not configured");
+    return options.orchestrationSkills.listCatalog();
+  }
+
+  function withSkillInstruction(prompt: string, skills: readonly string[]): string {
+    if (skills.length === 0) return prompt;
+    return `Use these skills for this task: ${skills.join(", ")}.\n\n${prompt}`;
+  }
+
+  registerTool(
+    "list_skills",
+    {
+      title: "List skills",
+      description:
+        "List the skills managed on this host, the same catalog as the host Agents skill settings. Returns name, description, source, whether the host selection includes the skill, and whether it is installed. Use the names with create_agent skills.",
+      inputSchema: {},
+      outputSchema: {
+        skills: z.array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+            source: z.string(),
+            selected: z.boolean(),
+            installed: z.boolean(),
+          }),
+        ),
+      },
+    },
+    async () => ({
+      content: [],
+      structuredContent: ensureValidJson({ skills: await requireSkillCatalog() }),
+    }),
+  );
+
   registerTool(
     "create_agent",
     {
@@ -1617,6 +1686,7 @@ function createToolCatalog(
         workspaceId: z.string().optional(),
         currentModeId: z.string().nullable(),
         availableModes: z.array(ProviderModeSchema),
+        skills: z.array(z.string()).optional(),
         guidance: z.string().optional(),
       },
     },
@@ -1631,6 +1701,7 @@ function createToolCatalog(
       }
       const selectedProvider = resolveRequiredProviderModel(parsedArgs.provider).provider;
       const inheritedConfig = resolveInheritedProviderConfig(selectedProvider);
+      const skills = await resolveRequestedSkills(parsedArgs.skills);
       const { snapshot, initialPromptStarted } = await createAgentCommand(
         {
           agentManager,
@@ -1650,7 +1721,7 @@ function createToolCatalog(
           kind: "mcp",
           provider: parsedArgs.provider,
           title: parsedArgs.title,
-          initialPrompt: parsedArgs.initialPrompt,
+          initialPrompt: withSkillInstruction(parsedArgs.initialPrompt, skills),
           config: inheritedConfig,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
@@ -1688,6 +1759,7 @@ function createToolCatalog(
           ...(currentSnapshot.workspaceId ? { workspaceId: currentSnapshot.workspaceId } : {}),
           currentModeId: currentSnapshot.currentModeId,
           availableModes: currentSnapshot.availableModes,
+          ...(skills.length > 0 ? { skills } : {}),
           ...(guidance ? { guidance } : {}),
         }),
       };
@@ -2142,6 +2214,74 @@ function createToolCatalog(
         structuredContent: ensureValidJson({
           status: structuredSnapshot.status,
           snapshot: structuredSnapshot,
+        }),
+      };
+    },
+  );
+
+  registerTool(
+    "wait_for_agent",
+    {
+      title: "Wait for agent",
+      description: `Block until the agent finishes its turn, errors, or needs permission, then return its status, the attention reason, and its last assistant message. Waits at most timeoutSec (default ${DEFAULT_WAIT_FOR_AGENT_SEC}, max ${MAX_WAIT_FOR_AGENT_SEC}); on timeout the agent is still running and timedOut is true, so call again. An idle agent returns immediately.`,
+      inputSchema: {
+        agentId: z.string(),
+        timeoutSec: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_WAIT_FOR_AGENT_SEC)
+          .optional()
+          .describe(`Seconds to wait, 1-${MAX_WAIT_FOR_AGENT_SEC}.`),
+      },
+      outputSchema: {
+        agentId: z.string(),
+        status: AgentStatusEnum,
+        attentionReason: z.enum(["finished", "error", "permission", "timeout"]),
+        timedOut: z.boolean(),
+        lastMessage: z.string().nullable(),
+        permission: z.record(z.string(), z.unknown()).nullable(),
+      },
+    },
+    async ({ agentId, timeoutSec = DEFAULT_WAIT_FOR_AGENT_SEC }, context) => {
+      if (!agentManager.getAgent(agentId)) {
+        const record = await agentStorage.get(agentId);
+        if (!record || record.internal) {
+          throw new PaseoToolInputError(`Agent ${agentId} not found`);
+        }
+        const status = record.lastStatus === "error" ? "error" : "idle";
+        return {
+          content: [],
+          structuredContent: ensureValidJson({
+            agentId,
+            status,
+            attentionReason: record.attentionReason ?? (status === "error" ? "error" : "finished"),
+            timedOut: false,
+            lastMessage: await agentManager.getLastAssistantMessage(agentId),
+            permission: null,
+          }),
+        };
+      }
+      const result = await waitForAgentWithTimeout(agentManager, agentId, {
+        signal: context.signal,
+        timeoutMs: timeoutSec * 1000,
+      });
+      const permission = result.permission ? sanitizePermissionRequest(result.permission) : null;
+      let attentionReason: "finished" | "error" | "permission" | "timeout" = "finished";
+      if (result.timedOut) attentionReason = "timeout";
+      else if (permission) attentionReason = "permission";
+      else if (result.status === "error") attentionReason = "error";
+      return {
+        content: [],
+        structuredContent: ensureValidJson({
+          agentId,
+          status: result.status,
+          attentionReason,
+          timedOut: result.timedOut,
+          lastMessage: result.timedOut
+            ? await agentManager.getLastAssistantMessage(agentId)
+            : result.lastMessage,
+          permission,
         }),
       };
     },

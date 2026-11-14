@@ -254,6 +254,7 @@ function buildAgentManagerSpies() {
       permission: null,
       lastMessage: null,
     }),
+    getLastAssistantMessage: vi.fn().mockResolvedValue("last answer"),
     setAgentMode: vi.fn().mockResolvedValue(undefined),
     setAgentModel: vi.fn().mockResolvedValue(undefined),
     setAgentThinkingOption: vi.fn().mockResolvedValue(undefined),
@@ -6949,5 +6950,172 @@ describe("local durable finish subscription MCP wiring", () => {
       await mcp?.close();
       await removeAgentStateDir(manager, storage, workdir);
     }
+  });
+});
+
+describe("skills and wait_for_agent MCP tools", () => {
+  const logger = createTestLogger();
+  const catalog = [
+    {
+      name: "paseo",
+      description: "Operate Paseo.",
+      source: "paseo-bundled" as const,
+      selected: true,
+      installed: true,
+    },
+    {
+      name: "paseo-help",
+      description: "Paseo help.",
+      source: "paseo-bundled" as const,
+      selected: false,
+      installed: false,
+    },
+  ];
+
+  async function createServer(deps: TestDeps) {
+    return createAgentMcpServer({
+      agentManager: deps.agentManager,
+      agentStorage: deps.agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      orchestrationSkills: { listCatalog: async () => catalog },
+      ensureWorkspaceForCreate: async () => "workspace-created",
+      logger,
+    });
+  }
+
+  it("list_skills returns the host catalog without file contents", async () => {
+    const server = await createServer(createTestDeps());
+    const parsed = await registeredTool(server, "list_skills").inputSchema.safeParseAsync({});
+    const response = await registeredTool(server, "list_skills").handler(parsed.data);
+    expect(response.structuredContent).toEqual({ skills: catalog });
+  });
+
+  it("create_agent rejects unknown and uninstalled skills before creating", async () => {
+    const deps = createTestDeps();
+    const server = await createServer(deps);
+    const tool = registeredTool(server, "create_agent");
+    const base = {
+      title: "Skilled agent",
+      provider: "codex/gpt-5.4",
+      initialPrompt: "Do work",
+    };
+
+    await expect(tool.handler({ ...base, skills: ["nope"] })).rejects.toThrow(
+      /Unknown skills: nope/,
+    );
+    await expect(tool.handler({ ...base, skills: ["paseo-help"] })).rejects.toThrow(
+      /not installed on this host: paseo-help/,
+    );
+    expect(deps.spies.agentManager.createAgent).not.toHaveBeenCalled();
+  });
+
+  it("create_agent names installed skills in the first prompt and reports them", async () => {
+    const workdir = await mkdtemp(join(tmpdir(), "mcp-create-skills-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    const client = new HeldTurnAgentClient("codex", true);
+    const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+    try {
+      const server = await createAgentMcpServer({
+        agentManager: manager,
+        agentStorage: storage,
+        providerSnapshotManager: createOpenCodeManager().manager,
+        orchestrationSkills: { listCatalog: async () => catalog },
+        ensureWorkspaceForCreate: async () => "workspace-created",
+        logger,
+      });
+
+      const response = await registeredTool(server, "create_agent").handler({
+        title: "Skilled agent",
+        provider: "codex/gpt-5.4",
+        initialPrompt: "Do work",
+        labels: { "omb-dispatcher-thread": "thread-1" },
+        skills: ["paseo", "paseo"],
+      });
+
+      expect(response.structuredContent.skills).toEqual(["paseo"]);
+      const agentId = z.string().parse(response.structuredContent.agentId);
+      expect(manager.getAgent(agentId)?.labels).toMatchObject({
+        "omb-dispatcher-thread": "thread-1",
+      });
+      await vi.waitFor(() => expect(client.sessions[0]!.prompts).toHaveLength(1));
+      expect(client.sessions[0]!.prompts[0]).toBe(
+        "Use these skills for this task: paseo.\n\nDo work",
+      );
+    } finally {
+      await removeAgentStateDir(manager, storage, workdir);
+    }
+  });
+
+  it("wait_for_agent reports permission, error, and finished attention reasons", async () => {
+    const deps = createTestDeps();
+    deps.spies.agentManager.getAgent.mockReturnValue({ id: "a1", lifecycle: "running" });
+    const server = await createServer(deps);
+    const tool = registeredTool(server, "wait_for_agent");
+
+    deps.spies.agentManager.waitForAgentEvent.mockResolvedValueOnce({
+      status: "idle",
+      permission: { id: "p1", provider: "codex", name: "bash", kind: "tool" },
+      lastMessage: "need approval",
+    });
+    const permission = await tool.handler({ agentId: "a1" });
+    expect(permission.structuredContent).toMatchObject({
+      attentionReason: "permission",
+      timedOut: false,
+      lastMessage: "need approval",
+    });
+
+    deps.spies.agentManager.waitForAgentEvent.mockResolvedValueOnce({
+      status: "error",
+      permission: null,
+      lastMessage: null,
+    });
+    const failed = await tool.handler({ agentId: "a1" });
+    expect(failed.structuredContent).toMatchObject({ status: "error", attentionReason: "error" });
+
+    deps.spies.agentManager.waitForAgentEvent.mockResolvedValueOnce({
+      status: "idle",
+      permission: null,
+      lastMessage: "done",
+    });
+    const done = await tool.handler({ agentId: "a1" });
+    expect(done.structuredContent).toMatchObject({
+      status: "idle",
+      attentionReason: "finished",
+      lastMessage: "done",
+    });
+  });
+
+  it("wait_for_agent caps the wait and reports the running agent on timeout", async () => {
+    const deps = createTestDeps();
+    deps.spies.agentManager.getAgent.mockReturnValue({ id: "a1", lifecycle: "running" });
+    const hangUntilAborted = (_id: string, opts: { signal: AbortSignal }) => {
+      const { promise, reject } = Promise.withResolvers<never>();
+      const abort = () => reject(opts.signal.reason);
+      opts.signal.addEventListener("abort", abort, { once: true });
+      return promise;
+    };
+    deps.spies.agentManager.waitForAgentEvent.mockImplementation(hangUntilAborted);
+    const server = await createServer(deps);
+    const tool = registeredTool(server, "wait_for_agent");
+
+    const tooLong = await tool.inputSchema.safeParseAsync({ agentId: "a1", timeoutSec: 301 });
+    expect(tooLong.success).toBe(false);
+
+    const response = await tool.handler({ agentId: "a1", timeoutSec: 1 });
+    expect(response.structuredContent).toMatchObject({
+      status: "running",
+      attentionReason: "timeout",
+      timedOut: true,
+      lastMessage: "last answer",
+    });
+  });
+
+  it("wait_for_agent rejects unknown agents", async () => {
+    const deps = createTestDeps();
+    deps.spies.agentManager.getAgent.mockReturnValue(undefined);
+    const server = await createServer(deps);
+    await expect(
+      registeredTool(server, "wait_for_agent").handler({ agentId: "ghost" }),
+    ).rejects.toThrow(/not found/);
   });
 });
