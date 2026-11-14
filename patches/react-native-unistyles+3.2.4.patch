@@ -762,37 +762,34 @@ index 01026dc..3786ec4 100644
          const auto& shadowTreeRegistry = UIManagerBinding::getBinding(rt)->getUIManager().getShadowTreeRegistry();
  
 diff --git a/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js b/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
-index 7c7214e..8b56f04 100644
+index 7c7214e..57e6ae1 100644
 --- a/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
 +++ b/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
-@@ -7,6 +7,8 @@ exports.CSSState = void 0;
+@@ -7,6 +7,7 @@ exports.CSSState = void 0;
  var _convert = require("../convert");
  var _utils = require("../utils");
  var _core = require("./core");
-+const REBUILD_DELAY_MS = 1000;
 +const MAX_ADDED_RULES = 500;
  const safeGetMap = (map, key) => {
    const nextLevelMap = map.get(key);
    if (!nextLevelMap) {
-@@ -49,12 +51,99 @@ class CSSState {
+@@ -49,12 +50,68 @@ class CSSState {
    };
    add = (hash, values) => {
      (0, _core.convertToCSS)(hash, (0, _convert.convertUnistyles)(values, this.services.runtime), this);
 +    if (this.insertRules(hash)) {
-+      this.scheduleRebuild();
 +      return;
 +    }
      this.recreate();
    };
 +  // Adding or removing a class used to rewrite the whole stylesheet, and every rewrite restyles the
 +  // whole document. A new class is now inserted as rules into a second sheet, which restyles only
-+  // the elements that use it. Removals and the canonical rewrite run later, in idle time, at most
-+  // once per second: streaming keeps adding classes, so waiting for a quiet moment could wait
-+  // forever. Child selectors (`> *`) still rewrite at once: their order against the child's own
-+  // class decides which rule wins.
++  // the elements that use it, and comes after the main sheet as an appended class would. A removed
++  // class keeps its rules until the next full rewrite: its name is a hash of its values, so nothing
++  // else matches them. A full rewrite runs only when it is needed: for child selectors (`> *`),
++  // whose order against the child's own class decides which rule wins, and when the second sheet
++  // is full. A timed rewrite would restyle the document in the middle of a drag or an animation.
 +  addedTag = null;
-+  rebuildTimer = null;
-+  rebuildIdle = null;
 +  insertRules = hash => {
 +    if (!this.styleTag || hash.includes(' ')) {
 +      return false;
@@ -835,36 +832,7 @@ index 7c7214e..8b56f04 100644
 +    }
 +    return true;
 +  };
-+  cancelRebuild = () => {
-+    if (this.rebuildTimer !== null) {
-+      clearTimeout(this.rebuildTimer);
-+      this.rebuildTimer = null;
-+    }
-+    if (this.rebuildIdle !== null) {
-+      cancelIdleCallback(this.rebuildIdle);
-+      this.rebuildIdle = null;
-+    }
-+  };
-+  scheduleRebuild = () => {
-+    if (!this.styleTag || this.rebuildTimer !== null || this.rebuildIdle !== null) {
-+      return;
-+    }
-+    this.rebuildTimer = setTimeout(() => {
-+      this.rebuildTimer = null;
-+      if (typeof requestIdleCallback === 'undefined') {
-+        this.recreate();
-+        return;
-+      }
-+      this.rebuildIdle = requestIdleCallback(() => {
-+        this.rebuildIdle = null;
-+        this.recreate();
-+      }, {
-+        timeout: REBUILD_DELAY_MS
-+      });
-+    }, REBUILD_DELAY_MS);
-+  };
    recreate = () => {
-+    this.cancelRebuild();
      if (this.styleTag) {
        this.styleTag.innerText = this.getStyles();
      }
@@ -874,20 +842,18 @@ index 7c7214e..8b56f04 100644
    };
    addTheme = (theme, values) => {
      let themeVars = '';
-@@ -79,7 +168,7 @@ class CSSState {
+@@ -79,7 +136,6 @@ class CSSState {
      this.mqMap.forEach(styles => {
        styles.delete(hash);
      });
 -    this.recreate();
-+    this.scheduleRebuild();
    };
    getStyles = () => {
      let styles = Array.from(this.themesCSS.entries()).reduce((acc, [, themeCss]) => {
-@@ -153,6 +242,10 @@ class CSSState {
+@@ -153,6 +209,9 @@ class CSSState {
      hydrateState(mqState, true);
    };
    reset = () => {
-+    this.cancelRebuild();
 +    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
 +    this.addedTag?.remove();
 +    this.addedTag = null;
@@ -895,37 +861,34 @@ index 7c7214e..8b56f04 100644
      this.mainMap.clear();
    };
 diff --git a/node_modules/react-native-unistyles/lib/module/web/css/state.js b/node_modules/react-native-unistyles/lib/module/web/css/state.js
-index 88e02b3..2a1a067 100644
+index 88e02b3..6c5d8f4 100644
 --- a/node_modules/react-native-unistyles/lib/module/web/css/state.js
 +++ b/node_modules/react-native-unistyles/lib/module/web/css/state.js
-@@ -3,6 +3,8 @@
+@@ -3,6 +3,7 @@
  import { convertUnistyles } from '../convert';
  import { hyphenate, isServer } from '../utils';
  import { convertToCSS } from './core';
-+const REBUILD_DELAY_MS = 1000;
 +const MAX_ADDED_RULES = 500;
  const safeGetMap = (map, key) => {
    const nextLevelMap = map.get(key);
    if (!nextLevelMap) {
-@@ -45,12 +47,99 @@ export class CSSState {
+@@ -45,12 +46,68 @@ export class CSSState {
    };
    add = (hash, values) => {
      convertToCSS(hash, convertUnistyles(values, this.services.runtime), this);
 +    if (this.insertRules(hash)) {
-+      this.scheduleRebuild();
 +      return;
 +    }
      this.recreate();
    };
 +  // Adding or removing a class used to rewrite the whole stylesheet, and every rewrite restyles the
 +  // whole document. A new class is now inserted as rules into a second sheet, which restyles only
-+  // the elements that use it. Removals and the canonical rewrite run later, in idle time, at most
-+  // once per second: streaming keeps adding classes, so waiting for a quiet moment could wait
-+  // forever. Child selectors (`> *`) still rewrite at once: their order against the child's own
-+  // class decides which rule wins.
++  // the elements that use it, and comes after the main sheet as an appended class would. A removed
++  // class keeps its rules until the next full rewrite: its name is a hash of its values, so nothing
++  // else matches them. A full rewrite runs only when it is needed: for child selectors (`> *`),
++  // whose order against the child's own class decides which rule wins, and when the second sheet
++  // is full. A timed rewrite would restyle the document in the middle of a drag or an animation.
 +  addedTag = null;
-+  rebuildTimer = null;
-+  rebuildIdle = null;
 +  insertRules = hash => {
 +    if (!this.styleTag || hash.includes(' ')) {
 +      return false;
@@ -968,36 +931,7 @@ index 88e02b3..2a1a067 100644
 +    }
 +    return true;
 +  };
-+  cancelRebuild = () => {
-+    if (this.rebuildTimer !== null) {
-+      clearTimeout(this.rebuildTimer);
-+      this.rebuildTimer = null;
-+    }
-+    if (this.rebuildIdle !== null) {
-+      cancelIdleCallback(this.rebuildIdle);
-+      this.rebuildIdle = null;
-+    }
-+  };
-+  scheduleRebuild = () => {
-+    if (!this.styleTag || this.rebuildTimer !== null || this.rebuildIdle !== null) {
-+      return;
-+    }
-+    this.rebuildTimer = setTimeout(() => {
-+      this.rebuildTimer = null;
-+      if (typeof requestIdleCallback === 'undefined') {
-+        this.recreate();
-+        return;
-+      }
-+      this.rebuildIdle = requestIdleCallback(() => {
-+        this.rebuildIdle = null;
-+        this.recreate();
-+      }, {
-+        timeout: REBUILD_DELAY_MS
-+      });
-+    }, REBUILD_DELAY_MS);
-+  };
    recreate = () => {
-+    this.cancelRebuild();
      if (this.styleTag) {
        this.styleTag.innerText = this.getStyles();
      }
@@ -1007,20 +941,18 @@ index 88e02b3..2a1a067 100644
    };
    addTheme = (theme, values) => {
      let themeVars = '';
-@@ -75,7 +164,7 @@ export class CSSState {
+@@ -75,7 +132,6 @@ export class CSSState {
      this.mqMap.forEach(styles => {
        styles.delete(hash);
      });
 -    this.recreate();
-+    this.scheduleRebuild();
    };
    getStyles = () => {
      let styles = Array.from(this.themesCSS.entries()).reduce((acc, [, themeCss]) => {
-@@ -149,6 +238,10 @@ export class CSSState {
+@@ -149,6 +205,9 @@ export class CSSState {
      hydrateState(mqState, true);
    };
    reset = () => {
-+    this.cancelRebuild();
 +    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
 +    this.addedTag?.remove();
 +    this.addedTag = null;
