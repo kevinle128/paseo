@@ -116,7 +116,7 @@ describe("splitPinnedSidebarGroups", () => {
     ]);
   });
 
-  it("a newly pinned chat goes last with the append rule", () => {
+  it("a newly pinned chat goes first with the new-first rule", () => {
     const projects = [project("p1", [placement("older"), placement("newer"), placement("new")])];
     const result = splitPinnedSidebarGroups({
       projects,
@@ -129,13 +129,13 @@ describe("splitPinnedSidebarGroups", () => {
         },
       },
       storedOrder: ["newer", "older"],
-      rule: "append",
+      rule: "new-first",
     });
 
     expect(result.pinnedChats.map((workspace) => workspace.workspaceKey)).toEqual([
+      "new",
       "newer",
       "older",
-      "new",
     ]);
   });
 });

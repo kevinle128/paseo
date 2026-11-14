@@ -220,7 +220,7 @@ test.describe("Pinned grid in the workspace deck", () => {
 
     try {
       // The app loads before the pins exist, so the one-time order seed has nothing to freeze and
-      // the append rule applies. Pins made in the same millisecond tie, so the test reads the
+      // the new-first rule applies. Pins made in the same millisecond tie, so the test reads the
       // rendered cell order instead of assuming the pin order.
       await gotoAppShell(page);
       for (const workspace of workspaces) {

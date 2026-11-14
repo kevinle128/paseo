@@ -79,8 +79,30 @@ describe("pinned order seed", () => {
     expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toEqual(["fresh", "newer"]);
   });
 
-  it("does not remove a key on native", () => {
+  it("removes a key on native without seeding", () => {
     platform.isWeb = false;
+    removePinnedOrderKey("older", PINNED_AT, ALL_LIVE);
+    expect(usePinnedOrderSeedStore.getState().seeded).toBe(false);
+    expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toEqual(["newer"]);
+  });
+
+  it("puts a pin made again on native first instead of its old slot", () => {
+    platform.isWeb = false;
+    useSidebarOrderStore.setState({ pinnedWorkspaceOrder: ["newer", "older", "fresh"] });
+    removePinnedOrderKey("fresh", PINNED_AT, ALL_LIVE);
+    const repinned = { ...PINNED_AT, fresh: "2026-04-01T00:00:00Z" };
+    expect(
+      orderPinnedWorkspaceKeys({
+        pinnedAtByKey: repinned,
+        storedOrder: useSidebarOrderStore.getState().pinnedWorkspaceOrder,
+        rule: "recency",
+      }),
+    ).toEqual(["fresh", "newer", "older"]);
+  });
+
+  it("does not remove a key on native before the stores rehydrate", () => {
+    platform.isWeb = false;
+    vi.spyOn(useSidebarOrderStore.persist, "hasHydrated").mockReturnValue(false);
     removePinnedOrderKey("older", PINNED_AT, ALL_LIVE);
     expect(useSidebarOrderStore.getState().pinnedWorkspaceOrder).toEqual(["older", "newer"]);
   });

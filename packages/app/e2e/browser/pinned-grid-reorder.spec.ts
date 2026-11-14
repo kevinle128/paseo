@@ -102,7 +102,7 @@ async function expectNoDeckEntryRemounted(page: Page): Promise<void> {
 }
 
 async function pinInOrder(workspaces: Seeded[]): Promise<void> {
-  for (const workspace of workspaces) {
+  for (const workspace of workspaces.toReversed()) {
     await workspace.client.setWorkspacePinned(workspace.workspaceId, true);
   }
 }
@@ -117,8 +117,8 @@ async function openGrid(
   for (const workspace of [...pinned, ...others]) {
     await waitForWorkspaceInSidebar(page, { serverId, workspaceId: workspace.workspaceId });
   }
-  // Pinning after the app loaded keeps the stored order empty, so cells follow the pin order. Pins
-  // that exist at load are ordered newest first once, to match the old sidebar.
+  // Pinning after the app loaded keeps the stored order empty. New pins land first, newest first,
+  // so pinning in reverse order keeps them in the visual order passed by the caller.
   await pinInOrder(pinned);
   await switchWorkspaceViaSidebar({ page, serverId, workspaceId: pinned[0].workspaceId });
   await chooseGridMode(page, "2");
@@ -357,7 +357,7 @@ test.describe("Pinned grid reorder", () => {
     }
   });
 
-  test("new pins land last in the grid and the sidebar, and a re-pin lands last", async ({
+  test("new pins land first in the grid and the sidebar, and a re-pin lands first", async ({
     page,
   }) => {
     const serverId = getServerId();
@@ -374,7 +374,7 @@ test.describe("Pinned grid reorder", () => {
       await expectOrders(page, serverId, base, base);
 
       await pinWorkspaceFromSidebar(page, fourth.workspaceId);
-      const withFourth = [...base, fourth];
+      const withFourth = [fourth, ...base];
       await expect(cellLocator(page, serverId, fourth.workspaceId)).toBeVisible({
         timeout: 30_000,
       });
@@ -382,17 +382,17 @@ test.describe("Pinned grid reorder", () => {
 
       await switchWorkspaceViaSidebar({ page, serverId, workspaceId: fifth.workspaceId });
       await page.keyboard.press(PIN_SHORTCUT);
-      const withFifth = [...withFourth, fifth];
+      const withFifth = [fifth, fourth, ...base];
       await expect(cellLocator(page, serverId, fifth.workspaceId)).toBeVisible({
         timeout: 30_000,
       });
       await expectOrders(page, serverId, withFifth, withFifth);
 
-      // Unpin the second workspace, then pin it again: it goes to the end.
+      // Unpin the second workspace, then pin it again: it goes to the beginning.
       await pinWorkspaceFromSidebar(page, base[1].workspaceId);
       await expect(cellLocator(page, serverId, base[1].workspaceId)).toHaveCount(0);
       await pinWorkspaceFromSidebar(page, base[1].workspaceId);
-      const reordered = [base[0], base[2], fourth, fifth, base[1]];
+      const reordered = [base[1], fifth, fourth, base[0], base[2]];
       await expect(cellLocator(page, serverId, base[1].workspaceId)).toBeVisible({
         timeout: 30_000,
       });

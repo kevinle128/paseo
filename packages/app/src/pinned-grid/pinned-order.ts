@@ -2,10 +2,12 @@ import { applyStoredOrdering } from "@/hooks/sidebar-workspaces-view-model";
 
 /**
  * "recency": newest pin first, the stored order laid over those slots. Native always uses it.
- * "append": the stored keys that are still pinned, then the other pins oldest first, so a new
- * pin lands at the end. Web uses it once the stored order has been seeded.
+ * "new-first": the pins without a stored position first, newest first, then the stored keys that
+ * are still pinned in stored order. A new pin has no stored position, so it lands first and the
+ * rows the user placed keep their relative order. Web uses it once the stored order has been
+ * seeded.
  */
-export type PinnedOrderRule = "recency" | "append";
+export type PinnedOrderRule = "recency" | "new-first";
 
 /**
  * The rule depends on the platform, a build-time constant, and not on the window width. A rule
@@ -16,7 +18,7 @@ export function resolvePinnedOrderRule(input: {
   isWeb: boolean;
   seeded: boolean;
 }): PinnedOrderRule {
-  return input.isWeb && input.seeded ? "append" : "recency";
+  return input.isWeb && input.seeded ? "new-first" : "recency";
 }
 
 /**
@@ -32,8 +34,8 @@ export function orderPinnedWorkspaceKeys(input: {
   rule: PinnedOrderRule;
 }): string[] {
   const { pinnedAtByKey, storedOrder, rule } = input;
-  if (rule === "append") {
-    return orderAppend(pinnedAtByKey, storedOrder);
+  if (rule === "new-first") {
+    return orderNewFirst(pinnedAtByKey, storedOrder);
   }
   return orderByRecency(pinnedAtByKey, storedOrder);
 }
@@ -44,29 +46,31 @@ function compareKeys(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-function orderByRecency(pinnedAtByKey: Record<string, string>, storedOrder: string[]): string[] {
-  const byRecency = Object.keys(pinnedAtByKey).sort(
+function sortNewestFirst(keys: string[], pinnedAtByKey: Record<string, string>): string[] {
+  return keys.sort(
     (a, b) => (pinnedAtByKey[b] ?? "").localeCompare(pinnedAtByKey[a] ?? "") || compareKeys(a, b),
   );
+}
+
+function orderByRecency(pinnedAtByKey: Record<string, string>, storedOrder: string[]): string[] {
+  const byRecency = sortNewestFirst(Object.keys(pinnedAtByKey), pinnedAtByKey);
   return applyStoredOrdering({ items: byRecency, storedOrder, getKey: (key) => key });
 }
 
-function orderAppend(pinnedAtByKey: Record<string, string>, storedOrder: string[]): string[] {
-  const ordered: string[] = [];
+function orderNewFirst(pinnedAtByKey: Record<string, string>, storedOrder: string[]): string[] {
+  const stored: string[] = [];
   const placed = new Set<string>();
   for (const key of storedOrder) {
     if (key in pinnedAtByKey && !placed.has(key)) {
       placed.add(key);
-      ordered.push(key);
+      stored.push(key);
     }
   }
-  const rest = Object.keys(pinnedAtByKey)
-    .filter((key) => !placed.has(key))
-    .sort((a, b) => {
-      const byTime = (pinnedAtByKey[a] ?? "").localeCompare(pinnedAtByKey[b] ?? "");
-      return byTime !== 0 ? byTime : compareKeys(a, b);
-    });
-  return [...ordered, ...rest];
+  const unstored = sortNewestFirst(
+    Object.keys(pinnedAtByKey).filter((key) => !placed.has(key)),
+    pinnedAtByKey,
+  );
+  return [...unstored, ...stored];
 }
 
 /** The hosts a seed depends on: every registered host and those whose directory is loaded. */
@@ -90,7 +94,7 @@ export function shouldSeedPinnedOrder(input: PinnedOrderSeedHosts & { seeded: bo
 /**
  * The order the recency rule shows today for the known pins, followed by stored keys that are
  * not known (a host that has not loaded yet), in stored order. Writing it freezes what the
- * user sees now, so switching to the append rule does not move any row.
+ * user sees now, so switching to the new-first rule does not move any row.
  */
 export function buildPinnedOrderSeed(input: {
   pinnedAtByKey: Record<string, string>;

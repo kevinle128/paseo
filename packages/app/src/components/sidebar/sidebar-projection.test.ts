@@ -116,7 +116,7 @@ function twoProjectInput(groupMode: "project" | "status") {
 describe("buildSidebarProjection", () => {
   for (const [rule, expected] of [
     ["recency", ["second", "first"]],
-    ["append", ["first", "second"]],
+    ["new-first", ["first", "second"]],
   ] as const) {
     it(`lists pinned chats with the ${rule} rule`, () => {
       const first = makeWorkspace("first", "running");
@@ -131,6 +131,9 @@ describe("buildSidebarProjection", () => {
             [second.placement.workspaceKey]: "2026-07-13T12:00:00.000Z",
           },
         },
+        // Only the newer pin has a stored position: recency keeps it in its newest slot, while
+        // new-first lists the unstored older pin before it.
+        pinnedWorkspaceOrder: [second.placement.workspaceKey],
         pinnedOrderRule: rule,
         workspaceEntriesByKey: new Map([
           [first.entry.workspaceKey, first.entry],

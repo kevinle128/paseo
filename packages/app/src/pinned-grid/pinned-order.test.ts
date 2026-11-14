@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import {
   buildPinnedOrderSeed,
   orderPinnedWorkspaceKeys,
@@ -92,10 +93,10 @@ describe("recency rule ties", () => {
   });
 });
 
-describe("orderPinnedWorkspaceKeys with the append rule", () => {
-  const rule = "append" as const;
+describe("orderPinnedWorkspaceKeys with the new-first rule", () => {
+  const rule = "new-first" as const;
 
-  it("orders by pin time ascending when there is no stored order", () => {
+  it("orders by pin time descending when there is no stored order", () => {
     expect(
       orderPinnedWorkspaceKeys({
         pinnedAtByKey: {
@@ -106,10 +107,10 @@ describe("orderPinnedWorkspaceKeys with the append rule", () => {
         storedOrder: [],
         rule,
       }),
-    ).toEqual(["a", "c", "b"]);
+    ).toEqual(["b", "c", "a"]);
   });
 
-  it("puts a new pin after the stored keys", () => {
+  it("puts a new pin before the stored keys", () => {
     expect(
       orderPinnedWorkspaceKeys({
         pinnedAtByKey: {
@@ -120,7 +121,35 @@ describe("orderPinnedWorkspaceKeys with the append rule", () => {
         storedOrder: ["b", "a"],
         rule,
       }),
+    ).toEqual(["c", "b", "a"]);
+  });
+
+  it("keeps the stored order even when a stored key is newer than an unstored one", () => {
+    expect(
+      orderPinnedWorkspaceKeys({
+        pinnedAtByKey: {
+          a: "2026-01-01T00:00:00Z",
+          b: "2026-02-01T00:00:00Z",
+          c: "2026-03-01T00:00:00Z",
+        },
+        storedOrder: ["a", "c"],
+        rule,
+      }),
     ).toEqual(["b", "a", "c"]);
+  });
+
+  it("lists several unstored pins newest first", () => {
+    expect(
+      orderPinnedWorkspaceKeys({
+        pinnedAtByKey: {
+          a: "2026-01-01T00:00:00Z",
+          b: "2026-02-01T00:00:00Z",
+          c: "2026-03-01T00:00:00Z",
+        },
+        storedOrder: ["a"],
+        rule,
+      }),
+    ).toEqual(["c", "b", "a"]);
   });
 
   it("ignores stored keys that are not pinned", () => {
@@ -154,13 +183,52 @@ describe("orderPinnedWorkspaceKeys with the append rule", () => {
         storedOrder: ["host-2:w1"],
         rule,
       }),
-    ).toEqual(["host-2:w1", "host-1:w1", "host-1:w2"]);
+    ).toEqual(["host-1:w2", "host-1:w1", "host-2:w1"]);
+  });
+});
+
+// A reorder writes through mergeWithRemainder, as the sidebar Pinned section and the grid do.
+// The written order must be the order the user saw, or an unstored pin would move on the first
+// unrelated drag.
+describe("reordering keeps a new pin where it shows", () => {
+  const pinnedAtByKey = {
+    a: "2026-01-01T00:00:00Z",
+    b: "2026-02-01T00:00:00Z",
+    n: "2026-03-01T00:00:00Z",
+  };
+
+  function drag(storedOrder: string[], reorderedVisibleKeys: string[]): string[] {
+    const merge = { currentOrder: storedOrder, reorderedVisibleKeys };
+    return hasVisibleOrderChanged(merge) ? mergeWithRemainder(merge) : storedOrder;
+  }
+
+  for (const rule of ["new-first", "recency"] as const) {
+    it(`keeps the new pin first after the user swaps two other rows (${rule})`, () => {
+      const storedOrder = ["b", "a"];
+      const shown = orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder, rule });
+      expect(shown).toEqual(["n", "b", "a"]);
+
+      const nextStored = drag(storedOrder, ["n", "a", "b"]);
+      expect(orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder: nextStored, rule })).toEqual([
+        "n",
+        "a",
+        "b",
+      ]);
+    });
+  }
+
+  it("keeps a filtered-out new pin first after a drag of the visible rows", () => {
+    const nextStored = drag(["b", "a"], ["a", "b"]);
+    expect(nextStored).toEqual(["a", "b"]);
+    expect(
+      orderPinnedWorkspaceKeys({ pinnedAtByKey, storedOrder: nextStored, rule: "new-first" }),
+    ).toEqual(["n", "a", "b"]);
   });
 });
 
 describe("resolvePinnedOrderRule", () => {
-  it("uses append only on web once seeded", () => {
-    expect(resolvePinnedOrderRule({ isWeb: true, seeded: true })).toBe("append");
+  it("uses new-first only on web once seeded", () => {
+    expect(resolvePinnedOrderRule({ isWeb: true, seeded: true })).toBe("new-first");
     expect(resolvePinnedOrderRule({ isWeb: true, seeded: false })).toBe("recency");
     expect(resolvePinnedOrderRule({ isWeb: false, seeded: true })).toBe("recency");
     expect(resolvePinnedOrderRule({ isWeb: false, seeded: false })).toBe("recency");

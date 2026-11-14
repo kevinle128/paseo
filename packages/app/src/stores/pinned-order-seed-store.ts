@@ -12,8 +12,8 @@ interface PinnedOrderSeedState {
 const PinnedOrderSeedPersistedSchema = z.strictObject({ seeded: z.boolean() });
 
 /**
- * Records that the stored pinned order was seeded with the order the user saw before new pins
- * went to the end. It lives apart from the sidebar order store so that rolling back to code
+ * Records that the stored pinned order was seeded with the order the user saw before the web
+ * switched to the new-first rule. It lives apart from the sidebar order store so that rolling back to code
  * without this store leaves the order store readable.
  */
 export const usePinnedOrderSeedStore = create<PinnedOrderSeedState>()(
