@@ -233,21 +233,31 @@ function gridCell(isFocused: boolean): WorkspaceGridCell {
 }
 
 describe("grid cell follow", () => {
-  it("returns an unfocused cell to the end and follows new rows after the reader scrolled up", async () => {
+  it("keeps the reader's position when the cell loses focus after the reader detached", async () => {
     const history = [1, 2, 3, 4, 5, 6].map((index) => row(index));
     const timeline = mountTimeline(history);
+    timeline.setCell(gridCell(true), {});
     await timeline.settle();
     timeline.hold("message-5", () =>
       timeline.render({ historyMounted: [...history.slice(0, 4), row(5, 240), history[5]!] }),
     );
     await timeline.settle();
-    timeline.scrollTo(0);
-    await timeline.settle();
-    expect(timeline.distanceFromEnd()).toBeGreaterThan(1);
+    const triggerTop = timeline.rowTop("message-5");
 
     timeline.setCell(gridCell(false), {});
     await timeline.settle();
-    expect(timeline.distanceFromEnd()).toBeLessThanOrEqual(1);
+    expect(timeline.rowTop("message-5")).toBe(triggerTop);
+
+    timeline.render({ liveHead: [row(8)] });
+    await timeline.settle();
+    expect(timeline.rowTop("message-5")).toBe(triggerTop);
+  });
+
+  it("keeps following new rows in an unfocused cell the reader did not scroll", async () => {
+    const history = [1, 2, 3, 4, 5, 6].map((index) => row(index));
+    const timeline = mountTimeline(history);
+    timeline.setCell(gridCell(false), {});
+    await timeline.settle();
 
     timeline.render({ liveHead: [row(8)] });
     await timeline.settle();
