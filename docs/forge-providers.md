@@ -123,17 +123,24 @@ parsing `origin` itself.
   a cloud SSH host such as `ssh.github.com` resolve to the cloud host; self-hosted
   hosts pass through.
 - `referenceRepository` is the repository that owns issue and change-request
-  numbers: the parent when `origin` is a fork. `#123` links there; `owner/repo#123`
-  keeps the repository you wrote.
+  numbers when it is not `origin`: by default the parent when `origin` is a fork.
+  `#123` links there; `owner/repo#123` keeps the repository you wrote.
 - Branch and file links stay on the `origin` repository. A feature branch usually
   exists only on the fork.
 
 An adapter opts into `referenceRepository` with the optional
-`ForgeService.getReferenceRepository`. GitHub reads `parent` from `gh repo view`,
-GitLab reads `forked_from_project` from `glab api`, and the Gitea family reads
-`parent` from `tea api`. The lookup always names the `origin` repository
-explicitly, so it does not depend on `gh`'s default-repository choice, and it
-rejects on any CLI failure. `packages/server/src/server/forge-web.ts` keeps a
+`ForgeService.getReferenceRepository`. GitLab reads `forked_from_project` from
+`glab api`, and the Gitea family reads `parent` from `tea api`. GitHub decides in
+this order, because a fork can be a project of its own with its own pull requests:
+
+1. The repository chosen with `gh repo set-default`, read from
+   `remote.<name>.gh-resolved` in git config.
+2. `origin` when the fork has issues turned on. GitHub creates forks with issues
+   off, so a fork that turned them on tracks its own numbers.
+3. The `parent` from `gh repo view`.
+
+The lookup names the `origin` repository explicitly instead of letting `gh` pick
+one, and it rejects on any CLI failure. `packages/server/src/server/forge-web.ts` keeps a
 successful answer for as long as the remote stays the same. The first snapshot
 publishes `{ host }` immediately and the reference repository follows in a later
 update, so a slow or signed-out forge CLI never holds back the checkout's git

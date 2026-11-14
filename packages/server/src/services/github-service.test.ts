@@ -10,6 +10,7 @@ import {
   GITHUB_POLL_ALIGNMENT_MS,
   computeGithubNextInterval,
   createGitHubService,
+  parseGhResolvedConfig,
   parseStatusCheckRollup,
   type GitHubCommandRunner,
   type GitHubCommandRunnerOptions,
@@ -541,6 +542,7 @@ describe("ForgeService", () => {
         runner: runner.runner,
         resolveRepoHost: async () => null,
         resolveOriginRepository: async () => "fork-owner/repo",
+        resolveDefaultRepository: async () => null,
       });
 
       await expect(service.getReferenceRepository?.({ cwd: "/tmp/repo" })).resolves.toBe(
@@ -552,8 +554,40 @@ describe("ForgeService", () => {
         "view",
         "fork-owner/repo",
         "--json",
-        "owner,name,parent",
+        "owner,name,parent,hasIssuesEnabled",
       ]);
+    });
+
+    it("is null for a fork that turned issues on, because it owns its own numbers", async () => {
+      const view = JSON.stringify({ ...JSON.parse(forkView), hasIssuesEnabled: true });
+      const service = createGitHubService({
+        runner: createRunner([view]).runner,
+        resolveRepoHost: async () => null,
+        resolveOriginRepository: async () => "fork-owner/repo",
+        resolveDefaultRepository: async () => null,
+      });
+
+      await expect(service.getReferenceRepository?.({ cwd: "/tmp/repo" })).resolves.toBeNull();
+    });
+
+    it("follows the gh default repository without asking GitHub", async () => {
+      for (const [preferred, expected] of [
+        ["main-owner/repo", "main-owner/repo"],
+        ["Fork-Owner/repo", null],
+      ] as const) {
+        const runner = createRunner([forkView]);
+        const service = createGitHubService({
+          runner: runner.runner,
+          resolveRepoHost: async () => null,
+          resolveOriginRepository: async () => "fork-owner/repo",
+          resolveDefaultRepository: async () => preferred,
+        });
+
+        await expect(service.getReferenceRepository?.({ cwd: "/tmp/repo" })).resolves.toBe(
+          expected,
+        );
+        expect(runner.calls).toHaveLength(0);
+      }
     });
 
     it("rejects when gh cannot answer, so a failed lookup is not mistaken for a repository without a parent", async () => {
@@ -568,6 +602,7 @@ describe("ForgeService", () => {
         },
         resolveRepoHost: async () => null,
         resolveOriginRepository: async () => "fork-owner/repo",
+        resolveDefaultRepository: async () => null,
       });
 
       await expect(service.getReferenceRepository?.({ cwd: "/tmp/repo" })).rejects.toBeInstanceOf(
@@ -581,9 +616,25 @@ describe("ForgeService", () => {
         runner: runner.runner,
         resolveRepoHost: async () => null,
         resolveOriginRepository: async () => "acme/repo",
+        resolveDefaultRepository: async () => null,
       });
 
       await expect(service.getReferenceRepository?.({ cwd: "/tmp/repo" })).resolves.toBeNull();
+    });
+  });
+
+  describe("parseGhResolvedConfig", () => {
+    it("reads the remote or repository that gh repo set-default recorded", () => {
+      expect(parseGhResolvedConfig("remote.upstream.gh-resolved base\n")).toEqual({
+        kind: "remote",
+        remote: "upstream",
+      });
+      expect(parseGhResolvedConfig("remote.origin.gh-resolved acme/repo\n")).toEqual({
+        kind: "repo",
+        repo: "acme/repo",
+      });
+      expect(parseGhResolvedConfig("")).toBeNull();
+      expect(parseGhResolvedConfig("remote.origin.gh-resolved other\n")).toBeNull();
     });
   });
 
