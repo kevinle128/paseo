@@ -167,7 +167,7 @@ test.describe("Pinned grid screenshots", () => {
       for (const agent of [...pinned, ...free]) {
         await waitForWorkspaceInSidebar(page, { serverId, workspaceId: agent.workspaceId });
       }
-      // Pinning after the app loaded keeps the cells in pin order.
+      // Pinning after the app loaded in reverse order keeps cells in the visual order.
       for (const agent of pinned) {
         await agent.client.setWorkspacePinned(agent.workspaceId, true);
       }

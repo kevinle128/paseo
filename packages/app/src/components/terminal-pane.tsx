@@ -5,6 +5,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { isPresented } from "@/screens/workspace/workspace-presence";
 import { useWorkspacePresence } from "@/screens/workspace/workspace-presence-context";
+import { useIsCellSuspended } from "@/pinned-grid/cell-suspension-context";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -300,7 +301,10 @@ export function TerminalPane({
   // A workspace shown but not owning input (reduced) still renders its terminal and claims its own
   // size. Only focus handling below is tied to the drilled `isWorkspaceFocused` (owns input).
   const workspacePresence = useWorkspacePresence();
-  const isWorkspacePresented = isPresented(workspacePresence);
+  // A grid cell parked behind a maximized cell keeps a reduced presence but releases its output
+  // stream like a hidden cell.
+  const isCellSuspended = useIsCellSuspended();
+  const isWorkspacePresented = isPresented(workspacePresence) && !isCellSuspended;
   const isTerminalPresented = retainedPanelActive && isWorkspacePresented;
   const supportsTerminalRestoreModes = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-restore-modes"] === true,

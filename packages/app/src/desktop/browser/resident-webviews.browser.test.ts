@@ -14,6 +14,7 @@ import {
   setBrowserWebviewViewportClip,
   resizeResidentBrowserWebview,
   takeResidentBrowserWebview,
+  BROWSER_SURFACES_HELD_ATTRIBUTE,
 } from "./resident-webviews";
 import {
   setCommandCenterFocusRestoreElement,
@@ -207,6 +208,42 @@ describe("resident browser webviews", () => {
     expectParkedSurface(webview.parentElement);
     anchor.remove();
     clip.remove();
+  });
+
+  it("keeps a webview hidden while its cell moves, then places it at the final rect", () => {
+    const webview = ensureTestBrowser({
+      browserId: "browser-held",
+      workspaceId: "workspace-held",
+      url: "https://example.com",
+    });
+    if (!webview?.parentElement) {
+      throw new Error("Expected resident browser surface");
+    }
+    const frame = document.createElement("div");
+    const anchor = document.createElement("div");
+    const clip = document.createElement("div");
+    frame.append(anchor, clip);
+    document.body.append(frame);
+    let width = 200;
+    for (const element of [anchor, clip]) {
+      Object.defineProperty(element, "getBoundingClientRect", {
+        value: () => ({ left: 0, top: 0, width, height: 100 }),
+      });
+    }
+    frame.setAttribute(BROWSER_SURFACES_HELD_ATTRIBUTE, "");
+
+    presentBrowserWebview("browser-held", webview, anchor, clip, { mode: "responsive" });
+    expect(webview.parentElement.style.visibility).toBe("hidden");
+    expect(webview.parentElement.style.pointerEvents).toBe("none");
+
+    frame.removeAttribute(BROWSER_SURFACES_HELD_ATTRIBUTE);
+    width = 1000;
+    repositionPresentedBrowserWebviews();
+    expect(webview.parentElement.style.visibility).toBe("visible");
+    expect(webview.parentElement.style.width).toBe("1000px");
+
+    releaseResidentBrowserWebview("browser-held", webview);
+    frame.remove();
   });
 
   it("clips an oversized fixed viewport to its pane without resizing the webview", () => {

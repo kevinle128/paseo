@@ -52,4 +52,13 @@ describe("createGridScrollSignal", () => {
     signal.setViewport(null);
     expect(signal.getViewportRect()).toBeNull();
   });
+
+  it("keeps the scroll offset it was given", () => {
+    const signal = createGridScrollSignal();
+    expect(signal.getScrollTop()).toBe(0);
+
+    signal.setScrollTop(724);
+
+    expect(signal.getScrollTop()).toBe(724);
+  });
 });

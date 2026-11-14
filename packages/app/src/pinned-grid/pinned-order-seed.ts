@@ -17,7 +17,7 @@ function storesReady(): boolean {
 
 /**
  * Freezes the order the user sees today into the stored order, then sets the flag that switches
- * web to the append rule. Only this function sets the flag. If the app stops between the two
+ * web to the new-first rule. Only this function sets the flag. If the app stops between the two
  * writes, the next call computes the same list because the recency rule returns a full stored
  * order unchanged. Does nothing while a registered host has no loaded directory, so the seed
  * never runs on a partial pin list.
@@ -38,14 +38,15 @@ export function seedPinnedWorkspaceOrder(
 
 /**
  * Drops one key from the stored order. Seeds first, when the hosts allow it, so the removal does
- * not move other rows.
+ * not move other rows. Runs on every platform: a stale key would put a pin made again back in
+ * its old slot instead of first. The seed itself stays web-only.
  */
 export function removePinnedOrderKey(
   key: string,
   pinnedAtByKey: Record<string, string>,
   hosts: PinnedOrderSeedHosts,
 ): void {
-  if (!isWeb || !storesReady()) return;
+  if (!storesReady()) return;
   seedPinnedWorkspaceOrder(pinnedAtByKey, hosts);
   useSidebarOrderStore.getState().removePinnedWorkspaceKey(key);
 }

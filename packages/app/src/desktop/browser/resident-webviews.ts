@@ -9,6 +9,12 @@ import { WEB_SURFACE_PLANE } from "@/lib/overlay-root";
 const RESIDENT_BROWSER_HOST_ID = "paseo-browser-resident-webviews";
 const BROWSER_ID_ATTRIBUTE = "data-paseo-browser-id";
 const BROWSER_SURFACE_ATTRIBUTE = "data-paseo-browser-surface";
+/**
+ * Set on an element while it animates with a transform. A webview anchored inside it stays hidden
+ * until the motion ends, because a fixed webview cannot follow the transform and a measure taken
+ * during it would size the page to an in-between rect. The owner places webviews again after.
+ */
+export const BROWSER_SURFACES_HELD_ATTRIBUTE = "data-paseo-browser-surfaces-held";
 const RESIDENT_VIEWPORT_WIDTH = 1280;
 const RESIDENT_VIEWPORT_HEIGHT = 800;
 
@@ -300,6 +306,12 @@ export function presentBrowserWebview(
   if (webview.parentElement !== surface) {
     surface.appendChild(webview);
   }
+  presentedBrowserWebviewsByBrowserId.set(normalizedBrowserId, { webview, anchor, clip, viewport });
+  if (anchor.closest(`[${BROWSER_SURFACES_HELD_ATTRIBUTE}]`)) {
+    surface.style.visibility = "hidden";
+    surface.style.pointerEvents = "none";
+    return;
+  }
   const anchorBounds = anchor.getBoundingClientRect();
   const clipBounds = clip.getBoundingClientRect();
   const viewportClip = viewportClipProvider?.() ?? null;
@@ -315,7 +327,6 @@ export function presentBrowserWebview(
     clipBounds.top + clipBounds.height,
     viewportClip?.bottom ?? Infinity,
   );
-  presentedBrowserWebviewsByBrowserId.set(normalizedBrowserId, { webview, anchor, clip, viewport });
   const surfaceLeft = Math.ceil(left);
   const surfaceTop = Math.ceil(top);
   const surfaceRight = Math.floor(right);

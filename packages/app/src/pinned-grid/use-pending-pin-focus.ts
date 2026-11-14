@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import { focusWorkspaceCell } from "@/stores/navigation-active-workspace-store";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { getWorkspaceSelectionKey } from "@/screens/workspace/workspace-deck-retention";
+import { markSmoothReveal, requestCellReveal } from "./cell-reveal-request";
 import {
   reducePendingPinFocus,
   type PendingPinFocusEvent,
@@ -61,8 +62,10 @@ export function usePendingPinFocus(input: {
   }, [pendingKey, pinnedKeys]);
 
   const selectionsRef = useRef(pinnedSelections);
+  const activeKeyRef = useRef(activeKey);
   useEffect(() => {
     selectionsRef.current = pinnedSelections;
+    activeKeyRef.current = activeKey;
   });
   // Runs once per reducer result, so a focus request is never replayed by an unrelated render.
   useEffect(() => {
@@ -72,9 +75,18 @@ export function usePendingPinFocus(input: {
     const selection = selectionsRef.current.find(
       (candidate) => getWorkspaceSelectionKey(candidate) === pending.focus,
     );
-    if (selection) {
-      focusWorkspaceCell(selection);
+    if (!selection) {
+      return;
     }
+    // The new pin is first in the pinned order, so the grid scrolls up to it. The scroll that
+    // the route change starts animates once.
+    markSmoothReveal(pending.focus);
+    if (activeKeyRef.current === pending.focus) {
+      // The route does not change, so the scroll layer only learns of the cell this way.
+      requestCellReveal(pending.focus);
+      return;
+    }
+    focusWorkspaceCell(selection);
   }, [pending]);
 
   return { handlePicked, focusCell };

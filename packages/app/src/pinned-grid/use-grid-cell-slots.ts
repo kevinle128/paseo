@@ -62,7 +62,7 @@ export function useGridCellSlots(input: {
     signal.notify("layout");
   }, [signal, slotIndexByKey, cellKeys]);
 
-  // The maximized cell is laid out at its final rect at once and a clip animates it. Fixed
+  // The maximized cell is laid out at its final rect at once and a transform animates it. Fixed
   // surfaces are placed again when the animation starts and once more when it ends.
   const seenMaximizedKeyRef = useRef(maximizedKey);
   const hasGrid = grid !== null;

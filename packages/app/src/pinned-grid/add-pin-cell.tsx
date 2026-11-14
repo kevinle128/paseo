@@ -14,6 +14,8 @@ const ANCHOR_WIDTH = 320;
 
 interface AddPinCellProps {
   rect: GridCellRect;
+  /** The tile stays mounted while a cell is maximized, hidden. It closes its picker then. */
+  hidden: boolean;
   /** Called with the workspace key the user picked. */
   onPicked: (workspaceKey: string) => void;
 }
@@ -24,6 +26,7 @@ interface AddPinCellProps {
  */
 export const AddPinCell = memo(function AddPinCell({
   rect,
+  hidden,
   onPicked,
 }: AddPinCellProps): ReactElement | null {
   const { t } = useTranslation();
@@ -46,6 +49,12 @@ export const AddPinCell = memo(function AddPinCell({
       }
     });
   }, [open, scrollSignal]);
+
+  useEffect(() => {
+    if (hidden) {
+      setOpen(false);
+    }
+  }, [hidden]);
 
   const handleOpen = useCallback(() => setOpen(true), []);
   const handleClose = useCallback(() => setOpen(false), []);

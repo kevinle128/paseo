@@ -50,7 +50,7 @@ describe("pinned workspace selections", () => {
     useSidebarOrderStore.setState({ pinnedWorkspaceOrder: [] });
   });
 
-  it("puts a new pin last once the order is seeded, and first before", () => {
+  it("puts a new pin first before and after the order is seeded", () => {
     setSessions({
       "host-a": session([
         workspace("a1", "2026-01-01"),
@@ -66,7 +66,7 @@ describe("pinned workspace selections", () => {
     act(() => {
       usePinnedOrderSeedStore.setState({ seeded: true });
     });
-    expect(unseeded.result.current.map((entry) => entry.workspaceId)).toEqual(["a2", "a1", "a3"]);
+    expect(unseeded.result.current.map((entry) => entry.workspaceId)).toEqual(["a3", "a2", "a1"]);
   });
 
   it("lists pinned workspaces across hosts, most recent first, and ignores unpinned ones", () => {

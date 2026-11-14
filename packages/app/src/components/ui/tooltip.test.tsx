@@ -23,12 +23,35 @@ vi.mock("@gorhom/bottom-sheet", () => ({
   useBottomSheetModalInternal: () => null,
 }));
 
+const reanimated = vi.hoisted(() => {
+  interface FakeFadeOut {
+    reduceMotionV: string;
+    reduceMotion(value: string): FakeFadeOut;
+  }
+  const fadeOuts: FakeFadeOut[] = [];
+  return {
+    fadeOuts,
+    createFadeOut(): FakeFadeOut {
+      const fadeOut: FakeFadeOut = {
+        reduceMotionV: "system",
+        reduceMotion(value) {
+          fadeOut.reduceMotionV = value;
+          return fadeOut;
+        },
+      };
+      fadeOuts.push(fadeOut);
+      return fadeOut;
+    },
+  };
+});
+
 vi.mock("react-native-reanimated", () => ({
   default: {
     View: "div",
   },
-  FadeIn: {},
-  FadeOut: {},
+  FadeIn: { duration: () => ({}) },
+  FadeOut: { duration: () => reanimated.createFadeOut() },
+  ReduceMotion: { System: "system", Always: "always", Never: "never" },
 }));
 
 vi.mock("react-native-unistyles", () => ({
@@ -103,6 +126,40 @@ describe("TooltipTrigger", () => {
     pressTrigger();
 
     expect(onPress).not.toHaveBeenCalled();
+  });
+
+  it("closes without the fade-out when its trigger is pressed, and fades again next time", () => {
+    const onPress = vi.fn();
+    const onOpenChange = vi.fn();
+    const renderOpen = (open: boolean) => {
+      act(() => {
+        root?.render(
+          <Tooltip open={open} onOpenChange={onOpenChange}>
+            <TooltipTrigger asChild>
+              <Pressable onPress={onPress} testID="trigger">
+                <Text>Maximize</Text>
+              </Pressable>
+            </TooltipTrigger>
+          </Tooltip>,
+        );
+      });
+    };
+
+    renderOpen(true);
+    const fadeOut = reanimated.fadeOuts.at(-1);
+    expect(fadeOut?.reduceMotionV).toBe("system");
+
+    pressTrigger();
+
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(fadeOut?.reduceMotionV).toBe("always");
+
+    renderOpen(false);
+    renderOpen(true);
+
+    expect(reanimated.fadeOuts.at(-1)).toBe(fadeOut);
+    expect(fadeOut?.reduceMotionV).toBe("system");
   });
 
   it("keeps an asChild trigger interactive when the child is not disabled", () => {

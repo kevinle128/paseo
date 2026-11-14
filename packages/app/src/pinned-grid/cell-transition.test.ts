@@ -1,86 +1,78 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFadeKeyframes,
+  buildFlipKeyframes,
+  buildFlipTransform,
   buildMaximizeKeyframes,
   buildRestoreKeyframes,
-  formatClipInset,
-  resolveClipInsets,
 } from "./cell-transition";
 
 const full = { x: 0, y: 0, width: 1000, height: 600 };
-const slot = { x: 508, y: 308, width: 492, height: 292 };
+const slot = { x: 500, y: 300, width: 500, height: 300 };
+const identity = { transform: "translate(0px, 0px) scale(1, 1)" };
 
-describe("resolveClipInsets", () => {
-  it("measures each side of the inner rect inside the outer rect", () => {
-    expect(resolveClipInsets(full, slot)).toEqual({ top: 308, right: 0, bottom: 0, left: 508 });
+describe("buildFlipTransform", () => {
+  it("draws the full layout over the slot", () => {
+    expect(buildFlipTransform(slot, full)).toBe("translate(500px, 300px) scale(0.5, 0.5)");
   });
 
-  it("gives zero for equal rects", () => {
-    expect(resolveClipInsets(full, full)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  it("draws the slot layout over the full rect", () => {
+    expect(buildFlipTransform(full, slot)).toBe("translate(-500px, -300px) scale(2, 2)");
   });
 
-  it("never gives a negative inset when the inner rect pokes out", () => {
-    const wide = { x: -10, y: -10, width: 1100, height: 700 };
-    expect(resolveClipInsets(full, wide)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  it("gives the identity for equal rects", () => {
+    expect(buildFlipTransform(full, full)).toBe(identity.transform);
   });
-});
 
-describe("formatClipInset", () => {
-  it("writes a CSS inset with rounded corners", () => {
-    expect(formatClipInset({ top: 1, right: 2, bottom: 3, left: 4 }, 6)).toBe(
-      "inset(1px 2px 3px 4px round 6px)",
+  it("does not scale an axis of a box that has no size", () => {
+    expect(buildFlipTransform(full, { x: 0, y: 0, width: 0, height: 0 })).toBe(
+      "translate(0px, 0px) scale(1, 1)",
     );
   });
 });
 
+describe("buildFlipKeyframes", () => {
+  it("ends at the identity written in the same form as the start", () => {
+    expect(buildFlipKeyframes(slot, full)).toEqual([
+      { transform: "translate(500px, 300px) scale(0.5, 0.5)" },
+      identity,
+    ]);
+  });
+});
+
 describe("buildMaximizeKeyframes", () => {
-  it("grows the clip from the old rect to the whole cell", () => {
-    const [start, end] = buildMaximizeKeyframes({
-      from: slot,
-      to: full,
-      fromScrollTop: 0,
-      radius: 8,
-    });
-    expect(start.clipPath).toBe("inset(308px 0px 0px 508px round 8px)");
-    expect(end.clipPath).toBe("inset(0px 0px 0px 0px round 8px)");
+  it("starts the full layout drawn over the old slot", () => {
+    expect(buildMaximizeKeyframes({ from: slot, to: full, fromScrollTop: 0 })).toEqual([
+      { transform: "translate(500px, 300px) scale(0.5, 0.5)" },
+      identity,
+    ]);
   });
 
   it("subtracts the scroll offset the grid had before it scrolled to the top", () => {
     const [start] = buildMaximizeKeyframes({
-      from: { ...slot, y: 608 },
+      from: { ...slot, y: 600 },
       to: full,
       fromScrollTop: 300,
-      radius: 8,
     });
-    expect(start.clipPath).toBe("inset(308px 0px 0px 508px round 8px)");
+    expect(start.transform).toBe("translate(500px, 300px) scale(0.5, 0.5)");
   });
 });
 
 describe("buildRestoreKeyframes", () => {
-  it("shrinks the clip to the slot and keeps one translate for the restored scroll", () => {
-    const [start, end] = buildRestoreKeyframes({
-      held: full,
-      target: slot,
-      toScrollTop: 0,
-      radius: 8,
-    });
-    expect(start).toEqual({
-      clipPath: "inset(0px 0px 0px 0px round 8px)",
-      transform: "translateY(0px)",
-    });
-    expect(end.clipPath).toBe("inset(308px 0px 0px 508px round 8px)");
-    expect(end.transform).toBe("translateY(0px)");
+  it("starts the slot layout drawn over the viewport", () => {
+    expect(buildRestoreKeyframes({ maximized: full, slot, toScrollTop: 0 })).toEqual([
+      { transform: "translate(-500px, -300px) scale(2, 2)" },
+      identity,
+    ]);
   });
 
-  it("aims at the slot in the scrolled grid", () => {
-    const [, end] = buildRestoreKeyframes({
-      held: full,
-      target: { ...slot, y: 608 },
+  it("starts at the viewport of the grid scrolled back to its offset", () => {
+    const [start] = buildRestoreKeyframes({
+      maximized: full,
+      slot: { ...slot, y: 600 },
       toScrollTop: 300,
-      radius: 8,
     });
-    expect(end.clipPath).toBe("inset(308px 0px 0px 508px round 8px)");
-    expect(end.transform).toBe("translateY(300px)");
+    expect(start.transform).toBe("translate(-500px, -300px) scale(2, 2)");
   });
 });
 

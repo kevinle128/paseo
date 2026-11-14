@@ -10,67 +10,54 @@ export const CELL_FADE_SCALE = 0.97;
 /** Time to keep a fading cell on screen: the longest animation plus a frame of margin. */
 export const CELL_TRANSITION_SETTLE_MS = CELL_TRANSITION_MS + 60;
 
-export interface ClipInsets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
+/** A transform written in one fixed form, so the browser interpolates each part on its own. */
+function formatFlipTransform(dx: number, dy: number, sx: number, sy: number): string {
+  return `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
 }
 
-/** How far `inner` sits inside `outer` on each side. A side where `inner` pokes out gives 0. */
-export function resolveClipInsets(outer: GridCellRect, inner: GridCellRect): ClipInsets {
-  return {
-    top: Math.max(0, inner.y - outer.y),
-    right: Math.max(0, outer.x + outer.width - (inner.x + inner.width)),
-    bottom: Math.max(0, outer.y + outer.height - (inner.y + inner.height)),
-    left: Math.max(0, inner.x - outer.x),
-  };
-}
-
-export function formatClipInset(insets: ClipInsets, radius: number): string {
-  const { top, right, bottom, left } = insets;
-  return `inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`;
-}
-
-const NO_INSETS: ClipInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+const IDENTITY_TRANSFORM = formatFlipTransform(0, 0, 1, 1);
 
 /**
- * Keyframes for a cell that fills the grid. The cell is laid out at its final rect once; the clip
- * grows from the old rect to the whole cell, so nothing relayouts while it moves.
- * `fromScrollTop` is the grid scroll offset before maximize; the grid scrolls to the top then.
+ * The transform that draws a box laid out at `layout` over the rect `from`. It assumes
+ * `transform-origin: 0 0`.
+ */
+export function buildFlipTransform(from: GridCellRect, layout: GridCellRect): string {
+  const sx = layout.width > 0 ? from.width / layout.width : 1;
+  const sy = layout.height > 0 ? from.height / layout.height : 1;
+  return formatFlipTransform(from.x - layout.x, from.y - layout.y, sx, sy);
+}
+
+/** Keyframes that move a box laid out at `layout` from the rect `from` to where it is laid out. */
+export function buildFlipKeyframes(from: GridCellRect, layout: GridCellRect): Keyframe[] {
+  return [{ transform: buildFlipTransform(from, layout) }, { transform: IDENTITY_TRANSFORM }];
+}
+
+/**
+ * Keyframes for a cell that fills the grid. The cell is laid out at its final rect once and only a
+ * transform moves it, so the animation runs on the compositor. `fromScrollTop` is the grid scroll
+ * offset before maximize; the grid scrolls to the top then, so the slot was drawn that much higher.
  */
 export function buildMaximizeKeyframes(input: {
   from: GridCellRect;
   to: GridCellRect;
   fromScrollTop: number;
-  radius: number;
 }): Keyframe[] {
-  const { from, to, fromScrollTop, radius } = input;
-  const visibleFrom = { ...from, y: from.y - fromScrollTop };
-  return [
-    { clipPath: formatClipInset(resolveClipInsets(to, visibleFrom), radius) },
-    { clipPath: formatClipInset(NO_INSETS, radius) },
-  ];
+  const { from, to, fromScrollTop } = input;
+  return buildFlipKeyframes({ ...from, y: from.y - fromScrollTop }, to);
 }
 
 /**
- * Keyframes for a cell that returns to its slot. The cell keeps its large layout while the clip
- * shrinks to the slot. The grid scrolls back to `toScrollTop` at the same time, so the large
- * layout moves with a constant translate to stay on the visible area.
+ * Keyframes for a cell that returns to its slot. The cell is laid out at the slot at once and
+ * starts drawn over the whole viewport. The grid scrolls back to `toScrollTop` in the same frame,
+ * so the viewport top is at `toScrollTop` in grid coordinates.
  */
 export function buildRestoreKeyframes(input: {
-  held: GridCellRect;
-  target: GridCellRect;
+  maximized: GridCellRect;
+  slot: GridCellRect;
   toScrollTop: number;
-  radius: number;
 }): Keyframe[] {
-  const { held, target, toScrollTop, radius } = input;
-  const shifted = { ...held, y: held.y + toScrollTop };
-  const transform = `translateY(${toScrollTop}px)`;
-  return [
-    { clipPath: formatClipInset(NO_INSETS, radius), transform },
-    { clipPath: formatClipInset(resolveClipInsets(shifted, target), radius), transform },
-  ];
+  const { maximized, slot, toScrollTop } = input;
+  return buildFlipKeyframes({ ...maximized, y: maximized.y + toScrollTop }, slot);
 }
 
 /**

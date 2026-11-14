@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { View } from "react-native";
-import { subscribeCellReveal } from "./cell-reveal-request";
+import { consumeSmoothReveal, subscribeCellReveal } from "./cell-reveal-request";
+import { prefersReducedMotion } from "./cell-transition";
 import type { GridCellRect } from "./geometry";
 import { resolveScrollToCell } from "./grid-layout";
 import type { GridScrollSignal } from "./grid-scroll-signal";
@@ -8,7 +9,8 @@ import type { GridScrollSignal } from "./grid-scroll-signal";
 /**
  * Scroll behavior of the grid container: it publishes scroll to fixed-position surfaces, resets to
  * the top while a cell is maximized and restores the offset after, and scrolls a cell into view
- * when focus arrives from outside the grid (a sidebar click).
+ * when focus arrives from outside the grid (a sidebar click). The scroll animates once when the
+ * cell was marked with `markSmoothReveal` (a pin picked in the "+" picker).
  */
 export function useGridScrollLayer(input: {
   deckRef: RefObject<View | null>;
@@ -31,7 +33,6 @@ export function useGridScrollLayer(input: {
     viewportHeight,
     signal,
   } = input;
-  const savedScrollTopRef = useRef(0);
   const isMaximizedRef = useRef(false);
   isMaximizedRef.current = maximizedKey !== null;
   const cellRectsRef = useRef(cellRects);
@@ -44,9 +45,11 @@ export function useGridScrollLayer(input: {
     if (!isGrid || !(node instanceof HTMLElement)) {
       return undefined;
     }
+    // The signal keeps the offset outside a maximize, so the maximize motion reads it without a
+    // layout and the restore returns to it.
     const handleScroll = () => {
       if (!isMaximizedRef.current) {
-        savedScrollTopRef.current = node.scrollTop;
+        signal.setScrollTop(node.scrollTop);
       }
       signal.notify();
     };
@@ -63,8 +66,8 @@ export function useGridScrollLayer(input: {
     if (!isGrid || !(node instanceof HTMLElement)) {
       return;
     }
-    node.scrollTop = maximizedKey !== null ? 0 : savedScrollTopRef.current;
-  }, [deckRef, isGrid, maximizedKey]);
+    node.scrollTop = maximizedKey !== null ? 0 : signal.getScrollTop();
+  }, [deckRef, isGrid, maximizedKey, signal]);
 
   const scrollCellIntoView = useCallback(
     (key: string) => {
@@ -72,13 +75,19 @@ export function useGridScrollLayer(input: {
       if (!(node instanceof HTMLElement)) return;
       const rect = cellRectsRef.current.get(key);
       if (!rect) return;
+      // Spent before the target is known, so a mark for a cell already in view does not carry
+      // over to a later scroll to the same cell.
+      const smooth = consumeSmoothReveal(key) && !prefersReducedMotion();
       const target = resolveScrollToCell({
         cellTop: rect.y,
         cellHeight: rect.height,
         scrollTop: node.scrollTop,
         viewportHeight: viewportHeightRef.current,
       });
-      if (target !== null) {
+      if (target === null) return;
+      if (smooth) {
+        node.scrollTo({ top: target, behavior: "smooth" });
+      } else {
         node.scrollTop = target;
       }
     },

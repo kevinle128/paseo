@@ -1,14 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  type RefObject,
-} from "react";
-import type { View } from "react-native";
-import { isWeb } from "@/constants/platform";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import { CellPresenceTracker, type CellPresenceSnapshot } from "./cell-presence";
 import type { GridCellRect } from "./geometry";
 import type { GridScrollSignal } from "./grid-scroll-signal";
@@ -29,7 +19,8 @@ function samePresences(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Presence of every grid cell. Scroll is read by one rAF-throttled handler on the grid's scroll
  * signal and the offset is never React state: the deck re-renders only when some cell changes
- * presence. A timer wakes the deck when an off-screen cell is due to turn hidden, because no
+ * presence. The offset comes from the signal, not from the DOM: a `scrollTop` read in the layout
+ * effect of a maximize or restore commit forced a layout of the whole grid there. A timer wakes the deck when an off-screen cell is due to turn hidden, because no
  * scroll event arrives while the user stands still.
  *
  * Render only previews the presences. The tracker records what it saw (and the clock reading)
@@ -37,16 +28,14 @@ function samePresences(a: readonly string[], b: readonly string[]): boolean {
  */
 export function useCellPresences(
   input: CellPresenceInput & {
-    deckRef: RefObject<View | null>;
     signal: GridScrollSignal;
     enabled: boolean;
   },
 ): CellPresenceSnapshot {
-  const { deckRef, signal, enabled, rects, viewportHeight, focusedIndex, maximizedIndex } = input;
+  const { signal, enabled, rects, viewportHeight, focusedIndex, maximizedIndex } = input;
   const trackerRef = useRef<CellPresenceTracker | null>(null);
   trackerRef.current ??= new CellPresenceTracker();
   const tracker = trackerRef.current;
-  const scrollTopRef = useRef(0);
   const [version, rerender] = useReducer((count: number) => count + 1, 0);
 
   // `version` only forces a new preview after a handler recorded a change.
@@ -55,7 +44,7 @@ export function useCellPresences(
       enabled
         ? tracker.preview({
             rects,
-            scrollTop: scrollTopRef.current,
+            scrollTop: signal.getScrollTop(),
             viewportHeight,
             focusedIndex,
             maximizedIndex,
@@ -63,7 +52,7 @@ export function useCellPresences(
           })
         : NO_CELLS,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- version is a re-preview trigger
-    [enabled, tracker, rects, viewportHeight, focusedIndex, maximizedIndex, version],
+    [enabled, tracker, signal, rects, viewportHeight, focusedIndex, maximizedIndex, version],
   );
 
   const latestRef = useRef<CellPresenceInput>({
@@ -84,13 +73,9 @@ export function useCellPresences(
 
   const reevaluate = useCallback(() => {
     const latest = latestRef.current;
-    const node: unknown = deckRef.current;
-    if (isWeb && node instanceof HTMLElement) {
-      scrollTopRef.current = node.scrollTop;
-    }
     const next = tracker.evaluate({
       rects: latest.rects,
-      scrollTop: scrollTopRef.current,
+      scrollTop: signal.getScrollTop(),
       viewportHeight: latest.viewportHeight,
       focusedIndex: latest.focusedIndex,
       maximizedIndex: latest.maximizedIndex,
@@ -111,7 +96,7 @@ export function useCellPresences(
     if (changed) {
       rerender();
     }
-  }, [clearTimer, deckRef, tracker]);
+  }, [clearTimer, signal, tracker]);
 
   // Record the observation the render previewed. The preview already matches it, so this
   // re-renders only when the clock moved a cell across the hidden delay in between.
