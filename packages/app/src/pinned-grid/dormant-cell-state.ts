@@ -69,17 +69,16 @@ export interface DormantCellPlacement<Rect> {
 }
 
 /**
- * The grid cells that need a card: those without a mounted workspace. A maximized cell covers the
- * grid, so no card shows then.
+ * The grid cells that need a card: those without a mounted workspace. The cards stay listed while
+ * a cell is maximized; the deck hides them with the rest of the grid chrome.
  */
 export function resolveDormantCells<Rect>(input: {
   cells: readonly { serverId: string; workspaceId: string }[] | null;
   mountedKeys: ReadonlySet<string>;
   cellRects: ReadonlyMap<string, Rect>;
-  hasMaximizedCell: boolean;
 }): DormantCellPlacement<Rect>[] {
-  const { cells, mountedKeys, cellRects, hasMaximizedCell } = input;
-  if (!cells || hasMaximizedCell) {
+  const { cells, mountedKeys, cellRects } = input;
+  if (!cells) {
     return [];
   }
   const placements: DormantCellPlacement<Rect>[] = [];

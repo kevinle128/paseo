@@ -1,5 +1,4 @@
-import { useMemo, type RefObject } from "react";
-import type { View } from "react-native";
+import { useMemo } from "react";
 import type { ActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import {
   getWorkspaceSelectionKey,
@@ -16,7 +15,6 @@ const NO_CELL_RECTS: GridCellRect[] = [];
  * are undefined while no grid shows.
  */
 export function useGridCellPresence(input: {
-  deckRef: RefObject<View | null>;
   signal: GridScrollSignal;
   cells: ActiveWorkspaceSelection[] | null;
   geometry: GridGeometry | null;
@@ -33,7 +31,6 @@ export function useGridCellPresence(input: {
     [cells, geometry],
   );
   const snapshot = useCellPresences({
-    deckRef: input.deckRef,
     signal: input.signal,
     enabled: cells !== null && geometry !== null,
     rects,

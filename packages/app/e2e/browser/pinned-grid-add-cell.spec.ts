@@ -79,7 +79,7 @@ async function readSidebarPinnedIds(page: Page): Promise<string[]> {
 }
 
 async function pinInOrder(workspaces: Seeded[]): Promise<void> {
-  for (const workspace of workspaces) {
+  for (const workspace of workspaces.toReversed()) {
     await workspace.client.setWorkspacePinned(workspace.workspaceId, true);
   }
 }
@@ -216,7 +216,7 @@ test.describe("Pinned grid add cell", () => {
       await test.step("maximize hides the tile and restore brings it back", async () => {
         const cell = cellLocator(page, serverId, seeded[0].workspaceId);
         await cell.getByTestId("workspace-grid-cell-maximize").click();
-        await expect(addCell(page)).toHaveCount(0);
+        await expect(addCell(page)).toBeHidden();
         await page.keyboard.press("ControlOrMeta+Shift+Enter");
         await expect(addCell(page)).toBeVisible();
       });
@@ -273,7 +273,7 @@ test.describe("Pinned grid add cell", () => {
     }
   });
 
-  test("a pick lands last, is focused and scrolled into view, and the sidebar lists it last", async ({
+  test("a pick lands first, is focused and scrolled into view, and the sidebar lists it first", async ({
     page,
   }) => {
     const serverId = getServerId();
@@ -308,8 +308,8 @@ test.describe("Pinned grid add cell", () => {
       await expectAppRoute(page, buildHostWorkspaceRoute(serverId, picked.workspaceId));
 
       const order = await readCellOrder(page, serverId, [...pinned, picked]);
-      expect(order.at(-1)?.workspaceId).toBe(picked.workspaceId);
-      await expect.poll(async () => (await readSidebarPinnedIds(page)).at(-1)).toBe(pickedKey);
+      expect(order.at(0)?.workspaceId).toBe(picked.workspaceId);
+      await expect.poll(async () => (await readSidebarPinnedIds(page)).at(0)).toBe(pickedKey);
 
       await expect
         .poll(async () => {

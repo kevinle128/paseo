@@ -38,6 +38,7 @@ import {
   useReleaseUnmountedCellSuspensions,
 } from "@/pinned-grid/use-release-unmounted-cell-suspensions";
 import { GridDividers } from "@/pinned-grid/grid-dividers";
+import { MaximizeHiddenLayer } from "@/pinned-grid/maximize-hidden-layer";
 import {
   createReducedFidelityClock,
   type ReducedFidelityClock,
@@ -45,6 +46,9 @@ import {
 import { StreamFidelityProvider } from "@/pinned-grid/stream-fidelity-context";
 import { useGridCellPresence } from "@/pinned-grid/use-grid-cell-presence";
 import { useCellTimelineSuspension } from "@/pinned-grid/use-cell-timeline-suspension";
+import { useSettledCellSuspension } from "@/pinned-grid/use-settled-cell-suspension";
+import { useParkedCell } from "@/pinned-grid/use-parked-cell";
+import { CellSuspensionProvider } from "@/pinned-grid/cell-suspension-context";
 import { useFocusAfterCellRemoval } from "@/pinned-grid/use-focus-after-cell-removal";
 import { useGridFocus } from "@/pinned-grid/use-grid-focus";
 import { useGridLayoutPreview } from "@/pinned-grid/use-grid-layout-preview";
@@ -76,6 +80,9 @@ const GRID_SCROLL_STYLE = {
   overflowX: "hidden",
   overflowY: "auto",
 } as unknown as ViewStyle;
+// Cells parked behind a maximized cell keep their layout, so they still extend the scroll range.
+// The maximized deck does not scroll, and a classic scrollbar must not appear and narrow it.
+const GRID_MAXIMIZED_SCROLL_STYLE = { overflowY: "hidden" } as unknown as ViewStyle;
 
 function selectionKey(selection: ActiveWorkspaceSelection | null): string | null {
   return selection ? getWorkspaceSelectionKey(selection) : null;
@@ -194,7 +201,6 @@ export function WorkspaceDeck() {
 
   const reducedClock = useMemo(() => createReducedFidelityClock(), []);
   const { presences: cellPresences, gridCellStates } = useGridCellPresence({
-    deckRef,
     signal: gridScrollSignal,
     cells: grid ? grid.cells : null,
     geometry,
@@ -254,9 +260,13 @@ export function WorkspaceDeck() {
   });
   useGridFixedSurfaces({ deckRef, isGrid, signal: gridScrollSignal });
 
+  const hasMaximizedCell = maximizedKey !== null;
   const deckStyle = useMemo(
-    () => (isGrid ? [styles.deck, GRID_SCROLL_STYLE] : styles.deck),
-    [isGrid],
+    () =>
+      isGrid
+        ? [styles.deck, GRID_SCROLL_STYLE, hasMaximizedCell && GRID_MAXIMIZED_SCROLL_STYLE]
+        : styles.deck,
+    [hasMaximizedCell, isGrid],
   );
   const mountedKeys = useMemo(
     () => new Set(renderedSelections.map(getWorkspaceSelectionKey)),
@@ -268,14 +278,8 @@ export function WorkspaceDeck() {
   );
   useReleaseUnmountedCellSuspensions({ unmountedCells, mountedKeys });
   const dormantCells = useMemo(
-    () =>
-      resolveDormantCells({
-        cells: grid ? grid.cells : null,
-        mountedKeys,
-        cellRects,
-        hasMaximizedCell: maximizedKey !== null,
-      }),
-    [cellRects, grid, maximizedKey, mountedKeys],
+    () => resolveDormantCells({ cells: grid ? grid.cells : null, mountedKeys, cellRects }),
+    [cellRects, grid, mountedKeys],
   );
   const spacerStyle = useMemo(() => [styles.spacer, { height: contentHeight }], [contentHeight]);
   const dimCells = (grid?.cells.length ?? 0) > 1;
@@ -326,27 +330,29 @@ export function WorkspaceDeck() {
               />
             );
           })}
-          <DormantCellLayer placements={dormantCells} onFocusCell={focusCell} />
-          {grid && geometry && maximizedKey === null ? (
-            <GridDividers
-              geometry={geometry}
-              columnRatios={columnRatios}
-              previewColumnRatios={layoutPreview.previewColumnRatios}
-              commitColumnRatios={layoutPreview.commitColumnRatios}
-              resetColumnRatios={layoutPreview.resetColumnRatios}
-              previewRowScales={layoutPreview.previewRowScales}
-              commitRowScales={layoutPreview.commitRowScales}
-              resetRowScales={layoutPreview.resetRowScales}
-            />
+          {grid && geometry ? (
+            <MaximizeHiddenLayer hidden={hasMaximizedCell}>
+              <DormantCellLayer placements={dormantCells} onFocusCell={focusCell} />
+              <GridDividers
+                geometry={geometry}
+                columnRatios={columnRatios}
+                previewColumnRatios={layoutPreview.previewColumnRatios}
+                commitColumnRatios={layoutPreview.commitColumnRatios}
+                resetColumnRatios={layoutPreview.resetColumnRatios}
+                previewRowScales={layoutPreview.previewRowScales}
+                commitRowScales={layoutPreview.commitRowScales}
+                resetRowScales={layoutPreview.resetRowScales}
+              />
+              <GridDeckTail
+                grid={grid}
+                geometry={geometry}
+                hidden={hasMaximizedCell}
+                draggedKey={draggedKey}
+                dropSlotIndex={dropSlotIndex}
+                onPicked={handlePicked}
+              />
+            </MaximizeHiddenLayer>
           ) : null}
-          <GridDeckTail
-            grid={grid}
-            geometry={geometry}
-            maximizedKey={maximizedKey}
-            draggedKey={draggedKey}
-            dropSlotIndex={dropSlotIndex}
-            onPicked={handlePicked}
-          />
         </View>
       </GridScrollSignalProvider>
     </RenderProfile>
@@ -354,9 +360,9 @@ export function WorkspaceDeck() {
 }
 
 interface GridDeckTailProps {
-  grid: { cells: ActiveWorkspaceSelection[]; columns: number } | null;
-  geometry: GridGeometry | null;
-  maximizedKey: string | null;
+  grid: { cells: ActiveWorkspaceSelection[]; columns: number };
+  geometry: GridGeometry;
+  hidden: boolean;
   draggedKey: string | null;
   dropSlotIndex: number | null;
   onPicked: (workspaceKey: string) => void;
@@ -366,28 +372,27 @@ interface GridDeckTailProps {
 function GridDeckTail({
   grid,
   geometry,
-  maximizedKey,
+  hidden,
   draggedKey,
   dropSlotIndex,
   onPicked,
 }: GridDeckTailProps) {
-  if (!grid || !geometry) {
-    return null;
-  }
   const showsDropSlot = draggedKey !== null && dropSlotIndex !== null;
   return (
     <>
-      {maximizedKey === null ? (
-        <WindowChromeRegion
-          corners={resolveCellChromeCorners({
-            index: grid.cells.length,
-            columns: grid.columns,
-            isMaximized: false,
-          })}
-        >
-          <AddPinCell rect={geometry.cellRect(grid.cells.length)} onPicked={onPicked} />
-        </WindowChromeRegion>
-      ) : null}
+      <WindowChromeRegion
+        corners={resolveCellChromeCorners({
+          index: grid.cells.length,
+          columns: grid.columns,
+          isMaximized: false,
+        })}
+      >
+        <AddPinCell
+          rect={geometry.cellRect(grid.cells.length)}
+          hidden={hidden}
+          onPicked={onPicked}
+        />
+      </WindowChromeRegion>
       {showsDropSlot ? <GridDropIndicator rect={geometry.cellRect(dropSlotIndex)} /> : null}
     </>
   );
@@ -427,7 +432,14 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
   isDragSource,
 }: WorkspaceDeckEntryProps) {
   // A cell that a maximize hides keeps its content on screen while it fades out.
-  const presence = useFadeOutPresence(livePresence, isCell && underMaximized);
+  const shownPresence = useFadeOutPresence(livePresence, isCell && underMaximized);
+  const isShown = isPresented(shownPresence);
+  const parked = useParkedCell({ underMaximized: isCell && underMaximized, isPresented: isShown });
+  // The workspace of a parked cell keeps a reduced presence for the whole maximize and the frame
+  // hides it. A presence change renders the whole workspace again, which made the fade settle and
+  // the restore commit render every cell that was on screen. A parked cell still owns no input,
+  // and it releases its timeline and terminal streams through the suspension below.
+  const presence: WorkspacePresence = parked ? "reduced" : shownPresence;
   const hasHydratedWorkspaces = useHasHydratedWorkspaces(selection.serverId);
   const workspaceExists = useWorkspaceExists(selection.serverId, selection.workspaceId);
   // A string selector, so the entry renders again only when the title changes.
@@ -448,11 +460,17 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
     }
   }, [onUnmountInactive, selection, shouldKeepMounted]);
   // A hidden grid cell holds no timeline subscription; other entries keep the established rule
-  // that an opened chat stays subscribed.
+  // that an opened chat stays subscribed. The held presence suspends a cell after its fade, and a
+  // restored cell resumes after the motion, so no catch-up runs while a cell animates.
+  const settledSuspended = useSettledCellSuspension({
+    hidden: shownPresence === "hidden",
+    underMaximized,
+  });
+  const cellSuspended = isCell && settledSuspended;
   useCellTimelineSuspension({
     serverId: selection.serverId,
     workspaceId: selection.workspaceId,
-    suspended: isCell && livePresence === "hidden",
+    suspended: cellSuspended,
   });
 
   if (!shouldKeepMounted) {
@@ -466,11 +484,12 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
         cellKey={getWorkspaceSelectionKey(selection)}
         label={cellLabel}
         isCell={isCell}
-        isVisible={isPresentedEntry}
+        isVisible={isShown}
         rect={rect}
         isFocused={presence === "focused"}
         isMaximized={isMaximized}
         underMaximized={underMaximized}
+        parked={parked}
         dimmed={dimmed}
         chromeCorners={chromeCorners}
         onFocusCell={onFocusCell}
@@ -482,16 +501,19 @@ const WorkspaceDeckEntry = memo(function WorkspaceDeckEntry({
           fidelity={presence === "reduced" ? "reduced" : "full"}
           clock={clock}
         >
-          <RetainedPanel
-            active={isPresentedEntry}
-            testID={`workspace-deck-entry-${selection.serverId}:${selection.workspaceId}`}
-          >
-            <WorkspaceScreen
-              serverId={selection.serverId}
-              workspaceId={selection.workspaceId}
-              presence={presence}
-            />
-          </RetainedPanel>
+          <CellSuspensionProvider value={cellSuspended}>
+            <RetainedPanel
+              active={isPresentedEntry}
+              keepLayout={parked}
+              testID={`workspace-deck-entry-${selection.serverId}:${selection.workspaceId}`}
+            >
+              <WorkspaceScreen
+                serverId={selection.serverId}
+                workspaceId={selection.workspaceId}
+                presence={presence}
+              />
+            </RetainedPanel>
+          </CellSuspensionProvider>
         </StreamFidelityProvider>
       </GridCellFrame>
     </HostRouteProvider>

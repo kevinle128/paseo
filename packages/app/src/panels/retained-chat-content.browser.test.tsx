@@ -12,7 +12,11 @@ import { useSessionStore } from "@/stores/session-store";
 import type { StreamItem } from "@/types/stream";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RetainedPanelActivity, useRetainedPanelActive } from "@/components/retained-panel";
+import {
+  RetainedPanel,
+  RetainedPanelActivity,
+  useRetainedPanelActive,
+} from "@/components/retained-panel";
 import { RetainedChatContent as NativeChat } from "./retained-chat-content.native";
 import { RetainedChatContent as WebChat } from "./retained-chat-content.web";
 import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
@@ -118,6 +122,68 @@ for (const [runtime, Chat] of [
     expect(mounts).toBe(runtime === "native" ? 1 : 2);
   });
 }
+
+describe("web chat in a panel that keeps its layout", () => {
+  function renderPanels(input: { outerActive: boolean; innerActive: boolean }) {
+    act(() =>
+      root.render(
+        <RetainedPanel active={input.outerActive} keepLayout testID="outer-panel">
+          <RetainedPanel active={input.innerActive}>
+            <WebChat>
+              <span data-testid="chat-row">row</span>
+            </WebChat>
+          </RetainedPanel>
+        </RetainedPanel>,
+      ),
+    );
+  }
+  function readRow(): HTMLElement {
+    const row = container.querySelector('[data-testid="chat-row"]');
+    if (!(row instanceof HTMLElement)) {
+      throw new Error("The chat row is not mounted");
+    }
+    return row;
+  }
+
+  it("stays laid out instead of freezing while the panel is inactive", async () => {
+    renderPanels({ outerActive: true, innerActive: true });
+    renderPanels({ outerActive: false, innerActive: true });
+    await act(async () => {});
+
+    const outer = container.querySelector('[data-testid="outer-panel"]');
+    expect(outer instanceof HTMLElement && getComputedStyle(outer).display).not.toBe("none");
+    expect(getComputedStyle(readRow()).display).not.toBe("none");
+    expect(readRow().getBoundingClientRect().height).toBeGreaterThan(0);
+  });
+
+  it("still freezes a chat under an inactive activity inside the panel", async () => {
+    const renderActivity = (active: boolean) =>
+      act(() =>
+        root.render(
+          <RetainedPanel active={active} keepLayout>
+            <RetainedPanelActivity active={active}>
+              <WebChat>
+                <span data-testid="chat-row">row</span>
+              </WebChat>
+            </RetainedPanelActivity>
+          </RetainedPanel>,
+        ),
+      );
+    renderActivity(true);
+    renderActivity(false);
+    await act(async () => {});
+
+    expect(getComputedStyle(readRow()).display).toBe("none");
+  });
+
+  it("still freezes a chat whose own panel is inactive", async () => {
+    renderPanels({ outerActive: false, innerActive: true });
+    renderPanels({ outerActive: false, innerActive: false });
+    await act(async () => {});
+
+    expect(getComputedStyle(readRow()).display).toBe("none");
+  });
+});
 
 it("retains modified panels beyond the LRU cap and evicts them normally after save", () => {
   let mounted: string[] = [];

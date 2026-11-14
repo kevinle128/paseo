@@ -761,3 +761,432 @@ index 01026dc..3786ec4 100644
  #else
          const auto& shadowTreeRegistry = UIManagerBinding::getBinding(rt)->getUIManager().getShadowTreeRegistry();
  
+diff --git a/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js b/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
+index 7c7214e..8b56f04 100644
+--- a/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
++++ b/node_modules/react-native-unistyles/lib/commonjs/web/css/state.js
+@@ -7,6 +7,8 @@ exports.CSSState = void 0;
+ var _convert = require("../convert");
+ var _utils = require("../utils");
+ var _core = require("./core");
++const REBUILD_DELAY_MS = 1000;
++const MAX_ADDED_RULES = 500;
+ const safeGetMap = (map, key) => {
+   const nextLevelMap = map.get(key);
+   if (!nextLevelMap) {
+@@ -49,12 +51,99 @@ class CSSState {
+   };
+   add = (hash, values) => {
+     (0, _core.convertToCSS)(hash, (0, _convert.convertUnistyles)(values, this.services.runtime), this);
++    if (this.insertRules(hash)) {
++      this.scheduleRebuild();
++      return;
++    }
+     this.recreate();
+   };
++  // Adding or removing a class used to rewrite the whole stylesheet, and every rewrite restyles the
++  // whole document. A new class is now inserted as rules into a second sheet, which restyles only
++  // the elements that use it. Removals and the canonical rewrite run later, in idle time, at most
++  // once per second: streaming keeps adding classes, so waiting for a quiet moment could wait
++  // forever. Child selectors (`> *`) still rewrite at once: their order against the child's own
++  // class decides which rule wins.
++  addedTag = null;
++  rebuildTimer = null;
++  rebuildIdle = null;
++  insertRules = hash => {
++    if (!this.styleTag || hash.includes(' ')) {
++      return false;
++    }
++    if (!this.addedTag) {
++      this.addedTag = document.createElement('style');
++      this.addedTag.id = 'unistyles-web-added';
++      this.styleTag.after(this.addedTag);
++    }
++    const sheet = this.addedTag.sheet;
++    if (!sheet || sheet.cssRules.length >= MAX_ADDED_RULES) {
++      return false;
++    }
++    const rules = [];
++    const collect = map => {
++      for (const [mediaQuery, secondLevelMap] of map) {
++        for (const [className, thirdLevelMap] of secondLevelMap) {
++          if (className !== hash && !className.startsWith(`${hash}:`)) {
++            continue;
++          }
++          let body = '';
++          for (const [propertyKey, value] of thirdLevelMap) {
++            if (value !== undefined) {
++              body += `${(0, _utils.hyphenate)(propertyKey)}:${value};`;
++            }
++          }
++          const rule = `.${className}{${body}}`;
++          rules.push(mediaQuery ? `${mediaQuery}{${rule}}` : rule);
++        }
++      }
++    };
++    collect(this.mainMap);
++    collect(this.mqMap);
++    try {
++      for (const rule of rules) {
++        sheet.insertRule(rule, sheet.cssRules.length);
++      }
++    } catch {
++      return false;
++    }
++    return true;
++  };
++  cancelRebuild = () => {
++    if (this.rebuildTimer !== null) {
++      clearTimeout(this.rebuildTimer);
++      this.rebuildTimer = null;
++    }
++    if (this.rebuildIdle !== null) {
++      cancelIdleCallback(this.rebuildIdle);
++      this.rebuildIdle = null;
++    }
++  };
++  scheduleRebuild = () => {
++    if (!this.styleTag || this.rebuildTimer !== null || this.rebuildIdle !== null) {
++      return;
++    }
++    this.rebuildTimer = setTimeout(() => {
++      this.rebuildTimer = null;
++      if (typeof requestIdleCallback === 'undefined') {
++        this.recreate();
++        return;
++      }
++      this.rebuildIdle = requestIdleCallback(() => {
++        this.rebuildIdle = null;
++        this.recreate();
++      }, {
++        timeout: REBUILD_DELAY_MS
++      });
++    }, REBUILD_DELAY_MS);
++  };
+   recreate = () => {
++    this.cancelRebuild();
+     if (this.styleTag) {
+       this.styleTag.innerText = this.getStyles();
+     }
++    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++    this.addedTag?.remove();
++    this.addedTag = null;
+   };
+   addTheme = (theme, values) => {
+     let themeVars = '';
+@@ -79,7 +168,7 @@ class CSSState {
+     this.mqMap.forEach(styles => {
+       styles.delete(hash);
+     });
+-    this.recreate();
++    this.scheduleRebuild();
+   };
+   getStyles = () => {
+     let styles = Array.from(this.themesCSS.entries()).reduce((acc, [, themeCss]) => {
+@@ -153,6 +242,10 @@ class CSSState {
+     hydrateState(mqState, true);
+   };
+   reset = () => {
++    this.cancelRebuild();
++    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++    this.addedTag?.remove();
++    this.addedTag = null;
+     this.mqMap.clear();
+     this.mainMap.clear();
+   };
+diff --git a/node_modules/react-native-unistyles/lib/module/web/css/state.js b/node_modules/react-native-unistyles/lib/module/web/css/state.js
+index 88e02b3..2a1a067 100644
+--- a/node_modules/react-native-unistyles/lib/module/web/css/state.js
++++ b/node_modules/react-native-unistyles/lib/module/web/css/state.js
+@@ -3,6 +3,8 @@
+ import { convertUnistyles } from '../convert';
+ import { hyphenate, isServer } from '../utils';
+ import { convertToCSS } from './core';
++const REBUILD_DELAY_MS = 1000;
++const MAX_ADDED_RULES = 500;
+ const safeGetMap = (map, key) => {
+   const nextLevelMap = map.get(key);
+   if (!nextLevelMap) {
+@@ -45,12 +47,99 @@ export class CSSState {
+   };
+   add = (hash, values) => {
+     convertToCSS(hash, convertUnistyles(values, this.services.runtime), this);
++    if (this.insertRules(hash)) {
++      this.scheduleRebuild();
++      return;
++    }
+     this.recreate();
+   };
++  // Adding or removing a class used to rewrite the whole stylesheet, and every rewrite restyles the
++  // whole document. A new class is now inserted as rules into a second sheet, which restyles only
++  // the elements that use it. Removals and the canonical rewrite run later, in idle time, at most
++  // once per second: streaming keeps adding classes, so waiting for a quiet moment could wait
++  // forever. Child selectors (`> *`) still rewrite at once: their order against the child's own
++  // class decides which rule wins.
++  addedTag = null;
++  rebuildTimer = null;
++  rebuildIdle = null;
++  insertRules = hash => {
++    if (!this.styleTag || hash.includes(' ')) {
++      return false;
++    }
++    if (!this.addedTag) {
++      this.addedTag = document.createElement('style');
++      this.addedTag.id = 'unistyles-web-added';
++      this.styleTag.after(this.addedTag);
++    }
++    const sheet = this.addedTag.sheet;
++    if (!sheet || sheet.cssRules.length >= MAX_ADDED_RULES) {
++      return false;
++    }
++    const rules = [];
++    const collect = map => {
++      for (const [mediaQuery, secondLevelMap] of map) {
++        for (const [className, thirdLevelMap] of secondLevelMap) {
++          if (className !== hash && !className.startsWith(`${hash}:`)) {
++            continue;
++          }
++          let body = '';
++          for (const [propertyKey, value] of thirdLevelMap) {
++            if (value !== undefined) {
++              body += `${hyphenate(propertyKey)}:${value};`;
++            }
++          }
++          const rule = `.${className}{${body}}`;
++          rules.push(mediaQuery ? `${mediaQuery}{${rule}}` : rule);
++        }
++      }
++    };
++    collect(this.mainMap);
++    collect(this.mqMap);
++    try {
++      for (const rule of rules) {
++        sheet.insertRule(rule, sheet.cssRules.length);
++      }
++    } catch {
++      return false;
++    }
++    return true;
++  };
++  cancelRebuild = () => {
++    if (this.rebuildTimer !== null) {
++      clearTimeout(this.rebuildTimer);
++      this.rebuildTimer = null;
++    }
++    if (this.rebuildIdle !== null) {
++      cancelIdleCallback(this.rebuildIdle);
++      this.rebuildIdle = null;
++    }
++  };
++  scheduleRebuild = () => {
++    if (!this.styleTag || this.rebuildTimer !== null || this.rebuildIdle !== null) {
++      return;
++    }
++    this.rebuildTimer = setTimeout(() => {
++      this.rebuildTimer = null;
++      if (typeof requestIdleCallback === 'undefined') {
++        this.recreate();
++        return;
++      }
++      this.rebuildIdle = requestIdleCallback(() => {
++        this.rebuildIdle = null;
++        this.recreate();
++      }, {
++        timeout: REBUILD_DELAY_MS
++      });
++    }, REBUILD_DELAY_MS);
++  };
+   recreate = () => {
++    this.cancelRebuild();
+     if (this.styleTag) {
+       this.styleTag.innerText = this.getStyles();
+     }
++    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++    this.addedTag?.remove();
++    this.addedTag = null;
+   };
+   addTheme = (theme, values) => {
+     let themeVars = '';
+@@ -75,7 +164,7 @@ export class CSSState {
+     this.mqMap.forEach(styles => {
+       styles.delete(hash);
+     });
+-    this.recreate();
++    this.scheduleRebuild();
+   };
+   getStyles = () => {
+     let styles = Array.from(this.themesCSS.entries()).reduce((acc, [, themeCss]) => {
+@@ -149,6 +238,10 @@ export class CSSState {
+     hydrateState(mqState, true);
+   };
+   reset = () => {
++    this.cancelRebuild();
++    // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++    this.addedTag?.remove();
++    this.addedTag = null;
+     this.mqMap.clear();
+     this.mainMap.clear();
+   };
+diff --git a/node_modules/react-native-unistyles/src/web/css/state.ts b/node_modules/react-native-unistyles/src/web/css/state.ts
+index a0eea57..4d7601c 100644
+--- a/node_modules/react-native-unistyles/src/web/css/state.ts
++++ b/node_modules/react-native-unistyles/src/web/css/state.ts
+@@ -15,6 +15,9 @@ type SetProps = {
+ }
+ type HydrateState = Array<[string, Array<[string, Array<[string, any]>]>]>
+ 
++const REBUILD_DELAY_MS = 1000
++const MAX_ADDED_RULES = 500
++
+ const safeGetMap = (map: Map<string, Map<string, any>>, key: string) => {
+     const nextLevelMap = map.get(key)
+ 
+@@ -63,13 +66,126 @@ export class CSSState {
+ 
+     add = (hash: string, values: UnistylesValues) => {
+         convertToCSS(hash, convertUnistyles(values, this.services.runtime), this)
++
++        if (this.insertRules(hash)) {
++            this.scheduleRebuild()
++
++            return
++        }
++
+         this.recreate()
+     }
+ 
++    // Adding or removing a class used to rewrite the whole stylesheet, and every rewrite restyles the
++    // whole document. A new class is now inserted as rules into a second sheet, which restyles only
++    // the elements that use it. Removals and the canonical rewrite run later, in idle time, at most
++    // once per second: streaming keeps adding classes, so waiting for a quiet moment could wait
++    // forever. Child selectors (`> *`) still rewrite at once: their order against the child's own
++    // class decides which rule wins.
++    private addedTag: HTMLStyleElement | null = null
++    private rebuildTimer: ReturnType<typeof setTimeout> | null = null
++    private rebuildIdle: number | null = null
++
++    private insertRules = (hash: string) => {
++        if (!this.styleTag || hash.includes(' ')) {
++            return false
++        }
++
++        if (!this.addedTag) {
++            this.addedTag = document.createElement('style')
++            this.addedTag.id = 'unistyles-web-added'
++            this.styleTag.after(this.addedTag)
++        }
++
++        const sheet = this.addedTag.sheet
++
++        if (!sheet || sheet.cssRules.length >= MAX_ADDED_RULES) {
++            return false
++        }
++
++        const rules: Array<string> = []
++        const collect = (map: MapType) => {
++            for (const [mediaQuery, secondLevelMap] of map) {
++                for (const [className, thirdLevelMap] of secondLevelMap) {
++                    if (className !== hash && !className.startsWith(`${hash}:`)) {
++                        continue
++                    }
++
++                    let body = ''
++
++                    for (const [propertyKey, value] of thirdLevelMap) {
++                        if (value !== undefined) {
++                            body += `${hyphenate(propertyKey)}:${value};`
++                        }
++                    }
++
++                    const rule = `.${className}{${body}}`
++
++                    rules.push(mediaQuery ? `${mediaQuery}{${rule}}` : rule)
++                }
++            }
++        }
++
++        collect(this.mainMap)
++        collect(this.mqMap)
++
++        try {
++            for (const rule of rules) {
++                sheet.insertRule(rule, sheet.cssRules.length)
++            }
++        } catch {
++            return false
++        }
++
++        return true
++    }
++
++    private cancelRebuild = () => {
++        if (this.rebuildTimer !== null) {
++            clearTimeout(this.rebuildTimer)
++            this.rebuildTimer = null
++        }
++
++        if (this.rebuildIdle !== null) {
++            cancelIdleCallback(this.rebuildIdle)
++            this.rebuildIdle = null
++        }
++    }
++
++    private scheduleRebuild = () => {
++        if (!this.styleTag || this.rebuildTimer !== null || this.rebuildIdle !== null) {
++            return
++        }
++
++        this.rebuildTimer = setTimeout(() => {
++            this.rebuildTimer = null
++
++            if (typeof requestIdleCallback === 'undefined') {
++                this.recreate()
++
++                return
++            }
++
++            this.rebuildIdle = requestIdleCallback(
++                () => {
++                    this.rebuildIdle = null
++                    this.recreate()
++                },
++                { timeout: REBUILD_DELAY_MS },
++            )
++        }, REBUILD_DELAY_MS)
++    }
++
+     recreate = () => {
++        this.cancelRebuild()
++
+         if (this.styleTag) {
+             this.styleTag.innerText = this.getStyles()
+         }
++
++        // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++        this.addedTag?.remove()
++        this.addedTag = null
+     }
+ 
+     addTheme = (theme: string, values: Record<string, any>) => {
+@@ -103,7 +219,7 @@ export class CSSState {
+         this.mqMap.forEach((styles) => {
+             styles.delete(hash)
+         })
+-        this.recreate()
++        this.scheduleRebuild()
+     }
+ 
+     getStyles = () => {
+@@ -192,6 +308,12 @@ export class CSSState {
+     }
+ 
+     reset = () => {
++        this.cancelRebuild()
++
++        // Rules from `insertRule` live only in the CSSOM, and the element has no text to clear.
++        this.addedTag?.remove()
++        this.addedTag = null
++
+         this.mqMap.clear()
+         this.mainMap.clear()
+     }

@@ -133,6 +133,8 @@ import {
   type WorkspacePresence,
 } from "./workspace-presence";
 import { WorkspacePresenceProvider } from "./workspace-presence-context";
+import { useIsCellSuspended } from "@/pinned-grid/cell-suspension-context";
+import type { ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
 import {
   getHostRuntimeStore,
   useHostRuntimeClient,
@@ -1064,6 +1066,40 @@ function DesktopCenterColumnChrome({
   );
 }
 
+const NO_VISIBLE_AGENT_IDS: string[] = [];
+
+/**
+ * Publishes the chats the workspace shows to the viewed timeline, so they stay subscribed. A grid
+ * cell parked behind a maximized cell keeps a reduced presence, so its workspace still computes
+ * visible chats. The cell suspension is read in this leaf: it changes when the fade settles and
+ * after a restore, and a read in the workspace screen would render the whole workspace then.
+ */
+function WorkspaceViewedTimelineSource({
+  sourceId,
+  viewedTimelineSync,
+  agentIds,
+}: {
+  sourceId: string | null;
+  viewedTimelineSync: ViewedTimelineUiBridge | null;
+  agentIds: string[];
+}): null {
+  const isCellSuspended = useIsCellSuspended();
+  const publishedAgentIds = isCellSuspended ? NO_VISIBLE_AGENT_IDS : agentIds;
+  useLayoutEffect(() => {
+    if (!sourceId || !viewedTimelineSync) {
+      return;
+    }
+    viewedTimelineSync.replaceVisibleAgentIds(sourceId, publishedAgentIds);
+  }, [sourceId, viewedTimelineSync, publishedAgentIds]);
+  useEffect(() => {
+    if (!sourceId || !viewedTimelineSync) {
+      return;
+    }
+    return () => viewedTimelineSync.replaceVisibleAgentIds(sourceId, []);
+  }, [sourceId, viewedTimelineSync]);
+  return null;
+}
+
 function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceScreenContentProps) {
   // Presented keeps data live for every workspace on screen. Only the one that owns input may
   // claim keyboard handlers, the document title or the host-level focused agent and terminal.
@@ -1484,18 +1520,6 @@ function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceSc
         .catch(() => undefined);
     }
   }, [normalizedServerId, visibleAgentIds]);
-  useLayoutEffect(() => {
-    if (!persistenceKey || !viewedTimelineSync) {
-      return;
-    }
-    viewedTimelineSync.replaceVisibleAgentIds(persistenceKey, visibleAgentIds);
-  }, [persistenceKey, viewedTimelineSync, visibleAgentIds]);
-  useEffect(() => {
-    if (!persistenceKey || !viewedTimelineSync) {
-      return;
-    }
-    return () => viewedTimelineSync.replaceVisibleAgentIds(persistenceKey, []);
-  }, [persistenceKey, viewedTimelineSync]);
   const setFocusedAgentId = useSessionStore((state) => state.setFocusedAgentId);
   const setFocusedTerminalId = useSessionStore((state) => state.setFocusedTerminalId);
   const focusedPaneAgentId = useMemo(() => {
@@ -3862,6 +3886,11 @@ function WorkspaceScreenContent({ serverId, workspaceId, presence }: WorkspaceSc
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}
           ownsInput={workspaceOwnsInput}
+        />
+        <WorkspaceViewedTimelineSource
+          sourceId={persistenceKey}
+          viewedTimelineSync={viewedTimelineSync}
+          agentIds={visibleAgentIds}
         />
         <WorkspacePanelSurface
           onLayout={measureWorkspaceWidth}

@@ -123,7 +123,6 @@ describe("resolveDormantCells", () => {
         cells,
         mountedKeys: new Set(["s:a"]),
         cellRects,
-        hasMaximizedCell: false,
       }),
     ).toEqual([
       { serverId: "s", workspaceId: "b", rect: 2 },
@@ -131,9 +130,9 @@ describe("resolveDormantCells", () => {
     ]);
   });
 
-  it("lists nothing without a grid or while a cell is maximized", () => {
-    const base = { mountedKeys: new Set<string>(), cellRects };
-    expect(resolveDormantCells({ ...base, cells: null, hasMaximizedCell: false })).toEqual([]);
-    expect(resolveDormantCells({ ...base, cells, hasMaximizedCell: true })).toEqual([]);
+  it("lists nothing without a grid", () => {
+    expect(resolveDormantCells({ mountedKeys: new Set<string>(), cellRects, cells: null })).toEqual(
+      [],
+    );
   });
 });

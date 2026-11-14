@@ -41,8 +41,11 @@ import {
  *
  * The numbers only mean something on a quiet local machine against a production bundle (start the
  * run with E2E_METRO_BUNDLE=production); shared CI hardware and the dev bundle are far slower.
- * PASEO_PINNED_GRID_PERF_SCENARIO=<idle|typing|scroll|focus|staleness> runs one scenario.
- * PASEO_PINNED_GRID_PERF_CPU_PROFILE=<path> writes a CPU profile of the idle scenario.
+ * PASEO_PINNED_GRID_PERF_SCENARIO=<idle|typing|scroll|focus|staleness|hidden|maximize> runs one
+ * scenario.
+ * PASEO_PINNED_GRID_PERF_CPU_PROFILE=<path> writes a CPU profile of the idle or maximize scenario.
+ * PASEO_PINNED_GRID_PERF_RENDER_PROFILE=1 reports React commits per component (dev bundle only) for
+ * the idle and maximize scenarios.
  */
 
 const RUN = process.env.PASEO_PINNED_GRID_PERF_E2E === "1";
@@ -60,6 +63,10 @@ const KEYSTROKES_PER_ROUND = 40;
 const KEYSTROKE_ROUNDS = 3;
 const KEYSTROKE_DELAY_MS = 100;
 const FOCUS_TARGETS = 5;
+const MAXIMIZE_ROUNDS = 5;
+// The motion takes 240 ms; the window also covers the commit before it and the settle after it.
+const MAXIMIZE_WINDOW_MS = 450;
+const MAXIMIZE_REST_MS = 1_500;
 
 const FRAME_P95_BUDGET_MS = 16.7;
 const KEYSTROKE_P95_BUDGET_MS = 33;
@@ -68,7 +75,7 @@ const LONG_TASKS_OVER_100_PER_10S = 1;
 const REDUCED_STALENESS_BUDGET_MS = 500;
 const HEAP_GROWTH_BUDGET = 0.2;
 
-const SCENARIOS = ["idle", "typing", "scroll", "focus", "staleness", "hidden"] as const;
+const SCENARIOS = ["idle", "typing", "scroll", "focus", "staleness", "hidden", "maximize"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
 interface GridFixture {
@@ -303,6 +310,51 @@ async function sampleWindow(page: Page, durationMs: number): Promise<ProbeResult
   return stopProbe(page);
 }
 
+/** Probes only the window around one action, so idle frames between actions do not hide jank. */
+async function sampleAction(page: Page, action: () => Promise<void>): Promise<ProbeResult> {
+  await startProbe(page);
+  await action();
+  await page.waitForTimeout(MAXIMIZE_WINDOW_MS);
+  return stopProbe(page);
+}
+
+/** Sums render profile rows of several windows; `maxMs` keeps the slowest single commit. */
+function mergeRenderProfiles(windows: readonly (readonly RenderProfileRow[])[]) {
+  const merged = new Map<string, { id: string; commits: number; totalMs: number; maxMs: number }>();
+  for (const rows of windows) {
+    for (const row of rows) {
+      const entry = merged.get(row.id) ?? { id: row.id, commits: 0, totalMs: 0, maxMs: 0 };
+      entry.commits += row.commits;
+      entry.totalMs += row.totalMs;
+      entry.maxMs = Math.max(entry.maxMs, row.maxMs);
+      merged.set(row.id, entry);
+    }
+  }
+  const count = Math.max(windows.length, 1);
+  return [...merged.values()]
+    .sort((a, b) => b.totalMs - a.totalMs)
+    .map((entry) => ({
+      id: entry.id,
+      commitsPerWindow: Math.round((entry.commits / count) * 10) / 10,
+      msPerWindow: Math.round(entry.totalMs / count),
+      maxMs: Math.round(entry.maxMs),
+    }));
+}
+
+/** Long task starts are relative to their own probe; a CPU profile needs page time. */
+function longTasksInPageTime(probe: ProbeResult) {
+  return probe.longTasks.map((task) => ({ ...task, start: task.start + probe.startedAt }));
+}
+
+function mergeProbes(probes: readonly ProbeResult[]): ProbeResult {
+  return {
+    startedAt: probes[0]?.startedAt ?? 0,
+    frames: probes.flatMap((probe) => probe.frames),
+    longTasks: probes.flatMap((probe) => probe.longTasks),
+    durationMs: probes.reduce((sum, probe) => sum + probe.durationMs, 0),
+  };
+}
+
 // Screen recording and tracing add main-thread and compositor load that would distort the frames.
 test.use({ video: "off", trace: "off" });
 
@@ -473,6 +525,60 @@ test.describe("Pinned grid load test", () => {
     expect
       .soft(p95, "reduced cell update gap p95 (proxy for staleness)")
       .toBeLessThanOrEqual(REDUCED_STALENESS_BUDGET_MS);
+  });
+  // Maximize and restore of on-screen cells while every agent streams. Only the frames around each
+  // action are kept, so the numbers describe the motion itself.
+  scenarioTest("maximize", async ({ page, fixture }) => {
+    const grid = await describeGrid(page, fixture);
+    report("maximize grid", grid.description);
+    const targets = grid.cells.filter((cell) => cell.onScreen).slice(0, MAXIMIZE_ROUNDS);
+    expect(targets.length).toBeGreaterThan(0);
+    const maximizes: ProbeResult[] = [];
+    const restores: ProbeResult[] = [];
+    const cdp: CDPSession = await page.context().newCDPSession(page);
+    const finishCpuProfile = await startCpuProfile(page, cdp);
+    // With the render profile on, each action window is profiled on its own, next to an idle window
+    // of the same length, so the commits the action adds stand out from the streaming background.
+    const renders = { idle: [], maximize: [], restore: [] } as Record<string, RenderProfileRow[][]>;
+    const profiled = async <T>(name: string, sample: () => Promise<T>): Promise<T> => {
+      if (RENDER_PROFILE) await resetRenderProfile(page);
+      const result = await sample();
+      if (RENDER_PROFILE) renders[name].push(await readRenderProfile(page));
+      return result;
+    };
+    for (const target of targets) {
+      const cell = page.getByTestId(target.testId);
+      const button = cell.getByTestId("workspace-grid-cell-maximize");
+      if (RENDER_PROFILE) await profiled("idle", () => sampleWindow(page, MAXIMIZE_WINDOW_MS));
+      const toggle = () => sampleAction(page, () => button.click());
+      maximizes.push(await profiled("maximize", toggle));
+      await expect(button).toHaveAttribute("aria-expanded", "true");
+      await page.waitForTimeout(MAXIMIZE_REST_MS);
+      // Cells parked behind the maximized cell keep their layout and presence but, once the fade
+      // settled, hold no timeline subscription: only the maximized cell stays subscribed.
+      expect
+        .soft(fixture.subscriptions.latest()?.length, "subscribed cells while maximized")
+        .toBe(1);
+      restores.push(await profiled("restore", toggle));
+      await expect(button).toHaveAttribute("aria-expanded", "false");
+      await page.waitForTimeout(MAXIMIZE_REST_MS);
+    }
+    if (RENDER_PROFILE) {
+      for (const [name, windows] of Object.entries(renders)) {
+        report(`${name} render profile (dev bundle, per window)`, {
+          windows: windows.length,
+          rows: mergeRenderProfiles(windows).slice(0, 15),
+        });
+      }
+    }
+    const all = mergeProbes([...maximizes, ...restores]);
+    await finishCpuProfile(all);
+    if (CPU_PROFILE_PATH) {
+      const longTasks = [...maximizes, ...restores].flatMap(longTasksInPageTime);
+      await writeFile(`${CPU_PROFILE_PATH}.longtasks.json`, JSON.stringify(longTasks));
+    }
+    expectFrameAndTaskBudgets("maximize", mergeProbes(maximizes));
+    expectFrameAndTaskBudgets("restore", mergeProbes(restores));
   });
   // The 2560x1440 grid keeps every cell within the overscan margin, so no cell is hidden there. A
   // short viewport pushes the lower rows beyond it, which is where the invariant can be checked

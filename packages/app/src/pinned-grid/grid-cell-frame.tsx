@@ -1,11 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { isNative } from "@/constants/platform";
+import { BROWSER_SURFACES_HELD_ATTRIBUTE } from "@/desktop/browser/resident-webviews";
 import { WindowChromeRegion } from "@/utils/desktop-window";
 import { createPointerFocusClaim } from "./cell-press-guard";
 import type { GridCellRect } from "./geometry";
 import { WorkspaceGridCellProvider, type WorkspaceGridCell } from "./grid-cell-context";
+import { useGridScrollSignalSource } from "./grid-scroll-signal";
 import { useCellMotion } from "./use-cell-motion";
 
 type ChromeCorners = "both" | "top-left" | "top-right" | "none";
@@ -48,6 +59,11 @@ interface GridCellFrameProps {
   isMaximized: boolean;
   /** Another cell is maximized. This cell fades out and, when the grid returns, fades in. */
   underMaximized?: boolean;
+  /**
+   * The cell was on screen when another cell was maximized. While it is not visible it keeps its
+   * layout and is hidden without `display: none`, so the restore does not lay it out again.
+   */
+  parked?: boolean;
   /** Other cells dim when more than one cell shows. */
   dimmed: boolean;
   chromeCorners: ChromeCorners;
@@ -76,6 +92,7 @@ export const GridCellFrame = memo(function GridCellFrame({
   isFocused,
   isMaximized,
   underMaximized = false,
+  parked = false,
   dimmed,
   chromeCorners,
   label,
@@ -93,8 +110,10 @@ export const GridCellFrame = memo(function GridCellFrame({
   const onFocusCellRef = useRef(onFocusCell);
   onFocusCellRef.current = onFocusCell;
 
+  const scrollSignal = useGridScrollSignalSource();
   const { layoutRect, isMoving } = useCellMotion({
     frameRef,
+    scrollSignal,
     isCell,
     isVisible,
     rect,
@@ -175,6 +194,30 @@ export const GridCellFrame = memo(function GridCellFrame({
     }
   }, [isCell, isFocused]);
 
+  // `visibility` hides the parked cell and `content-visibility` skips its layout and paint while
+  // keeping the layout it has. Set on the node: React Native style types have no
+  // `contentVisibility`. The layout effect clears both before the restore paints.
+  // The workspace of a parked cell stays presented, so its Electron webviews do not park on their
+  // own. They are fixed-position and `visibility` does not reach them: the held attribute hides
+  // them, and the `layout` signal places them again at once.
+  const isParkedHidden = parked && !isVisible;
+  useLayoutEffect(() => {
+    const node: unknown = frameRef.current;
+    if (!isParkedHidden || !(node instanceof HTMLElement)) {
+      return undefined;
+    }
+    node.style.visibility = "hidden";
+    node.style.contentVisibility = "hidden";
+    node.setAttribute(BROWSER_SURFACES_HELD_ATTRIBUTE, "");
+    scrollSignal?.notify("layout");
+    return () => {
+      node.style.visibility = "";
+      node.style.contentVisibility = "";
+      node.removeAttribute(BROWSER_SURFACES_HELD_ATTRIBUTE);
+      scrollSignal?.notify("layout");
+    };
+  }, [isParkedHidden, scrollSignal]);
+
   const focusCell = useCallback(() => {
     onFocusCell(cellKey);
   }, [cellKey, onFocusCell]);
@@ -223,12 +266,12 @@ export const GridCellFrame = memo(function GridCellFrame({
   const frameStyle = useMemo(
     () => [
       rect ? styles.cell : styles.single,
-      !isVisible && styles.hidden,
+      !isVisible && !parked && styles.hidden,
       isDragSource && styles.dragSource,
       isMoving && styles.moving,
       rectStyle,
     ],
-    [isDragSource, isVisible, isMoving, rect, rectStyle],
+    [isDragSource, isVisible, isMoving, parked, rect, rectStyle],
   );
   const ringStyle = useMemo(
     () => [styles.ring, isFocused && !isMaximized ? styles.ringFocused : styles.ringIdle],

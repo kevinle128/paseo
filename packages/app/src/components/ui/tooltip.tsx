@@ -23,7 +23,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { FadeIn, FadeOut } from "react-native-reanimated";
+import { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { FloatingSurface } from "@/components/ui/floating";
@@ -51,6 +51,10 @@ interface TooltipContextValue {
   enabled: boolean;
   openOnPress: boolean;
   delayDuration: number;
+  /** The fade-out of the content. One instance per tooltip, so a close can turn it off. */
+  exiting: FadeOut;
+  /** Closes without the fade-out. */
+  closeAtOnce: () => void;
 }
 
 const TooltipContext = createContext<TooltipContextValue | null>(null);
@@ -262,6 +266,19 @@ export function Tooltip({
   const opensOnPress = isNative || isCompact;
   const enabled = active && (opensOnPress ? enabledOnMobile : enabledOnDesktop);
 
+  // A press on the trigger acts, and the action often changes the layout (a grid cell maximize).
+  // On web the fade-out clones the content and reads its layout while React is still committing
+  // that change, which forces a layout of the whole page inside the commit. So a press closes the
+  // tooltip without the fade-out. Reanimated reads the reduce-motion flag of `exiting` at unmount.
+  const exiting = useMemo(() => FadeOut.duration(80), []);
+  const closeAtOnce = useCallback(() => {
+    exiting.reduceMotion(ReduceMotion.Always);
+    setIsOpen(false);
+  }, [exiting, setIsOpen]);
+  useEffect(() => {
+    if (isOpen) exiting.reduceMotion(ReduceMotion.System);
+  }, [exiting, isOpen]);
+
   // Remove the portal in the inactive commit, before the retained chat freezes.
   // Closing also prevents the tooltip from returning when its panel is shown again.
   useEffect(() => {
@@ -276,8 +293,10 @@ export function Tooltip({
       enabled,
       openOnPress: opensOnPress,
       delayDuration,
+      exiting,
+      closeAtOnce,
     }),
-    [isOpen, setIsOpen, enabled, opensOnPress, delayDuration],
+    [isOpen, setIsOpen, enabled, opensOnPress, delayDuration, exiting, closeAtOnce],
   );
 
   return <TooltipContext.Provider value={value}>{children}</TooltipContext.Provider>;
@@ -383,14 +402,14 @@ export function TooltipTrigger({
       if (!ctx.enabled || disabled) {
         return;
       }
+      clearOpenTimer();
       if (ctx.openOnPress) {
-        clearOpenTimer();
         ctx.setOpen(true);
         return;
       }
-      close();
+      ctx.closeAtOnce();
     },
-    [clearOpenTimer, close, ctx, disabled, onPress],
+    [clearOpenTimer, ctx, disabled, onPress],
   );
 
   const triggerProps = {
@@ -544,7 +563,7 @@ export function TooltipContent({
           <FloatingSurface
             pointerEvents="none"
             entering={FadeIn.duration(80)}
-            exiting={FadeOut.duration(80)}
+            exiting={ctx.exiting}
             collapsable={false}
             role="tooltip"
             testID={testID}
@@ -573,7 +592,7 @@ export function TooltipContent({
           <FloatingSurface
             pointerEvents="none"
             entering={FadeIn.duration(80)}
-            exiting={FadeOut.duration(80)}
+            exiting={ctx.exiting}
             collapsable={false}
             role="tooltip"
             testID={testID}

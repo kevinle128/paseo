@@ -14,6 +14,12 @@ export interface GridScrollSignal {
   /** The scrolling grid element. Fixed-position surfaces clip themselves to its visible area. */
   setViewport(element: HTMLElement | null): void;
   getViewportRect(): GridViewportRect | null;
+  /**
+   * The grid scroll offset outside a maximize: the offset the grid shows, or the one it returns to
+   * when the maximize ends. It is kept here so a render can read it without forcing a layout.
+   */
+  getScrollTop(): number;
+  setScrollTop(value: number): void;
 }
 
 export interface GridViewportRect {
@@ -26,6 +32,7 @@ export interface GridViewportRect {
 export function createGridScrollSignal(): GridScrollSignal {
   const listeners = new Set<(reason: GridSignalReason) => void>();
   let viewport: HTMLElement | null = null;
+  let scrollTop = 0;
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -47,6 +54,12 @@ export function createGridScrollSignal(): GridScrollSignal {
       }
       const { left, top, right, bottom } = viewport.getBoundingClientRect();
       return { left, top, right, bottom };
+    },
+    getScrollTop() {
+      return scrollTop;
+    },
+    setScrollTop(value) {
+      scrollTop = value;
     },
   };
 }
