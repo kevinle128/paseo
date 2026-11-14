@@ -681,6 +681,8 @@ export const en = {
         copyTerminalId: "Copy terminal id",
         copyFilePath: "Copy file path",
         rename: "Rename",
+        splitPaneRight: "Split pane right",
+        splitPaneDown: "Split pane down",
         closeAbove: "Close tabs above",
         closeBelow: "Close tabs below",
         closeLeft: "Close to the left",

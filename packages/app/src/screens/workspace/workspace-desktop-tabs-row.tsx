@@ -65,6 +65,7 @@ import {
   type WorkspaceDesktopTabActions,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
+  type WorkspaceTabMenuPaneSplit,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { PaneHost } from "@/panels/panel-manifest";
@@ -439,6 +440,10 @@ function TabContextMenuItem({
         return <ThemedCopyX size={16} uniProps={mutedColorMapping} />;
       case "pencil":
         return <ThemedPencil size={16} uniProps={mutedColorMapping} />;
+      case "columns-2":
+        return <ThemedColumns2 size={16} uniProps={mutedColorMapping} />;
+      case "rows-2":
+        return <ThemedRows2 size={16} uniProps={mutedColorMapping} />;
       case "x":
         return <ThemedX size={16} uniProps={mutedColorMapping} />;
       default:
@@ -562,6 +567,7 @@ export interface WorkspaceDesktopTabsRowProps {
   onTogglePaneMaximized?: () => void;
   onSplitRight?: () => void;
   onSplitDown?: () => void;
+  tabPaneSplit?: WorkspaceTabMenuPaneSplit;
   focusModeEnabled: boolean;
   onExitFocusMode: () => void;
 }
@@ -1102,6 +1108,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   onTogglePaneMaximized,
   onSplitRight,
   onSplitDown,
+  tabPaneSplit,
   focusModeEnabled,
   onExitFocusMode,
 }: ResolvedWorkspaceDesktopTabsRowProps) {
@@ -1173,6 +1180,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      splitPaneRight: t("workspace.tabs.menu.splitPaneRight"),
+      splitPaneDown: t("workspace.tabs.menu.splitPaneDown"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),
@@ -1351,6 +1360,7 @@ function ResolvedWorkspaceDesktopTabsRow({
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
+          paneSplit={tabPaneSplit}
           resolvedTabWidth={resolvedTabWidth}
           showLabel={showLabel}
           showCloseButton={shouldShowCloseButton}
@@ -1386,6 +1396,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       rail,
       setHoveredCloseTabKey,
       tabMenuLabels,
+      tabPaneSplit,
       tabDropPreviewIndex,
       displayedTabs.length,
     ],
@@ -1509,6 +1520,7 @@ function ResolvedDesktopTabChip({
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
+  paneSplit,
   resolvedTabWidth,
   showLabel,
   showCloseButton,
@@ -1537,6 +1549,7 @@ function ResolvedDesktopTabChip({
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  paneSplit: WorkspaceTabMenuPaneSplit | undefined;
   resolvedTabWidth: number;
   showLabel: boolean;
   showCloseButton: boolean;
@@ -1567,6 +1580,7 @@ function ResolvedDesktopTabChip({
         onCloseTabsToLeft,
         onCloseTabsToRight,
         onCloseOtherTabs,
+        paneSplit,
         labels,
       }),
     [
@@ -1581,6 +1595,7 @@ function ResolvedDesktopTabChip({
       onCopyFilePath,
       onCopyResumeCommand,
       labels,
+      paneSplit,
       onReloadAgent,
       onRenameTab,
       tabCount,

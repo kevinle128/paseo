@@ -49,6 +49,7 @@ import {
   splitPaneEmptyInLayout,
   splitWorkspaceRootRightInLayout,
   splitPaneInLayout,
+  canSplitPaneInLayout,
   stripEphemeralTabsFromLayout,
   type SplitGroup,
   type SplitNode,
@@ -235,6 +236,14 @@ interface WorkspaceFocusRestorationState {
 // The persisted tree includes the Explorer shell; the renderer docks it outside workspace splits.
 // Preserve four user-created split levels beneath that bookkeeping node.
 const MAX_TREE_DEPTH = 5;
+
+export function canSplitWorkspacePane(input: {
+  layout: WorkspaceLayout;
+  paneId: string;
+  position: "left" | "right" | "top" | "bottom";
+}): boolean {
+  return canSplitPaneInLayout({ ...input, maxTreeDepth: MAX_TREE_DEPTH });
+}
 
 const LEGACY_EXPLORER_SIDEBAR_REFERENCE_WIDTH = 1440;
 const WORKSPACE_LAYOUT_PERSIST_VERSION = 2;

@@ -275,6 +275,166 @@ describe("buildWorkspaceTabMenuEntries", () => {
     expect(entries[1]).toEqual({ kind: "file-panel-open-with", key: "file-panel-open-with" });
   });
 
+  describe("pane split items", () => {
+    function buildDesktopEntries(input: {
+      tabCount: number;
+      paneSplit?: Parameters<typeof buildWorkspaceTabMenuEntries>[0]["paneSplit"];
+      surface?: "desktop" | "mobile";
+      tab?: WorkspaceTabDescriptor;
+    }) {
+      return buildWorkspaceTabMenuEntries({
+        surface: input.surface ?? "desktop",
+        tab: input.tab ?? createAgentTab(),
+        index: 0,
+        tabCount: input.tabCount,
+        menuTestIDBase: "workspace-tab-context-agent_123",
+        onCopyResumeCommand: vi.fn(),
+        onCopyAgentId: vi.fn(),
+        onCopyTerminalId: vi.fn(),
+        onCopyFilePath: vi.fn(),
+        onReloadAgent: vi.fn(),
+        onRenameTab: vi.fn(),
+        onCloseTab: vi.fn(),
+        onCloseTabsBefore: vi.fn(),
+        onCloseTabsAfter: vi.fn(),
+        onCloseOtherTabs: vi.fn(),
+        paneSplit: input.paneSplit,
+      });
+    }
+
+    function keysOf(entries: ReturnType<typeof buildDesktopEntries>): string[] {
+      return entries.map((entry) => entry.key);
+    }
+
+    function findItem(entries: ReturnType<typeof buildDesktopEntries>, key: string) {
+      const entry = entries.find((candidate) => candidate.kind === "item" && candidate.key === key);
+      if (!entry || entry.kind !== "item") {
+        throw new Error(`Menu item missing: ${key}`);
+      }
+      return entry;
+    }
+
+    it("places the split group between Rename and the close group", () => {
+      const entries = buildDesktopEntries({
+        tabCount: 2,
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      expect(keysOf(entries)).toEqual([
+        "copy-resume-command",
+        "copy-agent-id",
+        "rename",
+        "rename-separator",
+        "split-pane-right",
+        "split-pane-down",
+        "split-separator",
+        "close-before",
+        "close-after",
+        "close-others",
+        "reload-agent",
+        "close",
+      ]);
+      expect(findItem(entries, "split-pane-right")).toMatchObject({
+        label: "Split pane right",
+        icon: "columns-2",
+        testID: "workspace-tab-context-agent_123-split-right",
+        disabled: false,
+      });
+      expect(findItem(entries, "split-pane-down")).toMatchObject({
+        label: "Split pane down",
+        icon: "rows-2",
+        testID: "workspace-tab-context-agent_123-split-down",
+        disabled: false,
+      });
+    });
+
+    it("moves the tab into a new pane at the chosen position", () => {
+      const onSplit = vi.fn();
+      const entries = buildDesktopEntries({
+        tabCount: 2,
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit },
+      });
+
+      findItem(entries, "split-pane-right").onSelect();
+      findItem(entries, "split-pane-down").onSelect();
+
+      expect(onSplit).toHaveBeenNthCalledWith(1, "agent_123", "right");
+      expect(onSplit).toHaveBeenNthCalledWith(2, "agent_123", "bottom");
+    });
+
+    it("disables both items when the tab is alone in its pane", () => {
+      const entries = buildDesktopEntries({
+        tabCount: 1,
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      expect(findItem(entries, "split-pane-right").disabled).toBe(true);
+      expect(findItem(entries, "split-pane-down").disabled).toBe(true);
+    });
+
+    it("disables only the direction that would exceed the pane depth limit", () => {
+      const entries = buildDesktopEntries({
+        tabCount: 3,
+        paneSplit: { canSplitRight: false, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      expect(findItem(entries, "split-pane-right").disabled).toBe(true);
+      expect(findItem(entries, "split-pane-down").disabled).toBe(false);
+    });
+
+    it("omits the items without pane split support and on the mobile surface", () => {
+      const withoutSupport = buildDesktopEntries({ tabCount: 2 });
+      const mobile = buildDesktopEntries({
+        tabCount: 2,
+        surface: "mobile",
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      for (const entries of [withoutSupport, mobile]) {
+        expect(keysOf(entries)).not.toContain("split-pane-right");
+        expect(keysOf(entries)).not.toContain("split-pane-down");
+      }
+    });
+
+    it("separates the split group from the copy items on tabs without Rename", () => {
+      const entries = buildDesktopEntries({
+        tabCount: 2,
+        tab: {
+          key: "file_abc",
+          tabId: "file_abc",
+          kind: "file",
+          target: { kind: "file", path: "/some/path.ts", lineStart: 1, lineEnd: 10 },
+        },
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      expect(keysOf(entries).slice(0, 6)).toEqual([
+        "copy-file-path",
+        "file-panel-open-with",
+        "split-leading-separator",
+        "split-pane-right",
+        "split-pane-down",
+        "split-separator",
+      ]);
+    });
+
+    it("starts with the split group on tabs that have no leading items", () => {
+      const entries = buildDesktopEntries({
+        tabCount: 2,
+        tab: {
+          key: "draft_123",
+          tabId: "draft_123",
+          kind: "draft",
+          target: { kind: "draft", draftId: "draft_123" },
+        },
+        paneSplit: { canSplitRight: true, canSplitDown: true, onSplit: vi.fn() },
+      });
+
+      expect(entries[0]?.key).toBe("split-pane-right");
+      expect(entries[2]?.key).toBe("split-separator");
+    });
+  });
+
   it("uses a Changes close id for the working diff tab", () => {
     const actions = buildWorkspaceDesktopTabActions({
       tab: {
