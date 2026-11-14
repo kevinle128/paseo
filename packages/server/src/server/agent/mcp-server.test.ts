@@ -7085,6 +7085,22 @@ describe("skills and wait_for_agent MCP tools", () => {
     });
   });
 
+  it("wait_for_agent waits for the agent to become active, so a new agent is not reported finished early", async () => {
+    const deps = createTestDeps();
+    deps.spies.agentManager.getAgent.mockReturnValue({ id: "a1", lifecycle: "idle" });
+    const server = await createServer(deps);
+    deps.spies.agentManager.waitForAgentEvent.mockResolvedValueOnce({
+      status: "idle",
+      permission: null,
+      lastMessage: "first turn done",
+    });
+    await registeredTool(server, "wait_for_agent").handler({ agentId: "a1" });
+    expect(deps.spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
+      "a1",
+      expect.objectContaining({ waitForActive: true }),
+    );
+  });
+
   it("wait_for_agent caps the wait and reports the running agent on timeout", async () => {
     const deps = createTestDeps();
     deps.spies.agentManager.getAgent.mockReturnValue({ id: "a1", lifecycle: "running" });

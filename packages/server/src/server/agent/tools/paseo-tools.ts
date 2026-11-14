@@ -2262,9 +2262,11 @@ function createToolCatalog(
           }),
         };
       }
+      // A just-created agent has not started its first turn yet: without waitForActive it would be reported as finished.
       const result = await waitForAgentWithTimeout(agentManager, agentId, {
         signal: context.signal,
         timeoutMs: timeoutSec * 1000,
+        waitForActive: true,
       });
       const permission = result.permission ? sanitizePermissionRequest(result.permission) : null;
       let attentionReason: "finished" | "error" | "permission" | "timeout" = "finished";
