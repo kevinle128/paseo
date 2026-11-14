@@ -1949,6 +1949,33 @@ export function splitPaneInLayout(input: SplitPaneInLayoutInput): SplitPaneInLay
   };
 }
 
+/**
+ * Whether a tab of the pane can move into a new pane at `position` without exceeding the tree
+ * depth limit. Depth depends on the pane's place in the tree, so any tab of the pane answers it.
+ */
+export function canSplitPaneInLayout(input: {
+  layout: WorkspaceLayout;
+  paneId: string;
+  position: SplitPaneInLayoutInput["position"];
+  maxTreeDepth: number;
+}): boolean {
+  const pane = findPaneById(input.layout.root, input.paneId);
+  const tabId = pane?.tabIds[0];
+  if (!tabId) {
+    return false;
+  }
+  return (
+    splitPaneInLayout({
+      layout: input.layout,
+      tabId,
+      targetPaneId: input.paneId,
+      position: input.position,
+      maxTreeDepth: input.maxTreeDepth,
+      createNodeId: (prefix) => `${prefix}_probe`,
+    }) !== null
+  );
+}
+
 export function splitPaneEmptyInLayout(
   input: SplitPaneEmptyInLayoutInput,
 ): SplitPaneInLayoutResult | null {

@@ -690,6 +690,8 @@ export const fr: TranslationResources = {
         copyTerminalId: "Copier l’ID du terminal",
         copyFilePath: "Copier le chemin du fichier",
         rename: "Renommer",
+        splitPaneRight: "Diviser le panneau vers la droite",
+        splitPaneDown: "Diviser le panneau vers le bas",
         closeAbove: "Fermer les onglets au-dessus",
         closeBelow: "Fermer les onglets en dessous",
         closeLeft: "Fermer les onglets à gauche",

@@ -59,6 +59,7 @@ import {
   type SplitNode,
   type SplitPane,
   type WorkspaceLayout,
+  canSplitWorkspacePane,
 } from "@/stores/workspace-layout-store";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 import { recordRenderProfileReasons, RenderProfile } from "@/utils/render-profiler";
@@ -129,6 +130,7 @@ interface SplitNodeViewProps extends Omit<
   windowChromeCorners: WindowChromeCorners;
   maximizedPaneId: string | null;
   workspaceHasMultiplePanes: boolean;
+  paneSplitAvailability: PaneSplitAvailability;
   /**
    * One presented pane draws the workspace header itself and may merge its tabs into the compact
    * header. Split panes share one header above them and always show their tab rails.
@@ -155,6 +157,35 @@ interface SplitPaneViewProps extends Omit<
   showDropZones: boolean;
   dropPreview: SplitDropZoneHover | null;
   tabDropPreview: TabDropPreview | null;
+}
+
+type PaneSplitAvailability = ReadonlyMap<string, { right: boolean; down: boolean }>;
+
+function usePaneSplitAvailability(layout: WorkspaceLayout): PaneSplitAvailability {
+  const previousRef = useRef<PaneSplitAvailability>(new Map());
+  return useMemo(() => {
+    const next = new Map<string, { right: boolean; down: boolean }>();
+    for (const pane of collectAllPanes(layout.root)) {
+      next.set(pane.id, {
+        right: canSplitWorkspacePane({ layout, paneId: pane.id, position: "right" }),
+        down: canSplitWorkspacePane({ layout, paneId: pane.id, position: "bottom" }),
+      });
+    }
+    // Resizing a split changes the layout object but not the answers. Keep the previous map
+    // then, so memoized panes do not render again while a divider moves.
+    const previous = previousRef.current;
+    const unchanged =
+      previous.size === next.size &&
+      [...next].every(([id, value]) => {
+        const old = previous.get(id);
+        return old?.right === value.right && old.down === value.down;
+      });
+    if (unchanged) {
+      return previous;
+    }
+    previousRef.current = next;
+    return next;
+  }, [layout]);
 }
 
 const EMPTY_SPLIT_NODES: SplitNode[] = [];
@@ -211,6 +242,7 @@ export function SplitContainer({
     [layout.root, explorerSidebarPaneId],
   );
   const workspaceHasMultiplePanes = Boolean(mainRoot && hasMultipleVisiblePanes(mainRoot));
+  const paneSplitAvailability = usePaneSplitAvailability(layout);
   useEffect(() => {
     if (
       maximizedPaneId &&
@@ -314,6 +346,7 @@ export function SplitContainer({
                 ownsWorkspaceHeader={!panesShareWorkspaceHeader}
                 maximizedPaneId={maximizedPaneId}
                 workspaceHasMultiplePanes={workspaceHasMultiplePanes}
+                paneSplitAvailability={paneSplitAvailability}
                 onTogglePaneMaximized={handleTogglePaneMaximized}
                 focusModeEnabled={focusModeEnabled}
                 onExitFocusMode={onExitFocusMode}
@@ -447,6 +480,7 @@ function SplitNodeView({
   windowChromeCorners,
   maximizedPaneId,
   workspaceHasMultiplePanes,
+  paneSplitAvailability,
   onTogglePaneMaximized,
   focusModeEnabled,
   onExitFocusMode,
@@ -536,6 +570,7 @@ function SplitNodeView({
             tabDropPreview={tabDropPreview}
             maximizedPaneId={maximizedPaneId}
             workspaceHasMultiplePanes={workspaceHasMultiplePanes}
+            paneSplitAvailability={paneSplitAvailability}
             onTogglePaneMaximized={onTogglePaneMaximized}
             focusModeEnabled={focusModeEnabled}
             onExitFocusMode={onExitFocusMode}
@@ -604,6 +639,7 @@ function SplitNodeView({
               })}
               maximizedPaneId={maximizedPaneId}
               workspaceHasMultiplePanes={workspaceHasMultiplePanes}
+              paneSplitAvailability={paneSplitAvailability}
               onTogglePaneMaximized={onTogglePaneMaximized}
               focusModeEnabled={focusModeEnabled}
               onExitFocusMode={onExitFocusMode}
@@ -656,7 +692,7 @@ const SplitPaneView = memo(function SplitPaneView({
   onCreateNewTab,
   buildPaneContentModel,
   onFocusPane,
-  onSplitPane: _onSplitPane,
+  onSplitPane,
   onSplitPaneEmpty,
   onReorderTabsInPane,
   activeDragTabId,
@@ -665,6 +701,7 @@ const SplitPaneView = memo(function SplitPaneView({
   tabDropPreview,
   maximizedPaneId,
   workspaceHasMultiplePanes,
+  paneSplitAvailability,
   onTogglePaneMaximized,
   focusModeEnabled,
   onExitFocusMode,
@@ -759,6 +796,17 @@ const SplitPaneView = memo(function SplitPaneView({
   const handleSplitDown = useCallback(
     () => onSplitPaneEmpty({ targetPaneId: paneId, position: "bottom" }),
     [onSplitPaneEmpty, paneId],
+  );
+  const canSplitRight = paneSplitAvailability.get(paneId)?.right ?? false;
+  const canSplitDown = paneSplitAvailability.get(paneId)?.down ?? false;
+  const tabPaneSplit = useMemo(
+    () => ({
+      canSplitRight,
+      canSplitDown,
+      onSplit: (tabId: string, position: "right" | "bottom") =>
+        onSplitPane({ tabId, targetPaneId: paneId, position }),
+    }),
+    [canSplitDown, canSplitRight, onSplitPane, paneId],
   );
   const handleTogglePaneMaximized = useCallback(
     () => onTogglePaneMaximized(paneId),
@@ -865,6 +913,7 @@ const SplitPaneView = memo(function SplitPaneView({
                 onTogglePaneMaximized={handleTogglePaneMaximized}
                 onSplitRight={handleSplitRight}
                 onSplitDown={handleSplitDown}
+                tabPaneSplit={tabPaneSplit}
                 focusModeEnabled={Boolean(focusModeEnabled)}
                 onExitFocusMode={onExitFocusMode}
               />

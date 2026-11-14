@@ -11,6 +11,8 @@ export interface WorkspaceTabMenuLabels {
   copyTerminalId: string;
   copyFilePath: string;
   rename: string;
+  splitPaneRight: string;
+  splitPaneDown: string;
   closeAbove: string;
   closeBelow: string;
   closeLeft: string;
@@ -27,6 +29,8 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   copyTerminalId: i18n.t("workspace.tabs.menu.copyTerminalId"),
   copyFilePath: i18n.t("workspace.tabs.menu.copyFilePath"),
   rename: i18n.t("workspace.tabs.menu.rename"),
+  splitPaneRight: i18n.t("workspace.tabs.menu.splitPaneRight"),
+  splitPaneDown: i18n.t("workspace.tabs.menu.splitPaneDown"),
   closeAbove: i18n.t("workspace.tabs.menu.closeAbove"),
   closeBelow: i18n.t("workspace.tabs.menu.closeBelow"),
   closeLeft: i18n.t("workspace.tabs.menu.closeLeft"),
@@ -49,6 +53,8 @@ export type WorkspaceTabMenuEntry =
         | "arrow-right-to-line"
         | "copy-x"
         | "pencil"
+        | "columns-2"
+        | "rows-2"
         | "x";
       hint?: string;
       tooltip?: string;
@@ -67,6 +73,18 @@ export type WorkspaceTabMenuEntry =
       key: string;
     };
 
+export type WorkspaceTabMenuSplitPosition = "right" | "bottom";
+
+/**
+ * Moves a tab into a new pane beside or below its own pane. Without it the menu has no split
+ * items, which is the case for surfaces that have no panes.
+ */
+export interface WorkspaceTabMenuPaneSplit {
+  canSplitRight: boolean;
+  canSplitDown: boolean;
+  onSplit: (tabId: string, position: WorkspaceTabMenuSplitPosition) => void;
+}
+
 interface BuildWorkspaceTabMenuEntriesInput {
   surface: WorkspaceTabMenuSurface;
   tab: WorkspaceTabDescriptor;
@@ -83,6 +101,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCloseTabsBefore: (tabId: string) => Promise<void> | void;
   onCloseTabsAfter: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  paneSplit?: WorkspaceTabMenuPaneSplit;
   labels?: WorkspaceTabMenuLabels;
 }
 
@@ -100,6 +119,7 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  paneSplit?: WorkspaceTabMenuPaneSplit;
   labels?: WorkspaceTabMenuLabels;
 }
 
@@ -187,6 +207,7 @@ export function buildWorkspaceTabMenuEntries(
     onCloseTabsBefore,
     onCloseTabsAfter,
     onCloseOtherTabs,
+    paneSplit,
   } = input;
   const labels = input.labels ?? DEFAULT_WORKSPACE_TAB_MENU_LABELS;
   const isFirstTab = index === 0;
@@ -264,6 +285,36 @@ export function buildWorkspaceTabMenuEntries(
       kind: "separator",
       key: "rename-separator",
     });
+  }
+
+  if (surface === "desktop" && paneSplit) {
+    if (entries.length > 0 && entries[entries.length - 1]?.kind !== "separator") {
+      entries.push({ kind: "separator", key: "split-leading-separator" });
+    }
+    // Moving the only tab out would leave its pane empty.
+    entries.push({
+      kind: "item",
+      key: "split-pane-right",
+      label: labels.splitPaneRight,
+      icon: "columns-2",
+      disabled: isOnlyTab || !paneSplit.canSplitRight,
+      testID: `${menuTestIDBase}-split-right`,
+      onSelect: () => {
+        paneSplit.onSplit(tab.tabId, "right");
+      },
+    });
+    entries.push({
+      kind: "item",
+      key: "split-pane-down",
+      label: labels.splitPaneDown,
+      icon: "rows-2",
+      disabled: isOnlyTab || !paneSplit.canSplitDown,
+      testID: `${menuTestIDBase}-split-down`,
+      onSelect: () => {
+        paneSplit.onSplit(tab.tabId, "bottom");
+      },
+    });
+    entries.push({ kind: "separator", key: "split-separator" });
   }
 
   entries.push({
@@ -349,6 +400,7 @@ export function buildWorkspaceDesktopTabActions(
       onCloseTabsBefore: input.onCloseTabsToLeft,
       onCloseTabsAfter: input.onCloseTabsToRight,
       onCloseOtherTabs: input.onCloseOtherTabs,
+      paneSplit: input.paneSplit,
       labels: input.labels,
     }),
     closeButtonTestId: getCloseButtonTestId(input.tab),

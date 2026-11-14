@@ -25,6 +25,7 @@ import { defaultChangesState, type ChangesState } from "@/panels/changes/state";
 import { defaultFileState, type FileState } from "@/panels/file/state";
 import {
   canDismissPaneInLayout,
+  canSplitWorkspacePane,
   collectAllPanes,
   collectAllTabs,
   selectPaneFocusSuspended,
@@ -2971,6 +2972,53 @@ describe("workspace-layout-store actions", () => {
     expect(pane3).toBe("pane_44444444-4444-4444-4444-444444444444");
     expect(pane4).toBe("pane_66666666-6666-6666-6666-666666666666");
     expect(getTreeDepth(layout.root)).toBe(5);
+  });
+
+  it("canSplitWorkspacePane matches the depth limit that splitPane enforces", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const tabIds = ["a", "b", "c", "d", "e"].map(
+      (name) =>
+        store.openTab({
+          workspaceKey,
+          target: { kind: "file", path: `/repo/worktree/${name}.ts` },
+          intent: "reveal",
+        })!,
+    );
+    const pane1 = store.splitPane(workspaceKey, {
+      tabId: tabIds[1],
+      targetPaneId: "main",
+      position: "right",
+    })!;
+    const pane2 = store.splitPane(workspaceKey, {
+      tabId: tabIds[2],
+      targetPaneId: pane1,
+      position: "bottom",
+    })!;
+    const pane3 = store.splitPane(workspaceKey, {
+      tabId: tabIds[3],
+      targetPaneId: pane2,
+      position: "right",
+    })!;
+    const pane4 = store.splitPane(workspaceKey, {
+      tabId: tabIds[4],
+      targetPaneId: pane3,
+      position: "bottom",
+    })!;
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+
+    expect(canSplitWorkspacePane({ layout, paneId: "main", position: "right" })).toBe(true);
+    // Another pane in the same direction joins the existing group and adds no depth.
+    expect(canSplitWorkspacePane({ layout, paneId: pane4, position: "bottom" })).toBe(true);
+    expect(canSplitWorkspacePane({ layout, paneId: pane4, position: "right" })).toBe(false);
+    expect(canSplitWorkspacePane({ layout, paneId: "missing", position: "right" })).toBe(false);
+    expect(
+      workspaceLayoutStore.getState().splitPane(workspaceKey, {
+        tabId: tabIds[4],
+        targetPaneId: pane4,
+        position: "right",
+      }),
+    ).toBeNull();
   });
 
   it("moveTabToPane collapses the source pane when its last tab moves out", () => {

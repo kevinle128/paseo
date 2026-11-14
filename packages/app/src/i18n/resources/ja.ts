@@ -690,6 +690,8 @@ export const ja: TranslationResources = {
         copyTerminalId: "ターミナルIDをコピー",
         copyFilePath: "ファイルパスをコピー",
         rename: "名前を変更",
+        splitPaneRight: "右にペインを分割",
+        splitPaneDown: "下にペインを分割",
         closeAbove: "上のタブを閉じる",
         closeBelow: "下のタブを閉じる",
         closeLeft: "左のタブを閉じる",

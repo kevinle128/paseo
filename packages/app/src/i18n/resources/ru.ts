@@ -691,6 +691,8 @@ export const ru: TranslationResources = {
         copyTerminalId: "Скопировать идентификатор терминала",
         copyFilePath: "Скопировать путь к файлу",
         rename: "Переименовать",
+        splitPaneRight: "Разделить панель справа",
+        splitPaneDown: "Разделить панель вниз",
         closeAbove: "Закрыть вкладки выше",
         closeBelow: "Закрыть вкладки ниже",
         closeLeft: "Закрыть вкладки слева",
