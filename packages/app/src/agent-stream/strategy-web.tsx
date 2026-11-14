@@ -40,8 +40,6 @@ import {
   type HistoryStartSettleScheduler,
 } from "./history-start-settle-scheduler";
 import { useChatFindSelectedMessageId } from "@/agent-stream/chat-find";
-import { useWorkspaceGridCell } from "@/pinned-grid/grid-cell-context";
-import { isUnfocusedGridCell } from "./grid-follow";
 import { useScrollToMessage } from "./use-scroll-to-message.web";
 
 interface CreateWebStreamStrategyInput {
@@ -54,7 +52,6 @@ const WEB_BOTTOM_SETTLE_TIMEOUT_MS = 200;
 const USER_SCROLL_DELTA_EPSILON = 1;
 const BOTTOM_OVERSCROLL_TOLERANCE_PX = 2;
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 64;
-const AUTO_SCROLL_RESUME_THRESHOLD_PX = 1;
 const HISTORY_START_SETTLE_FRAMES = 2;
 const HISTORY_START_SLOT_HEIGHT_PX = 32;
 const CONTENT_PADDING_TOP_PX = 16;
@@ -105,12 +102,6 @@ function isScrollContainerNearBottom(
   }
   const distanceFromBottom = scrollHeight - clientHeight - scrollTop;
   return distanceFromBottom <= threshold;
-}
-
-function isScrollContainerAtBottom(
-  scrollContainer: Pick<HTMLElement, "scrollTop" | "clientHeight" | "scrollHeight">,
-): boolean {
-  return isScrollContainerNearBottom(scrollContainer, AUTO_SCROLL_RESUME_THRESHOLD_PX);
 }
 
 function isScrollContainerMeasurable(
@@ -382,11 +373,8 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     renderLiveAuxiliary,
   } = renderers;
 
-  const alwaysFollowsOutput = isUnfocusedGridCell(useWorkspaceGridCell());
-  const alwaysFollowsOutputRef = useRef(alwaysFollowsOutput);
   isActiveRef.current = isActive;
   followOutputRef.current = followOutput;
-  alwaysFollowsOutputRef.current = alwaysFollowsOutput;
 
   const hasRouteBottomAnchorRequest = routeBottomAnchorRequest !== null;
   const activationKey = routeBottomAnchorRequest?.requestKey ?? props.agentId;
@@ -752,7 +740,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     // A disclosure that closes back to the end of the list rejoins the output.
     if (disclosurePendingRef.current) {
       disclosurePendingRef.current = false;
-      if (isScrollContainerAtBottom(container)) setFollowOutput(true);
+      if (isScrollContainerNearBottom(container)) setFollowOutput(true);
     }
   });
 
@@ -775,21 +763,11 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const stopFollowingOutputFromUserIntent = useStableEvent(() => {
     finishInitialFill();
     cancelPendingStickToBottom();
-    if (followOutputRef.current && !alwaysFollowsOutputRef.current) {
+    if (followOutputRef.current) {
       setFollowOutput(false);
     }
     rearmHistoryStartFromUserIntent();
   });
-
-  // A grid cell that loses focus returns to the newest message and keeps following, whatever the
-  // reader did in it before.
-  useLayoutEffect(() => {
-    if (!alwaysFollowsOutput || !isActive) {
-      return;
-    }
-    setFollowOutput(true);
-    forceStickToBottom();
-  }, [alwaysFollowsOutput, forceStickToBottom, isActive]);
 
   useEffect(() => {
     if (revealInitialHistory) finishInitialFill();
@@ -802,7 +780,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     }
 
     const currentScrollTop = scrollContainer.scrollTop;
-    const isAtBottom = isScrollContainerAtBottom(scrollContainer);
+    const isAtBottom = isScrollContainerNearBottom(scrollContainer);
     const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - USER_SCROLL_DELTA_EPSILON;
     const scrolledDown =
       currentScrollTop > lastKnownScrollTopRef.current + USER_SCROLL_DELTA_EPSILON;

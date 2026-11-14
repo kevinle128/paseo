@@ -64,7 +64,7 @@ In a grid cell the composer never takes focus on its own and never restores it, 
 
 Escape in a cell composer leaves it: the first press moves focus to the cell frame and collapses the composer when it has no draft or attachment, and the second press interrupts the agent. With the autocomplete list open, Escape only closes the list.
 
-An unfocused cell always follows the newest message and hides the scroll-to-bottom button, whatever the scroll position was. The focused cell keeps normal follow behavior.
+Every cell follows the newest message until the reader scrolls up, focused or not. Scrolling up stops following and shows the scroll-to-bottom button. Losing focus, pointer leave and showing a hidden cell again keep that position. Scrolling back within the button's hide distance (64 px) or pressing the button resumes following (`packages/app/src/agent-stream/strategy-web.tsx`).
 
 ## Order
 

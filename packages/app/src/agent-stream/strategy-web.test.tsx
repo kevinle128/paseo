@@ -1180,6 +1180,109 @@ describe("createWebStreamStrategy", () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 
+  it("resumes follow-output when the reader returns within the scroll-to-bottom distance", async () => {
+    const scrollTo = vi.fn(function (
+      this: HTMLElement,
+      options?: ScrollToOptions | number,
+      y?: number,
+    ) {
+      const top = typeof options === "object" ? (options.top ?? 0) : (y ?? 0);
+      this.scrollTop = top;
+    });
+    HTMLElement.prototype.scrollTo = scrollTo;
+
+    const strategy = createWebStreamStrategy({ isMobileBreakpoint: true });
+    const viewportRef = React.createRef<StreamViewportHandle>();
+    const renderInput = {
+      agentId: "agent",
+      segments: {
+        historyVirtualized: [],
+        historyMounted: [userMessage(1), userMessage(2)],
+        liveHead: [],
+      },
+      boundary: {
+        hasVirtualizedHistory: false,
+        hasMountedHistory: true,
+        hasLiveHead: false,
+      },
+      renderers: createRenderers(vi.fn()),
+      listEmptyComponent: null,
+      viewportRef,
+      routeBottomAnchorRequest: null,
+      onNearBottomChange: vi.fn(),
+      onNearHistoryStart: vi.fn().mockReturnValue(true),
+      isLoadingOlderHistory: false,
+      hasOlderHistory: false,
+      olderHistoryProgressKey: null,
+      scrollEnabled: true,
+      listStyle: null,
+      baseListContentContainerStyle: null,
+      forwardListContentContainerStyle: null,
+      contentMaxWidth: DEFAULT_CONTENT_MAX_WIDTH,
+    };
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        strategy.render({
+          ...renderInput,
+          isAuthoritativeHistoryReady: true,
+        }),
+      );
+    });
+
+    const scrollContainer = container.querySelector('[data-testid="agent-chat-scroll"]');
+    if (!(scrollContainer instanceof HTMLElement)) {
+      throw new Error("Expected agent chat scroll container");
+    }
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 500 });
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 1500 });
+    scrollContainer.scrollTop = 1000;
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    act(() => {
+      scrollContainer.dispatchEvent(new Event("scroll"));
+    });
+    scrollTo.mockClear();
+
+    act(() => {
+      scrollContainer.dispatchEvent(new WheelEvent("wheel", { deltaY: -300 }));
+    });
+    scrollContainer.scrollTop = 500;
+    act(() => {
+      scrollContainer.dispatchEvent(new Event("scroll"));
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    // 40 px above the end: inside the 64 px distance that hides the scroll-to-bottom button.
+    scrollContainer.scrollTop = 960;
+    act(() => {
+      scrollContainer.dispatchEvent(new Event("scroll"));
+    });
+    scrollTo.mockClear();
+
+    act(() => {
+      root?.render(
+        strategy.render({
+          ...renderInput,
+          segments: {
+            ...renderInput.segments,
+            liveHead: [userMessage(3)],
+          },
+          isAuthoritativeHistoryReady: true,
+        }),
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
   it("keeps following output after geometry, nested-scroll, and zoom wheel events", () => {
     const scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number) {
       const top = typeof options === "object" ? (options.top ?? 0) : 0;
