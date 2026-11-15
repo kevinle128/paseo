@@ -810,6 +810,28 @@ function toBase64ImageOutput(block: unknown): ProviderImageOutput | null {
 // reach coerceToolResultContentToString, which JSON.stringifies the whole array — dumping base64
 // into the tool output. We pull those blocks out to render them as image markdown and leave a
 // "[image]" placeholder so image-only results still produce non-empty output.
+function buildClaudeWarningEvent(message: string): AgentStreamEvent {
+  return {
+    type: "timeline",
+    provider: "claude",
+    item: { type: "notification", level: "warning", message },
+  };
+}
+
+// The advisor usually answers with advisor_redacted_result, an encrypted payload only the model
+// can read, so only a plain advisor_result carries text worth showing. An advisor error, such as
+// prompt_too_long, arrives as content rather than as is_error.
+function normalizeAdvisorToolResult(block: ClaudeContentChunk): ClaudeContentChunk {
+  const content = toObjectRecord(block.content);
+  if (content?.type === "advisor_tool_result_error") {
+    const code = typeof content.error_code === "string" ? content.error_code : "unknown";
+    return { ...block, is_error: true, content: `Advisor failed: ${code}` };
+  }
+  const text =
+    content?.type === "advisor_result" && typeof content.text === "string" ? content.text : "";
+  return { ...block, content: text };
+}
+
 function splitClaudeToolResultImages(content: unknown): {
   images: ProviderImageOutput[];
   text: unknown;
@@ -1241,7 +1263,17 @@ interface TimelineMessageState {
   reasoningText: string;
   emittedAssistantLength: number;
   emittedReasoningLength: number;
+  /** True once a stream delta arrived for this message. */
+  streamed: boolean;
   stopped: boolean;
+}
+
+function isStreamedTail(
+  state: TimelineMessageState,
+  streamedText: string,
+  snapshotText: string,
+): boolean {
+  return state.streamed && streamedText.endsWith(snapshotText);
 }
 
 class TimelineAssembler {
@@ -1354,6 +1386,7 @@ class TimelineAssembler {
     state: TimelineMessageState,
     fragments: TimelineFragment[],
   ): AgentTimelineItem[] {
+    state.streamed = true;
     for (const fragment of fragments) {
       if (fragment.kind === "assistant") {
         state.assistantText += fragment.text;
@@ -1377,13 +1410,18 @@ class TimelineAssembler {
       .map((fragment) => fragment.text)
       .join("");
 
-    if (assistantText.length > 0) {
+    // With partial messages on, Claude Code sends one assistant snapshot per finished content
+    // block, holding only that block. In a message with two text or thinking blocks (around a
+    // server tool call such as the advisor) the second snapshot does not extend the streamed
+    // text, and treating it as a rewrite emitted it twice. A snapshot that the streamed text
+    // already ends with is a confirmation; any other snapshot still repairs a lost delta.
+    if (assistantText.length > 0 && !isStreamedTail(state, state.assistantText, assistantText)) {
       if (!assistantText.startsWith(state.assistantText)) {
         state.emittedAssistantLength = 0;
       }
       state.assistantText = assistantText;
     }
-    if (reasoningText.length > 0) {
+    if (reasoningText.length > 0 && !isStreamedTail(state, state.reasoningText, reasoningText)) {
       if (!reasoningText.startsWith(state.reasoningText)) {
         state.emittedReasoningLength = 0;
       }
@@ -1442,6 +1480,7 @@ class TimelineAssembler {
       reasoningText: "",
       emittedAssistantLength: 0,
       emittedReasoningLength: 0,
+      streamed: false,
       stopped: false,
     };
     this.messages.set(messageId, created);
@@ -2326,6 +2365,11 @@ class ClaudeAgentSession implements AgentSession {
   private planResumeMode: PermissionMode | null = null;
   private availableModes: AgentMode[] = DEFAULT_MODES;
   private toolUseCache = new Map<string, ToolUseCacheEntry>();
+  /**
+   * Server tool results (advisor, web search, code execution) sit in the assistant message, so
+   * with partial messages each one arrives in the stream and again in the block's snapshot.
+   */
+  private readonly settledServerToolResultIds = new Set<string>();
   private toolUseIndexToId = new Map<number, string>();
   private toolUseInputBuffers = new Map<string, string>();
   private subagentHandbackIds = new Set<string>();
@@ -4889,24 +4933,11 @@ class ClaudeAgentSession implements AgentSession {
           availableModes: this.availableModes,
         });
       }
-      const status = toObjectRecord(message)?.status;
-      if (status === "compacting") {
-        this.compacting = true;
-        // Claude Code repeats this status every 30 seconds until the compaction
-        // finishes. Each repeat used to open its own marker, and the app only ever
-        // resolves one of them, so the rest stayed on "Compacting..." forever.
-        if (!this.compactionMarkerOpen) {
-          this.compactionMarkerOpen = true;
-          events.push({
-            type: "timeline",
-            item: { type: "compaction", status: "loading" },
-            provider: "claude",
-          });
-        }
-      }
+      this.appendCompactionStatusEvents(message, events);
       return;
     }
     if (message.subtype === "compact_boundary") {
+      this.compacting = false;
       this.compactionMarkerOpen = false;
       const compactMetadata = readCompactionMetadata(message);
       events.push({
@@ -4935,6 +4966,61 @@ class ClaudeAgentSession implements AgentSession {
     }
     if (message.subtype === "task_progress") {
       return;
+    }
+    if (message.subtype === "api_retry") {
+      // A retrying request keeps the turn open with no other output, so without this the turn
+      // looks hung.
+      const status = message.error_status ? ` ${message.error_status}` : "";
+      events.push(
+        buildClaudeWarningEvent(
+          `Claude API request failed (${message.error}${status}). Retry ${message.attempt} of ${message.max_retries}.`,
+        ),
+      );
+    }
+  }
+
+  /**
+   * A compaction and its server tool results never outlive the turn. An interrupt during a
+   * compaction sends no compact_result, and a left-over compacting flag refuses every later steer.
+   */
+  private resetTurnStreamState(): void {
+    this.compacting = false;
+    this.compactionMarkerOpen = false;
+    this.settledServerToolResultIds.clear();
+  }
+
+  private appendCompactionStatusEvents(
+    message: Extract<SDKMessage, { type: "system"; subtype: "status" }>,
+    events: AgentStreamEvent[],
+  ): void {
+    // Claude Code ends every compaction attempt with compact_result. A failed attempt sends
+    // no compact_boundary, and an auto-compaction can fail and continue the same turn.
+    if (message.compact_result) {
+      this.compacting = false;
+      this.compactionMarkerOpen = false;
+      if (message.compact_result === "failed") {
+        const reason = message.compact_error ? ` (${message.compact_error})` : "";
+        events.push(
+          buildClaudeWarningEvent(
+            `Claude could not compact the context${reason}. It continues without compacting.`,
+          ),
+        );
+      }
+    }
+    if (message.status !== "compacting") {
+      return;
+    }
+    this.compacting = true;
+    // Claude Code repeats this status every 30 seconds until the compaction
+    // finishes. Each repeat used to open its own marker, and the app only ever
+    // resolves one of them, so the rest stayed on "Compacting..." forever.
+    if (!this.compactionMarkerOpen) {
+      this.compactionMarkerOpen = true;
+      events.push({
+        type: "timeline",
+        item: { type: "compaction", status: "loading" },
+        provider: "claude",
+      });
     }
   }
 
@@ -4977,10 +5063,6 @@ class ClaudeAgentSession implements AgentSession {
     events: AgentStreamEvent[],
   ): Promise<void> {
     if (isSyntheticUserEntry(message)) {
-      return;
-    }
-    if (this.compacting) {
-      this.compacting = false;
       return;
     }
     const messageId =
@@ -5083,6 +5165,7 @@ class ClaudeAgentSession implements AgentSession {
     message: Extract<SDKMessage, { type: "result" }>,
     events: AgentStreamEvent[],
   ): void {
+    this.resetTurnStreamState();
     const usage = this.convertUsage(message);
     // Claude Code reports a turn that stopped on an API error (a usage limit, an overloaded or
     // rejected request) as `success` with `is_error`, carrying the error text in `result`.
@@ -5414,6 +5497,7 @@ class ClaudeAgentSession implements AgentSession {
       }
     }
     this.toolUseCache.clear();
+    this.resetTurnStreamState();
     this.sidechainTracker.clear();
     // The task protocol's routing table is session-scoped, so it is deliberately NOT reset here:
     // the turn ended, the session did not. Wiping it would strand every task id the session still
@@ -5824,13 +5908,18 @@ class ClaudeAgentSession implements AgentSession {
         this.handleToolUseStart(block, context.items);
         break;
       case "tool_result":
+        await this.handleToolResult(block, context.items);
+        break;
+      case "advisor_tool_result":
+        await this.handleServerToolResult(normalizeAdvisorToolResult(block), context.items);
+        break;
       case "mcp_tool_result":
       case "web_fetch_tool_result":
       case "web_search_tool_result":
       case "code_execution_tool_result":
       case "bash_code_execution_tool_result":
       case "text_editor_code_execution_tool_result":
-        await this.handleToolResult(block, context.items);
+        await this.handleServerToolResult(block, context.items);
         break;
       default:
         break;
@@ -5923,6 +6012,18 @@ class ClaudeAgentSession implements AgentSession {
     if (typeof block.tool_use_id === "string") {
       this.toolUseCache.delete(block.tool_use_id);
     }
+  }
+
+  private async handleServerToolResult(
+    block: ClaudeContentChunk,
+    items: AgentTimelineItem[],
+  ): Promise<void> {
+    const id = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
+    if (id && !this.toolUseCache.has(id) && this.settledServerToolResultIds.has(id)) {
+      return;
+    }
+    if (id) this.settledServerToolResultIds.add(id);
+    await this.handleToolResult(block, items);
   }
 
   private rememberSettledSubagentToolCall(

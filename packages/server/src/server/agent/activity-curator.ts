@@ -9,6 +9,7 @@ import { projectTimelineRows, selectItemsByProjectedLimit } from "./timeline-pro
 
 const DEFAULT_MAX_ITEMS = 0;
 const MAX_TOOL_INPUT_CHARS = 400;
+const NOTIFICATION_LABELS = { info: "Info", warning: "Warning", error: "Error" } as const;
 const MAX_TOOL_SUMMARY_CHARS = 200;
 const MAX_FORK_CONTEXT_CHARS = 100_000;
 const MAX_FORK_METADATA_CHARS = 1_000;
@@ -183,8 +184,12 @@ function curateProjectedActivityEntries(
       case "error":
         entries.push(activityEntry(`[Error] ${item.message}`));
         break;
+      case "notification":
+        entries.push(activityEntry(`[${NOTIFICATION_LABELS[item.level]}] ${item.message}`));
+        break;
       case "compaction":
-        entries.push(activityEntry("[Compacted]"));
+        // A loading marker only says compaction started. Claude can fail it and go on.
+        entries.push(activityEntry(item.status === "loading" ? "[Compacting]" : "[Compacted]"));
         break;
     }
   }
