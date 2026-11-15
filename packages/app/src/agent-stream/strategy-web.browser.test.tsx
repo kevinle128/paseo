@@ -382,5 +382,3 @@ describe("web history start", () => {
     expect(olderHistoryLoads).toBe(1);
   });
 });
-  });
-});
