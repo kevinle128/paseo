@@ -2363,3 +2363,19 @@ test("shows each Claude API retry as a warning", async () => {
 
   await session.close();
 });
+
+test("a turn that ends during a compaction leaves later steers open", async () => {
+  // An interrupt during a compaction ends the turn with no compact_result.
+  mockScriptedQuery([
+    { type: "system", subtype: "status", status: "compacting", session_id: "sess-1" },
+    successResult(),
+  ]);
+
+  const session = await createSession();
+  await collectUntilTerminal(streamSession(session, "scripted prompt"));
+
+  const internal: { compacting: boolean; compactionMarkerOpen: boolean } = asInternals(session);
+  expect(internal).toMatchObject({ compacting: false, compactionMarkerOpen: false });
+
+  await session.close();
+});

@@ -1268,6 +1268,14 @@ interface TimelineMessageState {
   stopped: boolean;
 }
 
+function isStreamedTail(
+  state: TimelineMessageState,
+  streamedText: string,
+  snapshotText: string,
+): boolean {
+  return state.streamed && streamedText.endsWith(snapshotText);
+}
+
 class TimelineAssembler {
   private readonly messages = new Map<string, TimelineMessageState>();
   private readonly finalizedMessageIds = new Set<string>();
@@ -1393,13 +1401,6 @@ class TimelineAssembler {
     state: TimelineMessageState,
     fragments: TimelineFragment[],
   ): AgentTimelineItem[] {
-    // With partial messages on, Claude Code sends one assistant snapshot per finished content
-    // block, holding only that block. The deltas already carried its text, and a message with two
-    // text or thinking blocks (around a server tool call such as the advisor) has a second
-    // snapshot that does not extend the streamed text. Treating it as a rewrite emitted it twice.
-    if (state.streamed) {
-      return [];
-    }
     const assistantText = fragments
       .filter((fragment) => fragment.kind === "assistant")
       .map((fragment) => fragment.text)
@@ -1409,13 +1410,18 @@ class TimelineAssembler {
       .map((fragment) => fragment.text)
       .join("");
 
-    if (assistantText.length > 0) {
+    // With partial messages on, Claude Code sends one assistant snapshot per finished content
+    // block, holding only that block. In a message with two text or thinking blocks (around a
+    // server tool call such as the advisor) the second snapshot does not extend the streamed
+    // text, and treating it as a rewrite emitted it twice. A snapshot that the streamed text
+    // already ends with is a confirmation; any other snapshot still repairs a lost delta.
+    if (assistantText.length > 0 && !isStreamedTail(state, state.assistantText, assistantText)) {
       if (!assistantText.startsWith(state.assistantText)) {
         state.emittedAssistantLength = 0;
       }
       state.assistantText = assistantText;
     }
-    if (reasoningText.length > 0) {
+    if (reasoningText.length > 0 && !isStreamedTail(state, state.reasoningText, reasoningText)) {
       if (!reasoningText.startsWith(state.reasoningText)) {
         state.emittedReasoningLength = 0;
       }
@@ -4973,6 +4979,16 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
+  /**
+   * A compaction and its server tool results never outlive the turn. An interrupt during a
+   * compaction sends no compact_result, and a left-over compacting flag refuses every later steer.
+   */
+  private resetTurnStreamState(): void {
+    this.compacting = false;
+    this.compactionMarkerOpen = false;
+    this.settledServerToolResultIds.clear();
+  }
+
   private appendCompactionStatusEvents(
     message: Extract<SDKMessage, { type: "system"; subtype: "status" }>,
     events: AgentStreamEvent[],
@@ -5149,6 +5165,7 @@ class ClaudeAgentSession implements AgentSession {
     message: Extract<SDKMessage, { type: "result" }>,
     events: AgentStreamEvent[],
   ): void {
+    this.resetTurnStreamState();
     const usage = this.convertUsage(message);
     // Claude Code reports a turn that stopped on an API error (a usage limit, an overloaded or
     // rejected request) as `success` with `is_error`, carrying the error text in `result`.
@@ -5480,7 +5497,7 @@ class ClaudeAgentSession implements AgentSession {
       }
     }
     this.toolUseCache.clear();
-    this.settledServerToolResultIds.clear();
+    this.resetTurnStreamState();
     this.sidechainTracker.clear();
     // The task protocol's routing table is session-scoped, so it is deliberately NOT reset here:
     // the turn ended, the session did not. Wiping it would strand every task id the session still
