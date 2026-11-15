@@ -1235,6 +1235,99 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
     expect(timeline[0]).toMatchObject({ id: TOOL_USE_ID });
   });
 
+  describe("a subagent's advisor call", () => {
+    const ADVISOR_ID = "srvtoolu_01TP2rchgAyaMoX5pXRWZKHP";
+
+    // Claude Code writes one record per content block, so the call and its result are two
+    // assistant records that share a message id.
+    function advisorRecord(block: unknown): string {
+      return JSON.stringify({
+        type: "assistant",
+        isSidechain: true,
+        agentId: AGENT_ID,
+        sessionId: "replay-session",
+        timestamp: "2026-07-26T06:27:49.000Z",
+        message: { id: "msg_011CgxrVJocGWMAwjbJCq4E7", role: "assistant", content: [block] },
+      });
+    }
+    const advisorCall = advisorRecord({
+      type: "server_tool_use",
+      id: ADVISOR_ID,
+      name: "advisor",
+      input: {},
+    });
+    const advisorResult = advisorRecord({
+      type: "advisor_tool_result",
+      tool_use_id: ADVISOR_ID,
+      content: { type: "advisor_redacted_result", encrypted_content: "opaque" },
+    });
+
+    /** Replays, then closes with a subscriber attached, as an idle runtime collection does. */
+    async function replayThenClose(): Promise<{
+      history: AgentStreamEvent[];
+      closing: AgentStreamEvent[];
+    }> {
+      const session = await new ClaudeAgentClient({
+        logger,
+        queryFactory,
+        resolveVersion: async () => "2.1.220",
+      }).resumeSession({ provider: "claude", sessionId: "replay-session" }, { cwd });
+      const history: AgentStreamEvent[] = [];
+      for await (const event of session.streamHistory()) history.push(event);
+      const closing: AgentStreamEvent[] = [];
+      session.subscribe((event) => closing.push(event));
+      await session.close();
+      return { history, closing };
+    }
+
+    function parentCallIds(events: AgentStreamEvent[]): string[] {
+      return events.flatMap((event) =>
+        event.type === "timeline" && event.item.type === "tool_call" ? [event.item.callId] : [],
+      );
+    }
+
+    function subagentAdvisorRows(events: AgentStreamEvent[]) {
+      return events.flatMap((event) =>
+        event.type === "provider_subagent" &&
+        event.event.type === "timeline" &&
+        event.event.item.type === "tool_call" &&
+        event.event.item.callId === ADVISOR_ID
+          ? [{ id: event.event.id, status: event.event.item.status }]
+          : [],
+      );
+    }
+
+    test("stays off the parent timeline when its result was never written", async () => {
+      writeSession({
+        parentLines: [taskToolUse(), taskToolResult()],
+        meta: JSON.stringify({ toolUseId: TOOL_USE_ID }),
+        sidechainLines: [advisorCall],
+      });
+
+      const { history, closing } = await replayThenClose();
+
+      expect(subagentAdvisorRows(history)).toEqual([{ id: TOOL_USE_ID, status: "running" }]);
+      expect(parentCallIds(history)).not.toContain(ADVISOR_ID);
+      expect(parentCallIds(closing)).not.toContain(ADVISOR_ID);
+    });
+
+    test("settles on the subagent timeline and stays off the parent timeline", async () => {
+      writeSession({
+        parentLines: [taskToolUse(), taskToolResult()],
+        meta: JSON.stringify({ toolUseId: TOOL_USE_ID }),
+        sidechainLines: [advisorCall, advisorResult],
+      });
+
+      const { history, closing } = await replayThenClose();
+
+      expect(subagentAdvisorRows(history)).toEqual([
+        { id: TOOL_USE_ID, status: "running" },
+        { id: TOOL_USE_ID, status: "completed" },
+      ]);
+      expect(parentCallIds([...history, ...closing])).not.toContain(ADVISOR_ID);
+    });
+  });
+
   test("replays a SubagentHandback report as the subagent's final message", async () => {
     const handbackId = "toolu_handback";
     const report = "## Verdict\n\n- **Coherent**";
