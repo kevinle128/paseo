@@ -382,3 +382,22 @@ describe("web history start", () => {
     expect(olderHistoryLoads).toBe(1);
   });
 });
+
+describe("web virtualized history measurement", () => {
+  it("settles a long jump into rows far shorter than their estimate without a nested update loop", async () => {
+    // Each corrective pass mounts the rows above the reader at their estimate. When the real rows
+    // are much shorter, measuring them moves the reader up into more estimated rows.
+    const history = Array.from({ length: 4000 }, (_, index) =>
+      row(index, index % 50 === 0 ? 40 : 0),
+    );
+    const timeline = mountTimeline([row(5000)]);
+    timeline.render({ historyVirtualized: history });
+    await timeline.settle();
+
+    // The failure is React's "Maximum update depth exceeded", which act rethrows here.
+    timeline.wheelUpTo(timeline.scrollTop() / 2);
+    await timeline.settle();
+
+    expect(host.querySelector("[data-history-row-id]")).not.toBeNull();
+  });
+});

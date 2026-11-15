@@ -57,6 +57,8 @@ const HISTORY_START_SLOT_HEIGHT_PX = 32;
 const CONTENT_PADDING_TOP_PX = 16;
 const UPWARD_INPUT_EVIDENCE_TIMEOUT_MS = 100;
 const VIRTUALIZER_SCROLL_MARGIN_PX = HISTORY_START_SLOT_HEIGHT_PX + CONTENT_PADDING_TOP_PX;
+// React stops after 50 nested commits per root, and grid cells share one root.
+const MAX_LAYOUT_PASSES_PER_FRAME = 8;
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -755,21 +757,49 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     }
   });
 
+  const applyLayoutPass = useStableEvent(() => {
+    // Commit positions for every resized row before accepting reading geometry.
+    // Child layout can change during this commit, ahead of ResizeObserver delivery.
+    if (!isActiveRef.current || measureVirtualizedRows()) return;
+    reconcileReadingPosition();
+  });
+
+  // Each pass can mount rows at their estimate and measure them in the next commit. Rows much
+  // shorter than their estimate move the reader into more estimated rows, so the passes can chain
+  // past React's nested update limit. After a few passes the rest continues in the next frame.
+  const layoutPassFrame = useRef<{ id: number; passes: number; deferred: boolean } | null>(null);
+  const runLayoutPass = useStableEvent(() => {
+    let frame = layoutPassFrame.current;
+    if (!frame) {
+      frame = { id: 0, passes: 0, deferred: false };
+      frame.id = window.requestAnimationFrame(() => {
+        layoutPassFrame.current = null;
+        // Finish before this frame paints, as the ResizeObserver path does.
+        if (frame?.deferred) flushSync(runLayoutPass);
+      });
+      layoutPassFrame.current = frame;
+    }
+    if (frame.passes >= MAX_LAYOUT_PASSES_PER_FRAME) {
+      frame.deferred = true;
+      return;
+    }
+    frame.passes += 1;
+    applyLayoutPass();
+  });
+  useEffect(
+    () => () => {
+      if (layoutPassFrame.current) window.cancelAnimationFrame(layoutPassFrame.current.id);
+      layoutPassFrame.current = null;
+    },
+    [],
+  );
+
   // Apply row positions and their scroll correction in the same paint, including
   // the ordinary-to-virtualized handoff and measurements of newly mounted rows.
   useLayoutEffect(() => {
-    // Commit positions for every resized row before accepting reading geometry.
-    // Child layout can change during this commit, ahead of ResizeObserver delivery.
-    if (!isActive || measureVirtualizedRows()) return;
-    reconcileReadingPosition();
-  }, [
-    contentWidth,
-    isActive,
-    segments,
-    virtualRows,
-    measureVirtualizedRows,
-    reconcileReadingPosition,
-  ]);
+    if (!isActive) return;
+    runLayoutPass();
+  }, [contentWidth, isActive, segments, virtualRows, runLayoutPass]);
 
   const stopFollowingOutputFromUserIntent = useStableEvent(() => {
     finishInitialFill();
