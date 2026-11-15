@@ -1,6 +1,7 @@
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
 
 import type { DaemonConfigStore } from "../daemon-config-store.js";
+import { buildSkillCatalog, type SkillCatalogEntry } from "./internal/catalog.js";
 import {
   createSkillsController,
   type SkillsController,
@@ -23,6 +24,8 @@ export interface OrchestrationSkills {
     selection: AgentSkillSelection;
   }>;
   autoUpdate(): Promise<SkillsSnapshot>;
+  /** The bundled catalog with descriptions and host selection state, for read-only listing. */
+  listCatalog(): Promise<SkillCatalogEntry[]>;
 }
 
 export function createOrchestrationSkills(
@@ -41,7 +44,17 @@ export function createOrchestrationSkills(
       controller.save({ ...selection, confirmedRemovals }),
     importLegacySelectionIfUnset: (selection) => controller.importLegacySelectionIfUnset(selection),
     autoUpdate: () => controller.autoUpdate(),
+    listCatalog: async () => {
+      const snapshot = await controller.status();
+      return buildSkillCatalog({
+        sourceDir: resolveTargets().sourceDir,
+        available: snapshot.available,
+        installed: snapshot.installed,
+        selection: snapshot.selection,
+      });
+    },
   };
 }
 
+export type { SkillCatalogEntry } from "./internal/catalog.js";
 export type { SkillsSaveResult, SkillsSnapshot } from "./internal/controller.js";

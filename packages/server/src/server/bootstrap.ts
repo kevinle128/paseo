@@ -1535,6 +1535,7 @@ export async function createPaseoDaemon(
   const createAgentToolHostDependencies = (
     runtime: PaseoToolRuntimeContext,
   ): PaseoToolHostDependencies => ({
+    orchestrationSkills,
     finishSubscriptions: () => finishSubscriptions,
     agentMessages: () => {
       if (!wsServer) throw new Error("Daemon is not accepting agent messages");

@@ -102,14 +102,17 @@ export async function waitForAgentWithTimeout(
   options?: {
     signal?: AbortSignal;
     waitForActive?: boolean;
+    /** Defaults to AGENT_WAIT_TIMEOUT_MS. */
+    timeoutMs?: number;
   },
 ): Promise<AgentWaitWithTimeoutResult> {
+  const timeoutMs = options?.timeoutMs ?? AGENT_WAIT_TIMEOUT_MS;
   const timeoutController = new AbortController();
   const combinedController = new AbortController();
 
   const timeoutId = setTimeout(() => {
     timeoutController.abort(new Error("wait timeout"));
-  }, AGENT_WAIT_TIMEOUT_MS);
+  }, timeoutMs);
 
   const forwardAbort = (reason: unknown) => {
     if (!combinedController.signal.aborted) {
@@ -149,7 +152,7 @@ export async function waitForAgentWithTimeout(
         limit: 5,
       });
       const recentActivity = curateAgentActivity(recent.items);
-      const waitedSeconds = Math.round(AGENT_WAIT_TIMEOUT_MS / 1000);
+      const waitedSeconds = Math.round(timeoutMs / 1000);
       const message = `Awaiting the agent timed out after ${waitedSeconds}s. This does not mean the agent failed - it is still running. Call get_agent_status to check on it, or continue with other work if you will receive a finish notification.\n\nRecent activity:\n${recentActivity}`;
       return {
         status: snapshot?.lifecycle ?? "idle",
