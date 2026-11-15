@@ -5665,29 +5665,44 @@ class ClaudeAgentSession implements AgentSession {
   ): Promise<ClaudeReplayOwnership> {
     const parentFacts = await readClaudeReplayParentFacts(history.parentEntries);
 
-    // Replay produces the same observations the live task protocol produces, then folds them
-    // with the same function, so identity and status are derived once for both paths.
-    const subagents = [];
-    for (const subagent of history.subagents) {
-      subagents.push({
-        ...subagent,
-        parentFacts: await readClaudeReplayParentFacts(subagent.entries),
+    // Child entries go through the same block mapper as the parent, and that mapper keeps
+    // per-call state for the parent's turn. A child call with no result in its transcript, such
+    // as an advisor call cut off by an interrupt, would stay in that state, and the next flush
+    // (close, interrupt, failed turn) would emit it as a canceled call in the parent's timeline.
+    const sidechainCallIds = new Set<string>();
+    const convertSidechainEntry = (entry: ClaudeHistoryEntry) => {
+      collectClaudeHistoryCallIds(entry, sidechainCallIds);
+      return this.convertHistoryEntry(entry);
+    };
+    let subagentReplay: Awaited<ReturnType<typeof observeReplaySubagents>>;
+    let observations: SubagentObservation[];
+    try {
+      // Replay produces the same observations the live task protocol produces, then folds them
+      // with the same function, so identity and status are derived once for both paths.
+      const subagents = [];
+      for (const subagent of history.subagents) {
+        subagents.push({
+          ...subagent,
+          parentFacts: await readClaudeReplayParentFacts(subagent.entries),
+        });
+      }
+      subagentReplay = await observeReplaySubagents({
+        subagents,
+        parent: parentFacts,
+        convertEntry: convertSidechainEntry,
       });
+      observations = [
+        ...subagentReplay.observations,
+        ...(await observeReplayWorkflows({
+          workflows: history.workflows,
+          parentEntries: history.parentEntries,
+          entriesByRunId: history.workflowEntriesByRunId,
+          convertEntry: convertSidechainEntry,
+        })),
+      ];
+    } finally {
+      this.forgetSidechainCallState(sidechainCallIds);
     }
-    const subagentReplay = await observeReplaySubagents({
-      subagents,
-      parent: parentFacts,
-      convertEntry: (entry) => this.convertHistoryEntry(entry),
-    });
-    const observations = [
-      ...subagentReplay.observations,
-      ...(await observeReplayWorkflows({
-        workflows: history.workflows,
-        parentEntries: history.parentEntries,
-        entriesByRunId: history.workflowEntriesByRunId,
-        convertEntry: (entry) => this.convertHistoryEntry(entry),
-      })),
-    ];
     this.taskProtocolSource.restore(subagentReplay.restored);
     const restoredProviderSubagentIds = new Set(
       observations
@@ -5710,6 +5725,15 @@ class ClaudeAgentSession implements AgentSession {
     }
     this.historyPending = true;
     return replay;
+  }
+
+  /** Call ids are unique per session, so dropping these leaves the parent's own calls intact. */
+  private forgetSidechainCallState(callIds: ReadonlySet<string>): void {
+    for (const id of callIds) {
+      this.toolUseCache.delete(id);
+      this.settledServerToolResultIds.delete(id);
+      this.subagentHandbackIds.delete(id);
+    }
   }
 
   private async ingestPersistedHistoryEntry(
@@ -6492,6 +6516,17 @@ function hasToolLikeBlock(block?: ClaudeContentChunk | null): boolean {
   }
   const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
   return type.includes("tool");
+}
+
+/** Ids of the calls an entry starts and of the calls its results settle. */
+function collectClaudeHistoryCallIds(entry: ClaudeHistoryEntry, ids: Set<string>): void {
+  const content = entry.message?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content) {
+    if (!isClaudeContentChunk(block)) continue;
+    if (typeof block.id === "string" && hasToolLikeBlock(block)) ids.add(block.id);
+    if (typeof block.tool_use_id === "string") ids.add(block.tool_use_id);
+  }
 }
 
 function readCompactionMetadata(
