@@ -319,6 +319,8 @@ second line'`,
         ],
       },
       { type: "error", message: "boom" },
+      { type: "compaction", status: "loading" },
+      { type: "notification", level: "warning", message: "Retry 2 of 10." },
       { type: "compaction", status: "completed", trigger: "auto" },
     ];
 
@@ -328,6 +330,8 @@ second line'`,
     expect(result).toContain("- [ ] One");
     expect(result).toContain("- [x] Two");
     expect(result).toContain("[Error] boom");
+    expect(result).toContain("[Compacting]");
+    expect(result).toContain("[Warning] Retry 2 of 10.");
     expect(result).toContain("[Compacted]");
   });
 

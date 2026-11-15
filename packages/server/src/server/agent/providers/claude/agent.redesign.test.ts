@@ -2070,3 +2070,296 @@ test("does not use stream_event uuid as assistant message identity when message_
 
   await session.close();
 });
+
+/** A query that echoes the prompt and then replays the given SDK frames in order. */
+function mockScriptedQuery(frames: Record<string, unknown>[]): void {
+  sdkQueryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    const readPromptUuid = createPromptUuidReader(prompt);
+    let step = -2;
+    return createBaseQueryMock(
+      vi.fn(async () => {
+        step += 1;
+        if (step === -1) return { done: false, value: claudeTurnInit() };
+        if (step === 0) {
+          return {
+            done: false,
+            value: {
+              type: "user",
+              message: { role: "user", content: "scripted prompt" },
+              parent_tool_use_id: null,
+              uuid: (await readPromptUuid()) ?? "missing-prompt-uuid",
+              session_id: "sess-1",
+            },
+          };
+        }
+        const frame = frames[step - 1];
+        return frame ? { done: false, value: frame } : { done: true, value: undefined };
+      }),
+    );
+  });
+}
+
+function timelineItems(events: AgentStreamEvent[]): AgentTimelineItem[] {
+  return events.flatMap((event) => (event.type === "timeline" ? [event.item] : []));
+}
+
+function toolCallsById(
+  items: AgentTimelineItem[],
+): Map<string, Extract<AgentTimelineItem, { type: "tool_call" }>> {
+  const calls = new Map<string, Extract<AgentTimelineItem, { type: "tool_call" }>>();
+  for (const item of items) {
+    if (item.type === "tool_call") calls.set(item.callId, item);
+  }
+  return calls;
+}
+
+function streamFrame(event: Record<string, unknown>) {
+  return { type: "stream_event", parent_tool_use_id: null, session_id: "sess-1", event };
+}
+
+/** Claude Code sends one assistant snapshot per finished block, holding only that block. */
+function blockSnapshot(messageId: string, block: Record<string, unknown>) {
+  return {
+    type: "assistant",
+    parent_tool_use_id: null,
+    session_id: "sess-1",
+    message: { id: messageId, role: "assistant", model: "opus", content: [block] },
+  };
+}
+
+function streamedBlock(input: {
+  messageId: string;
+  index: number;
+  start: Record<string, unknown>;
+  delta?: Record<string, unknown>;
+  final: Record<string, unknown>;
+}) {
+  return [
+    streamFrame({ type: "content_block_start", index: input.index, content_block: input.start }),
+    ...(input.delta
+      ? [streamFrame({ type: "content_block_delta", index: input.index, delta: input.delta })]
+      : []),
+    blockSnapshot(input.messageId, input.final),
+    streamFrame({ type: "content_block_stop", index: input.index }),
+  ];
+}
+
+test("streams each block of a message with two thinking and two text blocks once", async () => {
+  const id = "msg-advisor";
+  const advisorResult = {
+    type: "advisor_tool_result",
+    tool_use_id: "srvtoolu_advisor",
+    content: { type: "advisor_redacted_result", encrypted_content: "ENCRYPTED" },
+  };
+  mockScriptedQuery([
+    streamFrame({ type: "message_start", message: { id, role: "assistant", model: "opus" } }),
+    ...streamedBlock({
+      messageId: id,
+      index: 0,
+      start: { type: "thinking", thinking: "" },
+      delta: { type: "thinking_delta", thinking: "First thought. " },
+      final: { type: "thinking", thinking: "First thought. " },
+    }),
+    ...streamedBlock({
+      messageId: id,
+      index: 1,
+      start: { type: "text", text: "" },
+      delta: { type: "text_delta", text: "Checking. " },
+      final: { type: "text", text: "Checking. " },
+    }),
+    ...streamedBlock({
+      messageId: id,
+      index: 2,
+      start: { type: "server_tool_use", id: "srvtoolu_advisor", name: "advisor", input: {} },
+      final: { type: "server_tool_use", id: "srvtoolu_advisor", name: "advisor", input: {} },
+    }),
+    ...streamedBlock({ messageId: id, index: 3, start: advisorResult, final: advisorResult }),
+    ...streamedBlock({
+      messageId: id,
+      index: 4,
+      start: { type: "thinking", thinking: "" },
+      delta: { type: "thinking_delta", thinking: "Second thought." },
+      final: { type: "thinking", thinking: "Second thought." },
+    }),
+    ...streamedBlock({
+      messageId: id,
+      index: 5,
+      start: { type: "text", text: "" },
+      delta: { type: "text_delta", text: "Done." },
+      final: { type: "text", text: "Done." },
+    }),
+    streamFrame({ type: "message_stop" }),
+    successResult(),
+  ]);
+
+  const session = await createSession();
+  const items = timelineItems(
+    await collectUntilTerminal(streamSession(session, "scripted prompt")),
+  );
+
+  const reasoning = items.flatMap((item) => (item.type === "reasoning" ? [item.text] : []));
+  const assistant = items.flatMap((item) => (item.type === "assistant_message" ? [item.text] : []));
+  expect(reasoning.join("")).toBe("First thought. Second thought.");
+  expect(assistant.join("")).toBe("Checking. Done.");
+
+  const advisor = toolCallsById(items).get("srvtoolu_advisor");
+  expect(advisor).toMatchObject({ name: "advisor", status: "completed" });
+  expect(JSON.stringify(advisor)).not.toContain("ENCRYPTED");
+
+  await session.close();
+});
+
+test("settles an advisor call that the advisor answers with an error as failed", async () => {
+  mockScriptedQuery([
+    blockSnapshot("msg-advisor-error", {
+      type: "server_tool_use",
+      id: "srvtoolu_too_long",
+      name: "advisor",
+      input: {},
+    }),
+    blockSnapshot("msg-advisor-error", {
+      type: "advisor_tool_result",
+      tool_use_id: "srvtoolu_too_long",
+      content: { type: "advisor_tool_result_error", error_code: "prompt_too_long" },
+    }),
+    successResult(),
+  ]);
+
+  const session = await createSession();
+  const items = timelineItems(
+    await collectUntilTerminal(streamSession(session, "scripted prompt")),
+  );
+
+  expect(toolCallsById(items).get("srvtoolu_too_long")).toMatchObject({
+    name: "advisor",
+    status: "failed",
+  });
+
+  await session.close();
+});
+
+test.each([
+  {
+    outcome: "failed",
+    frames: [
+      {
+        type: "system",
+        subtype: "status",
+        status: null,
+        compact_result: "failed",
+        compact_error: "too_few_groups",
+        session_id: "sess-1",
+      },
+    ],
+  },
+  {
+    outcome: "success",
+    frames: [
+      {
+        type: "system",
+        subtype: "status",
+        status: null,
+        compact_result: "success",
+        session_id: "sess-1",
+      },
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "sess-1",
+        compact_metadata: { trigger: "auto", pre_tokens: 180000, post_tokens: 6000 },
+      },
+      {
+        type: "user",
+        isSynthetic: true,
+        session_id: "sess-1",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "This session is being continued from a previous conversation." },
+          ],
+        },
+      },
+    ],
+  },
+])(
+  "an auto-compaction that ends with $outcome inside a turn keeps the next tool result",
+  async ({ outcome, frames }) => {
+    mockScriptedQuery([
+      blockSnapshot("msg-tool", {
+        type: "tool_use",
+        id: "toolu_cat",
+        name: "Bash",
+        input: { command: "cat chunk.txt" },
+      }),
+      { type: "system", subtype: "status", status: "compacting", session_id: "sess-1" },
+      ...frames,
+      {
+        type: "user",
+        parent_tool_use_id: null,
+        session_id: "sess-1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_cat", content: "chunk text" }],
+        },
+      },
+      { type: "system", subtype: "status", status: "compacting", session_id: "sess-1" },
+      successResult(),
+    ]);
+
+    const session = await createSession();
+    const items = timelineItems(
+      await collectUntilTerminal(streamSession(session, "scripted prompt")),
+    );
+
+    expect(toolCallsById(items).get("toolu_cat")).toMatchObject({ status: "completed" });
+    // The second compaction is a new attempt, so it opens its own marker.
+    const markers = items.filter((item) => item.type === "compaction" && item.status === "loading");
+    expect(markers).toHaveLength(2);
+    const warnings = items.filter(
+      (item) => item.type === "notification" && item.level === "warning",
+    );
+    expect(warnings).toEqual(
+      outcome === "failed"
+        ? [
+            {
+              type: "notification",
+              level: "warning",
+              message:
+                "Claude could not compact the context (too_few_groups). It continues without compacting.",
+            },
+          ]
+        : [],
+    );
+
+    await session.close();
+  },
+);
+
+test("shows each Claude API retry as a warning", async () => {
+  mockScriptedQuery([
+    {
+      type: "system",
+      subtype: "api_retry",
+      attempt: 2,
+      max_retries: 10,
+      retry_delay_ms: 4000,
+      error_status: 529,
+      error: "server_error",
+      session_id: "sess-1",
+    },
+    successResult(),
+  ]);
+
+  const session = await createSession();
+  const items = timelineItems(
+    await collectUntilTerminal(streamSession(session, "scripted prompt")),
+  );
+
+  expect(items).toContainEqual({
+    type: "notification",
+    level: "warning",
+    message: "Claude API request failed (server_error 529). Retry 2 of 10.",
+  });
+
+  await session.close();
+});
