@@ -1295,7 +1295,7 @@ function createToolCatalog(
     .strict();
   const commonSendAgentPromptInputSchema = {
     activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
-      'How to send into a running turn: "steer" joins it, falling back to interrupt when unavailable; "interrupt" replaces it. Defaults to steer for agent callers and interrupt otherwise.',
+      'Agent callers: "steer" (default) waits until the current turn ends; "interrupt" replaces it. Human callers: "steer" joins the turn, falling back to interrupt; default is interrupt.',
     ),
     agentId: z.string(),
     prompt: z.string(),
@@ -2034,13 +2034,17 @@ function createToolCatalog(
 
   const PROMPTED_AGENT_NOTIFICATION_GUIDANCE =
     "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.";
+  const queuedWaitClause = (activeTurnBehavior: string | undefined) =>
+    activeTurnBehavior === "interrupt"
+      ? "Queued for delivery after two quiet seconds"
+      : "Queued for delivery after two quiet seconds and the current turn ends";
 
   registerTool(
     "send_agent_prompt",
     {
       title: "Send agent prompt",
       description:
-        "Send a task. Agent callers receive an immediate queued receipt; delivery follows after two quiet seconds per recipient. Completion reports include the target’s last response by default. Paseo supplies caller identity.",
+        "Send a task. Agent callers receive an immediate queued receipt; delivery follows after two quiet seconds per recipient and waits for the current turn to end unless interrupt is requested. Completion reports include the target’s last response by default. Paseo supplies caller identity.",
       inputSchema: sendAgentPromptInputSchema,
       outputSchema: {
         success: z.boolean(),
@@ -2117,8 +2121,8 @@ function createToolCatalog(
             messageId: receipt.messageId,
             status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
             guidance: notifying
-              ? `Queued for delivery after two quiet seconds. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
-              : "Queued for delivery after two quiet seconds; provider dispatch has not occurred.",
+              ? `${queuedWaitClause(activeTurnBehavior)}. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+              : `${queuedWaitClause(activeTurnBehavior)}; provider dispatch has not occurred.`,
           },
         };
       }
