@@ -4427,6 +4427,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.currentThreadId,
       this.client.request.bind(this.client),
       this.supportsInstructionSnapshots,
+      Boolean(this.config.pluginAppendSystemPrompt?.length),
     );
   }
 
@@ -5359,6 +5360,7 @@ export class CodexAppServerAgentSession implements AgentSession {
           threadId,
           this.client!.request.bind(this.client),
           this.supportsInstructionSnapshots,
+          Boolean(this.config.pluginAppendSystemPrompt?.length),
         );
         this.currentThreadId = threadId;
         // Codex writes a forked thread's rollout when it forks it, even before any turn.

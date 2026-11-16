@@ -3683,9 +3683,10 @@ export async function snapshotComparisonIndex(cwd: string) {
     const source = resolveGitRevParsePath(cwd, index.stdout);
     if (!source) throw new Error("Git did not return an index path");
     try {
-      const { atime, mtimeMs } = await statFile(source);
+      // Whole seconds from nanoseconds: a float mtimeMs can round up into the next second.
+      const { atime, mtimeNs } = await statFile(source, { bigint: true });
       await copyFile(source, indexFile);
-      await utimes(indexFile, atime, Math.floor(mtimeMs / 1000));
+      await utimes(indexFile, atime, Number(mtimeNs / 1_000_000_000n));
     } catch (error) {
       if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
       await runGitCommand(["read-tree", "--empty"], {

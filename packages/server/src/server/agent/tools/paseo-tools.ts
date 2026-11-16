@@ -2034,6 +2034,10 @@ function createToolCatalog(
 
   const PROMPTED_AGENT_NOTIFICATION_GUIDANCE =
     "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.";
+  const queuedWaitClause = (activeTurnBehavior: string | undefined) =>
+    activeTurnBehavior === "interrupt"
+      ? "Queued for delivery after two quiet seconds"
+      : "Queued for delivery after two quiet seconds and the current turn ends";
 
   registerTool(
     "send_agent_prompt",
@@ -2117,8 +2121,8 @@ function createToolCatalog(
             messageId: receipt.messageId,
             status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
             guidance: notifying
-              ? `Queued for delivery after two quiet seconds and the current turn ends. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
-              : "Queued for delivery after two quiet seconds and the current turn ends; provider dispatch has not occurred.",
+              ? `${queuedWaitClause(activeTurnBehavior)}. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+              : `${queuedWaitClause(activeTurnBehavior)}; provider dispatch has not occurred.`,
           },
         };
       }

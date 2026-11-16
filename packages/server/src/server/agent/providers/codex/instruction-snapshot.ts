@@ -42,10 +42,21 @@ export class CodexInstructionSnapshot {
     threadId: string,
     request: (method: string, params: unknown) => Promise<unknown>,
     supported: boolean,
+    requiresSnapshot = true,
   ): Promise<void> {
     if (this.receipt?.threadId === threadId && this.receipt.digest === this.digest) return;
-    if (!supported)
+    if (!supported) {
+      // A fork or resume of a thread that already holds this snapshot carries it through
+      // developerInstructions, so older servers need no injection.
+      if (this.receipt?.digest === this.digest) {
+        this.receipt = { threadId, digest: this.digest };
+        return;
+      }
+      // Without plugin instructions, older servers keep receiving the prompt through
+      // thread/resume and thread/fork developerInstructions, as before snapshots existed.
+      if (!requiresSnapshot) return;
       throw new Error("Update Codex to 0.121.0 or newer to apply agent instruction updates.");
+    }
     const snapshot = JSON.stringify({ version: 1, instructions: this.instructions ?? "" });
     const text =
       "This is the complete current set of Paseo-supplied instructions. It supersedes all earlier Paseo-supplied instructions in the conversation, including earlier snapshots. An empty instruction string means there are no current Paseo-supplied instructions. Provider and collaboration instructions remain in effect.\n\n<paseo_instruction_snapshot>" +
