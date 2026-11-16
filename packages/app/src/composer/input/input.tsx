@@ -2426,7 +2426,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         <ComposerInputPresentation
           fullscreen={isFullscreen}
           controlSizing={controlSizing}
-          sendIconSize={toolbarGlyph.size}
           surface={textSurface}
           surfaceHidden={isMinimal}
           toolbar={toolbar}
