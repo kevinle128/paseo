@@ -23,8 +23,17 @@ export function signalProcess(options: SignalOptions): void | Promise<void> {
   try {
     process.kill(plan.pid, plan.signal);
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+    if (!isProcessGone(error)) throw error;
   }
+}
+
+// macOS returns EPERM instead of ESRCH when the group leader exited but is not yet reaped.
+// The plugin only signals groups it spawned under the same user, so a real permission failure
+// cannot occur here and EPERM means the group is already gone.
+function isProcessGone(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error.code === "ESRCH" || error.code === "EPERM")
+  );
 }
 
 async function killTree(plan: Extract<SignalPlan, { type: "tree" }>): Promise<void> {
