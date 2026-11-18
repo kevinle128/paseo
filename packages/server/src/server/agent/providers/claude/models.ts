@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 
 import type { AgentModelDefinition } from "../../agent-sdk-types.js";
 import {
+  buildClaudeModeDependentAliasModel,
   getClaudeCustomModelThinkingOptions,
   getClaudeManifestModels,
   normalizeClaudeManifestModelId,
@@ -64,7 +65,7 @@ export async function getClaudeModelsWithSettings(
   discoveredModelIds: ReadonlySet<string> = new Set(),
 ): Promise<AgentModelDefinition[]> {
   const hardcodedModels = getClaudeManifestModels(claudeCodeVersion, discoveredModelIds);
-  const settingsModels = await readClaudeSettingsModels(logger, configDir);
+  const { models: settingsModels, defaultModelId } = await readClaudeSettings(logger, configDir);
   if (settingsModels.length === 0) {
     return hardcodedModels;
   }
@@ -86,46 +87,83 @@ export async function getClaudeModelsWithSettings(
     models.push(resolveConfiguredClaudeModel({ ...manifestModel, ...model }));
   }
 
-  return models;
+  // Claude Code starts model-less sessions on the settings.json `model`, so the catalog marks it
+  // as the default instead of the manifest's newest model.
+  return defaultModelId === null
+    ? models
+    : models.map((model) => withDefaultFlag(model, defaultModelId));
 }
 
-async function readClaudeSettingsModels(
+function withDefaultFlag(
+  model: AgentModelDefinition,
+  defaultModelId: string,
+): AgentModelDefinition {
+  const { isDefault: _isDefault, ...rest } = model;
+  return model.id === defaultModelId ? { ...rest, isDefault: true } : rest;
+}
+
+interface ClaudeSettingsModels {
+  models: AgentModelDefinition[];
+  defaultModelId: string | null;
+}
+
+async function readClaudeSettingsJson(logger: Logger, settingsPath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await fs.readFile(settingsPath, "utf8"));
+  } catch (error) {
+    logger.debug({ err: error, settingsPath }, "Failed to read Claude settings.json");
+    return null;
+  }
+}
+
+/** The top-level `model` of the user's Claude settings.json, or null when unset. */
+export async function readClaudeSettingsModelId(
   logger: Logger,
   configDir: string,
-): Promise<AgentModelDefinition[]> {
+): Promise<string | null> {
+  const parsed = await readClaudeSettingsJson(logger, path.join(configDir, "settings.json"));
+  return isRecord(parsed) ? normalizeSettingsModelId(parsed.model) : null;
+}
+
+function normalizeSettingsModelId(value: unknown): string | null {
+  const id = typeof value === "string" ? value.trim() : "";
+  return id.length > 0 ? id : null;
+}
+
+async function readClaudeSettings(
+  logger: Logger,
+  configDir: string,
+): Promise<ClaudeSettingsModels> {
   const settingsPath = path.join(configDir, "settings.json");
 
-  let parsed: unknown;
-  try {
-    const rawSettings = await fs.readFile(settingsPath, "utf8");
-    parsed = JSON.parse(rawSettings);
-  } catch (error) {
-    logger.debug({ err: error, settingsPath }, "Failed to read Claude settings models");
-    return [];
+  const parsed = await readClaudeSettingsJson(logger, settingsPath);
+  if (parsed === null) {
+    return { models: [], defaultModelId: null };
   }
 
   if (!isRecord(parsed)) {
     logger.debug({ settingsPath }, "Claude settings.json is not an object");
-    return [];
+    return { models: [], defaultModelId: null };
   }
 
   const models: AgentModelDefinition[] = [];
   addSettingsModel(models, parsed.model, "model");
+  const defaultModelId = normalizeSettingsModelId(parsed.model);
 
   const env = parsed.env;
   if (env === undefined) {
-    return models;
+    return { models, defaultModelId };
   }
   if (!isRecord(env)) {
     logger.debug({ settingsPath }, "Claude settings.json env is not an object");
-    return models;
+    return { models, defaultModelId };
   }
 
   for (const envKey of CLAUDE_SETTINGS_MODEL_ENV_KEYS) {
     addSettingsModel(models, env[envKey], `env.${envKey}`);
   }
 
-  return models;
+  return { models, defaultModelId };
 }
 
 function addSettingsModel(
@@ -142,12 +180,14 @@ function addSettingsModel(
     return;
   }
 
-  models.push({
-    provider: "claude",
-    id,
-    label: id,
-    description: `From Claude settings.json ${settingsKey}`,
-  });
+  models.push(
+    buildClaudeModeDependentAliasModel(id) ?? {
+      provider: "claude",
+      id,
+      label: id,
+      description: `From Claude settings.json ${settingsKey}`,
+    },
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -342,13 +342,17 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
       cwd: configDir,
       force: false,
     });
+    // The settings.json model becomes the catalog default, so the manifest default flag is cleared.
     expect(models.filter((model) => !model.id.startsWith("claude-mythos-"))).toEqual(
-      getClaudeModels("2.1.293").filter((model) => !model.id.startsWith("claude-mythos-")),
+      getClaudeModels("2.1.293")
+        .filter((model) => !model.id.startsWith("claude-mythos-"))
+        .map(({ isDefault: _isDefault, ...model }) => model),
     );
     expect(models.find((model) => model.id === "claude-mythos-5-1")).toEqual({
       ...findClaudeModel("claude-mythos-5-1"),
       label: "claude-mythos-5-1",
       description: "From Claude settings.json model",
+      isDefault: true,
     });
   });
 
@@ -444,12 +448,13 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
     });
 
     expect(models).toEqual([
-      ...getClaudeModels(),
+      ...getClaudeModels().map(({ isDefault: _isDefault, ...model }) => model),
       {
         provider: "claude",
         id: "us.anthropic.claude-opus-4-7[1m]",
         label: "us.anthropic.claude-opus-4-7[1m]",
         description: "From Claude settings.json model",
+        isDefault: true,
         thinkingOptions: customModelThinkingOptions,
       },
       {
