@@ -482,6 +482,13 @@ export function isClaudeModeDependentModelAlias(modelId: string | null | undefin
   );
 }
 
+const CLAUDE_MODEL_COMMAND_ALIASES = /^(opus|sonnet|haiku|opusplan)(\[1m\])?$/i;
+
+/** True when `/model <value>` names a model Claude Code accepts: a known alias or a Claude model id. */
+export function isClaudeModelCommandArgument(value: string): boolean {
+  return CLAUDE_MODEL_COMMAND_ALIASES.test(value) || normalizeClaudeRuntimeModelId(value) !== null;
+}
+
 /** Catalog entry for a mode-dependent alias; null when the id is any other model. */
 export function buildClaudeModeDependentAliasModel(modelId: string): AgentModelDefinition | null {
   if (!isClaudeModeDependentModelAlias(modelId)) {

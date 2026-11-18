@@ -157,9 +157,16 @@ function resolveThinkingDisplay(
   return unknownThinkingLabel;
 }
 
+export function readRunningModelId(extra: Record<string, unknown> | undefined): string | null {
+  const value = extra?.runtimeModel;
+  return typeof value === "string" ? value : null;
+}
+
 export function resolveAgentModelSelection(input: {
   models: AgentModelDefinition[] | null;
   runtimeModelId: string | null | undefined;
+  /** Model that is answering right now when the selected model is a mode-dependent alias. */
+  runningModelId?: string | null | undefined;
   configuredModelId: string | null | undefined;
   runtimeThinkingOptionId: string | null | undefined;
   explicitThinkingOptionId: string | null | undefined;
@@ -167,6 +174,7 @@ export function resolveAgentModelSelection(input: {
   const {
     models,
     runtimeModelId,
+    runningModelId,
     configuredModelId,
     runtimeThinkingOptionId,
     explicitThinkingOptionId,
@@ -183,12 +191,15 @@ export function resolveAgentModelSelection(input: {
   const fallbackModel = getFallbackModel(models);
   const selectedModel = pickSelectedModel(models, preferredModelId, fallbackModel);
 
-  const { activeModelId, displayModel } = resolveModelDisplay(
+  const resolvedDisplay = resolveModelDisplay(
     selectedModel,
     preferredModelId,
     fallbackModel,
     i18n.t("agentControls.model.unknown"),
   );
+  const runningModel = findModelById(models, normalizeModelId(runningModelId));
+  const { activeModelId } = resolvedDisplay;
+  const displayModel = runningModel?.label ?? resolvedDisplay.displayModel;
 
   const thinkingOptions = selectedModel?.thinkingOptions ?? null;
   const resolvedThinkingId = resolveThinkingId(

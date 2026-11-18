@@ -2,13 +2,14 @@ import type { AgentMode, AgentModelDefinition } from "@getpaseo/protocol/agent-t
 import { useShallow } from "zustand/shallow";
 import { formatAgentModeLabel } from "@/agent-controls/labels";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
-import { resolveAgentModelSelection } from "@/composer/agent-controls/utils";
+import { readRunningModelId, resolveAgentModelSelection } from "@/composer/agent-controls/utils";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore } from "@/stores/session-store";
 
 export interface AgentFactsInput {
   models: AgentModelDefinition[] | null;
   runtimeModelId: string | null | undefined;
+  runningModelId?: string | null | undefined;
   configuredModelId: string | null | undefined;
   runtimeThinkingOptionId: string | null | undefined;
   explicitThinkingOptionId: string | null | undefined;
@@ -46,6 +47,7 @@ export function useAgentFactsLine(serverId: string, agentId: string): string | n
             provider: current.provider,
             cwd: current.cwd,
             runtimeModelId: current.runtimeInfo?.model ?? null,
+            runningModelId: readRunningModelId(current.runtimeInfo?.extra),
             configuredModelId: current.model ?? null,
             runtimeThinkingOptionId: current.runtimeInfo?.thinkingOptionId ?? null,
             explicitThinkingOptionId: current.thinkingOptionId ?? null,

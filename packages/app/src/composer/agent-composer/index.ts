@@ -7,6 +7,7 @@ import type { ProviderSnapshotCache } from "@/data/provider-snapshot-cache";
 import {
   resolveAgentModelSelection,
   resolveProviderSnapshotEntry,
+  readRunningModelId,
 } from "@/composer/agent-controls/utils";
 import type { ComposerFocusOptions, ComposerModel, ComposerState } from "@/composer/model";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
@@ -183,6 +184,7 @@ export function createAgentComposer(
         resolveProviderSnapshotEntry(entries ?? undefined, agent.provider)?.models ?? null,
       ),
       runtimeModelId: agent.runtimeInfo?.model ?? null,
+      runningModelId: readRunningModelId(agent.runtimeInfo?.extra),
       configuredModelId: agent.model,
       runtimeThinkingOptionId: agent.runtimeInfo?.thinkingOptionId ?? null,
       explicitThinkingOptionId: agent.thinkingOptionId,

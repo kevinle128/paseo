@@ -45,6 +45,7 @@ import {
   getAgentControlHintKey,
   resolveAgentModelSelection,
   resolveProviderSnapshotEntry,
+  readRunningModelId,
 } from "@/composer/agent-controls/utils";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
@@ -353,6 +354,7 @@ type AgentControlsSlice = {
   provider: string;
   cwd: string | null;
   runtimeModelId: string | null;
+  runningModelId: string | null;
   model: string | null | undefined;
   options: ProviderOptions | undefined;
   controls: AgentOptionControl[] | undefined;
@@ -375,6 +377,7 @@ function selectAgentControlsSlice(
     provider: currentAgent.provider,
     cwd: currentAgent.cwd,
     runtimeModelId: currentAgent.runtimeInfo?.model ?? null,
+    runningModelId: readRunningModelId(currentAgent.runtimeInfo?.extra),
     model: currentAgent.model,
     options: currentAgent.options,
     controls: currentAgent.controls,
@@ -1045,6 +1048,7 @@ export const AgentControls = memo(function AgentControls({
   const modelSelection = resolveAgentModelSelection({
     models,
     runtimeModelId: agent?.runtimeModelId,
+    runningModelId: agent?.runningModelId,
     configuredModelId: agent?.model,
     runtimeThinkingOptionId: agent?.runtimeThinkingOptionId,
     explicitThinkingOptionId: agent?.thinkingOptionId,

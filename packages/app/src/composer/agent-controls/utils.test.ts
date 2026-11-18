@@ -268,3 +268,45 @@ describe("shortModelLabel", () => {
     );
   });
 });
+
+describe("resolveAgentModelSelection with a running model", () => {
+  const models = [
+    {
+      provider: "claude",
+      id: "opusplan",
+      label: "Opus Plan",
+      thinkingOptions: [{ id: "medium", label: "Medium" }],
+      defaultThinkingOptionId: "medium",
+    },
+    { provider: "claude", id: "claude-opus-4-8", label: "Opus 4.8" },
+    { provider: "claude", id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
+  ];
+
+  it("shows the model that is answering while keeping the alias selected", () => {
+    const selection = resolveAgentModelSelection({
+      models,
+      runtimeModelId: "opusplan",
+      runningModelId: "claude-opus-4-8",
+      configuredModelId: "opusplan",
+      runtimeThinkingOptionId: null,
+      explicitThinkingOptionId: null,
+    });
+
+    expect(selection.displayModel).toBe("Opus 4.8");
+    expect(selection.activeModelId).toBe("opusplan");
+    expect(selection.selectedThinkingId).toBe("medium");
+  });
+
+  it("falls back to the selected model label when the running model is not in the catalog", () => {
+    const selection = resolveAgentModelSelection({
+      models,
+      runtimeModelId: "opusplan",
+      runningModelId: "claude-unknown-9-9",
+      configuredModelId: "opusplan",
+      runtimeThinkingOptionId: null,
+      explicitThinkingOptionId: null,
+    });
+
+    expect(selection.displayModel).toBe("Opus Plan");
+  });
+});
