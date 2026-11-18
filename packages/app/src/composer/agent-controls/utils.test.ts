@@ -297,7 +297,7 @@ describe("resolveAgentModelSelection with a running model", () => {
     expect(selection.selectedThinkingId).toBe("medium");
   });
 
-  it("falls back to the selected model label when the running model is not in the catalog", () => {
+  it("shows the running model id when it is not in the catalog instead of the alias label", () => {
     const selection = resolveAgentModelSelection({
       models,
       runtimeModelId: "opusplan",
@@ -307,6 +307,6 @@ describe("resolveAgentModelSelection with a running model", () => {
       explicitThinkingOptionId: null,
     });
 
-    expect(selection.displayModel).toBe("Opus Plan");
+    expect(selection.displayModel).toBe("claude-unknown-9-9");
   });
 });

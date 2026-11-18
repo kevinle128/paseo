@@ -2454,6 +2454,8 @@ class ClaudeAgentSession implements AgentSession {
    * the only source for what Claude Code actually used.
    */
   private readonly answeringModelByPlanMode = new Map<boolean, string>();
+  /** Models the `sonnet` and `opus` aliases resolve to, read from the live query once. */
+  private aliasFamilyModels: { sonnet?: string; opus?: string } | null = null;
   /** settings.json `model`, read only while the session has no explicit model. */
   private settingsDefaultModel: string | null = null;
   private compacting = false;
@@ -2560,8 +2562,36 @@ class ClaudeAgentSession implements AgentSession {
       // alias session has no single runtime model to show.
       ...this.buildRuntimeModelExtra(),
     };
+    if (this.hasModeDependentModel() && !info.extra?.runtimeModel) {
+      const fallback = await this.resolveAliasFamilyModel(this.currentMode === "plan");
+      if (fallback) info.extra = { runtimeModel: fallback };
+    }
     this.cachedRuntimeInfo = info;
     return { ...info };
+  }
+
+  /**
+   * Before a turn has answered under a mode-dependent alias, the model in use is the one Claude
+   * Code maps the plan-mode family to: Opus in plan mode, Sonnet outside it.
+   */
+  private async resolveAliasFamilyModel(inPlanMode: boolean): Promise<string | null> {
+    const query = this.query;
+    if (!this.aliasFamilyModels && query?.supportedModels) {
+      try {
+        const rows = await query.supportedModels();
+        const families: { sonnet?: string; opus?: string } = {};
+        for (const row of rows) {
+          const family = row.value.toLowerCase();
+          if (family !== "sonnet" && family !== "opus") continue;
+          const resolved = normalizeClaudeRuntimeModelId(row.resolvedModel);
+          if (resolved) families[family] = resolved;
+        }
+        this.aliasFamilyModels = families;
+      } catch (error) {
+        this.logger.warn({ err: error }, "Failed to read Claude model aliases");
+      }
+    }
+    return (inPlanMode ? this.aliasFamilyModels?.opus : this.aliasFamilyModels?.sonnet) ?? null;
   }
 
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
