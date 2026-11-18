@@ -44,11 +44,13 @@ import {
   getClaudeContextWindowMaxTokens,
   getClaudeModelsWithSettings,
   normalizeClaudeRuntimeModelId,
+  readClaudeSettingsModelId,
   resolveConfiguredClaudeModel,
 } from "./models.js";
 import {
   CLAUDE_DISABLED_THINKING_OPTION_ID,
   CLAUDE_ULTRACODE_THINKING_OPTION_ID,
+  isClaudeModeDependentModelAlias,
   parseClaudeCodeVersion,
   resolveClaudeDisabledThinkingForModel,
 } from "./model-manifest.js";
@@ -2163,6 +2165,12 @@ function readLegacyResultUsageTokens(usage: unknown): number | undefined {
   return usageRecord ? readUsageTokenTotal(usageRecord) : undefined;
 }
 
+/** A plan skill is named for planning: its name, after any `ns:` prefix, ends with "plan". */
+export function isClaudePlanSkillName(name: string): boolean {
+  const base = name.slice(name.lastIndexOf(":") + 1);
+  return base.toLowerCase().endsWith("plan");
+}
+
 function isClaudeSubagentToolName(name: string | undefined): boolean {
   return name === "Task" || name === "Agent" || name === "Workflow";
 }
@@ -2359,6 +2367,12 @@ class ClaudeAgentSession implements AgentSession {
    * let them escape the adapter boundary.
    */
   private readonly unstartedMessageUuids = new Set<string>();
+  // Skill tool calls already answered with a plan-mode switch; a repeated frame must not switch again.
+  private readonly planSkillToolUseIds = new Set<string>();
+  // The mode last delivered to subscribers in a mode_changed event, so a host-initiated switch
+  // announces itself only when the CLI's status frame has not already done so.
+  private lastAnnouncedModeId: PermissionMode | null = null;
+  private planModeSwitch: Promise<void> | null = null;
   /** Human steers whose text has not reached Claude yet and therefore supersede blocking cards. */
   private readonly permissionClearingSteerUuids = new Set<string>();
   private claudeSessionId: string | null;
@@ -2432,6 +2446,8 @@ class ClaudeAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private lastOptionsModel: string | null = null;
   private lastRuntimeModel: string | null = null;
+  /** settings.json `model`, read only while the session has no explicit model. */
+  private settingsDefaultModel: string | null = null;
   private compacting = false;
   private compactionMarkerOpen = false;
   private queryPumpPromise: Promise<void> | null = null;
@@ -2502,6 +2518,7 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     this.currentMode = isPermissionMode(config.modeId) ? config.modeId : "default";
+    this.lastAnnouncedModeId = this.currentMode;
     if (this.currentMode !== "plan") {
       this.planResumeMode = this.currentMode;
     }
@@ -2531,7 +2548,9 @@ class ClaudeAgentSession implements AgentSession {
       sessionId: this.claudeSessionId,
       model: this.lastOptionsModel ?? this.config.model ?? null,
       modeId: this.currentMode ?? null,
-      ...(this.lastRuntimeModel
+      // The CLI reports the outside-plan model on init even in plan mode, so a mode-dependent
+      // alias session has no single runtime model to show.
+      ...(this.lastRuntimeModel && !this.hasModeDependentModel()
         ? {
             extra: {
               runtimeModel: this.lastRuntimeModel,
@@ -2640,6 +2659,14 @@ class ClaudeAgentSession implements AgentSession {
         // Stopped while Claude was still starting up: withdrawn by never sending it.
         if (sdkUserMessageId) this.unstartedMessageUuids.delete(sdkUserMessageId);
         return { turnId };
+      }
+      if (this.shouldEnterPlanModeForSlashCommand(prompt)) {
+        // Switched before the message is sent so the first step already runs in plan mode.
+        await this.enterPlanModeForPlanSkill("command");
+        if (cancelIssued) {
+          if (sdkUserMessageId) this.unstartedMessageUuids.delete(sdkUserMessageId);
+          return { turnId };
+        }
       }
       if (!this.input) {
         throw new Error("Claude session input stream not initialized");
@@ -2804,11 +2831,22 @@ class ClaudeAgentSession implements AgentSession {
     return this.availableModes;
   }
 
+  /** True when the session model is an alias Claude Code resolves differently per mode. */
+  private hasModeDependentModel(): boolean {
+    return isClaudeModeDependentModelAlias(this.config.model ?? this.settingsDefaultModel);
+  }
+
   async getCurrentMode(): Promise<string | null> {
     return this.currentMode ?? null;
   }
 
   async setMode(modeId: string): Promise<void> {
+    await this.applyPermissionMode(modeId);
+    // The host records the mode it set, so it counts as announced.
+    this.lastAnnouncedModeId = this.currentMode;
+  }
+
+  private async applyPermissionMode(modeId: string): Promise<void> {
     // Validate mode
     if (!VALID_CLAUDE_MODES.has(modeId)) {
       const validModesList = Array.from(VALID_CLAUDE_MODES).join(", ");
@@ -2836,6 +2874,7 @@ class ClaudeAgentSession implements AgentSession {
     } else {
       this.planResumeMode = normalized;
     }
+    if (this.currentMode !== normalized) this.cachedRuntimeInfo = null;
     this.currentMode = normalized;
   }
 
@@ -2845,6 +2884,10 @@ class ClaudeAgentSession implements AgentSession {
     const activeQuery = await this.ensureQuery();
     await activeQuery.setModel(normalizedModelId ?? undefined);
     this.config.model = normalizedModelId ?? undefined;
+    // settings.json supplies the model only while the session has none of its own.
+    this.settingsDefaultModel = normalizedModelId
+      ? null
+      : await readClaudeSettingsModelId(this.logger, claudeConfigDir(this.harnessEnvironment));
     this.reconcileThinkingOptionForModel(normalizedModelId);
     if (this.config.providerOptions.fast_mode) {
       const supported = claudeModelSupportsFastMode(this.config.model);
@@ -3262,6 +3305,72 @@ class ClaudeAgentSession implements AgentSession {
       : null;
   }
 
+  private canEnterPlanModeForPlanSkill(): boolean {
+    // Plan mode has no transport restriction, so assertClaudeModeCanRun never rejects it.
+    return this.hasModeDependentModel() && this.currentMode !== "plan" && !this.planModeSwitch;
+  }
+
+  /**
+   * Switches to plan mode and tells subscribers once. The switch records the mode without an event,
+   * and the CLI's status frame announces it only if that frame is delivered before setMode ends.
+   */
+  private enterPlanModeForPlanSkill(trigger: "command" | "tool call"): Promise<void> {
+    const switching = (async () => {
+      try {
+        await this.applyPermissionMode("plan");
+      } catch (error) {
+        this.logger.warn({ err: error }, `Failed to enter plan mode for plan skill ${trigger}`);
+        return;
+      }
+      if (this.currentMode !== this.lastAnnouncedModeId) {
+        this.lastAnnouncedModeId = this.currentMode;
+        this.pushEvent({
+          type: "mode_changed",
+          provider: "claude",
+          currentModeId: this.currentMode,
+          availableModes: this.availableModes,
+        });
+      }
+    })().finally(() => {
+      this.planModeSwitch = null;
+    });
+    this.planModeSwitch = switching;
+    return switching;
+  }
+
+  private shouldEnterPlanModeForSlashCommand(prompt: AgentPromptInput): boolean {
+    if (!this.canEnterPlanModeForPlanSkill()) {
+      return false;
+    }
+    let typedText: string | null = null;
+    if (typeof prompt === "string") {
+      typedText = prompt;
+    } else {
+      const chunk = prompt.find((c) => c.type === "text" && !("mimeType" in c));
+      typedText = chunk?.type === "text" ? chunk.text : null;
+    }
+    const parsed = typedText === null ? null : this.parseSlashCommandInput(typedText);
+    return parsed !== null && isClaudePlanSkillName(parsed.commandName);
+  }
+
+  /**
+   * The model asked for a plan skill on the main thread. Plan mode applies from the next API step,
+   * so the switch is fired without holding up the stream.
+   */
+  private enterPlanModeForSkillToolUse(content: unknown): void {
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (block?.type !== "tool_use" || block.name !== "Skill" || typeof block.id !== "string") {
+        continue;
+      }
+      const skill = (block.input as { skill?: unknown } | null | undefined)?.skill;
+      if (typeof skill !== "string" || !isClaudePlanSkillName(skill)) continue;
+      if (this.planSkillToolUseIds.has(block.id) || !this.canEnterPlanModeForPlanSkill()) continue;
+      this.planSkillToolUseIds.add(block.id);
+      void this.enterPlanModeForPlanSkill("tool call");
+    }
+  }
+
   private parseSlashCommandInput(text: string): SlashCommandInvocation | null {
     const trimmed = text.trim();
     if (!trimmed.startsWith("/") || trimmed.length <= 1) {
@@ -3598,6 +3707,7 @@ class ClaudeAgentSession implements AgentSession {
     this.query = null;
     this.input = null;
     this.queryPumpPromise = null;
+    this.planSkillToolUseIds.clear();
     this.queryRestartNeeded = false;
     // Ending the input retires the process on purpose. Detach first so its
     // exit is not reported as a crash.
@@ -3869,7 +3979,11 @@ class ClaudeAgentSession implements AgentSession {
     if (this.config.model) {
       base.model = this.config.model;
     }
-    this.lastOptionsModel = base.model ?? null;
+    this.settingsDefaultModel = this.config.model
+      ? null
+      : await readClaudeSettingsModelId(this.logger, claudeConfigDir(this.harnessEnvironment));
+    this.lastOptionsModel =
+      base.model ?? (this.hasModeDependentModel() ? this.settingsDefaultModel : null);
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
     }
@@ -4552,6 +4666,18 @@ class ClaudeAgentSession implements AgentSession {
       (this.activeForegroundTurnId ?? this.autonomousTurn?.id ?? null) !== turnId
     )
       return [];
+    for (const event of messageEvents) {
+      if (
+        event.type === "mode_changed" &&
+        event.currentModeId &&
+        isPermissionMode(event.currentModeId)
+      ) {
+        this.lastAnnouncedModeId = event.currentModeId;
+      }
+    }
+    if (message.type === "assistant" && !readClaudeParentToolUseId(message)) {
+      this.enterPlanModeForSkillToolUse(message.message.content);
+    }
     const assistantTimelineEvents = readClaudeParentToolUseId(message)
       ? []
       : this.timelineAssembler
@@ -5345,7 +5471,12 @@ class ClaudeAgentSession implements AgentSession {
         { runtimeModel: message.model, normalizedRuntimeModel },
         "Captured runtime model from SDK init",
       );
-      if (normalizedRuntimeModel) {
+      const sessionModel = this.config.model ?? this.settingsDefaultModel;
+      if (isClaudeModeDependentModelAlias(sessionModel)) {
+        // Claude Code picks Opus or Sonnet each turn; keep the alias so it round-trips into
+        // config.model instead of freezing the model the CLI reported at init.
+        this.lastOptionsModel = sessionModel;
+      } else if (normalizedRuntimeModel) {
         this.lastOptionsModel = normalizedRuntimeModel;
       } else if (!this.lastOptionsModel) {
         this.lastOptionsModel = this.config.model ?? null;
@@ -5359,6 +5490,7 @@ class ClaudeAgentSession implements AgentSession {
   /** Records a mode Claude Code reports, returning whether it differs from the current one. */
   private observePermissionMode(mode: PermissionMode): boolean {
     const changed = this.currentMode !== mode;
+    if (changed) this.cachedRuntimeInfo = null;
     this.currentMode = mode;
     if (mode !== "plan") {
       this.planResumeMode = mode;

@@ -468,6 +468,41 @@ export function normalizeClaudeRuntimeModelId(value: string | null | undefined):
   );
 }
 
+const CLAUDE_MODE_DEPENDENT_MODEL_ALIASES = new Set(["opusplan", "opusplan[1m]"]);
+
+/**
+ * Claude Code resolves these aliases to a different model in plan mode (Opus) than outside it
+ * (Sonnet). The session keeps the alias and Claude Code picks the model each turn, so Paseo must
+ * not replace the alias with the concrete model the CLI reports on init.
+ */
+export function isClaudeModeDependentModelAlias(modelId: string | null | undefined): boolean {
+  return (
+    typeof modelId === "string" &&
+    CLAUDE_MODE_DEPENDENT_MODEL_ALIASES.has(modelId.trim().toLowerCase())
+  );
+}
+
+/** Catalog entry for a mode-dependent alias; null when the id is any other model. */
+export function buildClaudeModeDependentAliasModel(modelId: string): AgentModelDefinition | null {
+  if (!isClaudeModeDependentModelAlias(modelId)) {
+    return null;
+  }
+  const id = modelId.trim();
+  const defaultThinkingOptionId: ClaudeEffortLevel = "medium";
+  return {
+    provider: "claude",
+    id,
+    label: id.toLowerCase().endsWith("[1m]") ? "Opus Plan 1M" : "Opus Plan",
+    description: "Opus in plan mode, Sonnet otherwise",
+    thinkingOptions: buildThinkingOptions(
+      CLAUDE_EFFORT_LEVELS.xhigh,
+      false,
+      defaultThinkingOptionId,
+    ),
+    defaultThinkingOptionId,
+  };
+}
+
 export function getClaudeCustomModelThinkingOptions(): AgentSelectOption[] {
   return CLAUDE_EFFORT_LEVELS.standard.map((id) => {
     const option: AgentSelectOption = { id, label: CLAUDE_EFFORT_LABELS[id] };
