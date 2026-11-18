@@ -51,6 +51,7 @@ import {
   CLAUDE_DISABLED_THINKING_OPTION_ID,
   CLAUDE_ULTRACODE_THINKING_OPTION_ID,
   isClaudeModeDependentModelAlias,
+  isClaudeModelCommandArgument,
   parseClaudeCodeVersion,
   resolveClaudeDisabledThinkingForModel,
 } from "./model-manifest.js";
@@ -420,6 +421,7 @@ const DEFAULT_MODES: AgentMode[] = [
 const VALID_CLAUDE_MODES = new Set(DEFAULT_MODES.map((mode) => mode.id));
 
 const REWIND_COMMAND_NAME = "rewind";
+const MODEL_COMMAND_NAME = "model";
 const REWIND_COMMAND: AgentSlashCommand = {
   name: REWIND_COMMAND_NAME,
   description: "Rewind tracked files to a previous user message",
@@ -2446,6 +2448,12 @@ class ClaudeAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private lastOptionsModel: string | null = null;
   private lastRuntimeModel: string | null = null;
+  /**
+   * Models that answered turns under a mode-dependent alias such as opusplan, keyed by whether the
+   * turn ran in plan mode. Init reports only the outside-plan model, so these observed models are
+   * the only source for what Claude Code actually used.
+   */
+  private readonly answeringModelByPlanMode = new Map<boolean, string>();
   /** settings.json `model`, read only while the session has no explicit model. */
   private settingsDefaultModel: string | null = null;
   private compacting = false;
@@ -2550,13 +2558,7 @@ class ClaudeAgentSession implements AgentSession {
       modeId: this.currentMode ?? null,
       // The CLI reports the outside-plan model on init even in plan mode, so a mode-dependent
       // alias session has no single runtime model to show.
-      ...(this.lastRuntimeModel && !this.hasModeDependentModel()
-        ? {
-            extra: {
-              runtimeModel: this.lastRuntimeModel,
-            },
-          }
-        : {}),
+      ...this.buildRuntimeModelExtra(),
     };
     this.cachedRuntimeInfo = info;
     return { ...info };
@@ -2606,6 +2608,8 @@ class ClaudeAgentSession implements AgentSession {
       void this.executeRewindTurn(turnId, slashCommand);
       return { turnId };
     }
+
+    this.adoptModelFromModelCommand(prompt);
 
     if (this.autonomousTurn) {
       this.completeAutonomousTurn();
@@ -2832,6 +2836,54 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   /** True when the session model is an alias Claude Code resolves differently per mode. */
+  private buildRuntimeModelExtra(): Pick<AgentRuntimeInfo, "extra"> {
+    if (!this.hasModeDependentModel()) {
+      return this.lastRuntimeModel ? { extra: { runtimeModel: this.lastRuntimeModel } } : {};
+    }
+    const answeringModel = this.answeringModelByPlanMode.get(this.currentMode === "plan");
+    return answeringModel ? { extra: { runtimeModel: answeringModel } } : {};
+  }
+
+  /** Remembers the model that answered a turn so a mode-dependent alias can show it. */
+  private observeAnsweringModel(model: unknown): void {
+    if (!this.hasModeDependentModel() || this.replayingHistory) return;
+    const normalized = normalizeClaudeRuntimeModelId(typeof model === "string" ? model : null);
+    if (!normalized) return;
+    this.rememberAnsweringModel(this.currentMode === "plan", normalized);
+  }
+
+  private rememberAnsweringModel(inPlanMode: boolean, model: string): void {
+    if (this.answeringModelByPlanMode.get(inPlanMode) === model) return;
+    this.answeringModelByPlanMode.set(inPlanMode, model);
+    this.cachedRuntimeInfo = null;
+  }
+
+  /**
+   * `/model <id>` runs inside Claude Code and never reaches setModel, so the session adopts the
+   * model it names. Anything Claude Code would reject leaves the session untouched.
+   */
+  private adoptModelFromModelCommand(prompt: AgentPromptInput): void {
+    const typedText =
+      typeof prompt === "string"
+        ? prompt
+        : (
+            prompt.find((chunk) => chunk.type === "text" && !("mimeType" in chunk)) as
+              | { text: string }
+              | undefined
+          )?.text;
+    const parsed = typedText === undefined ? null : this.parseSlashCommandInput(typedText);
+    if (parsed?.commandName !== MODEL_COMMAND_NAME || !parsed.args) return;
+    const requested = parsed.args.trim();
+    if (!isClaudeModelCommandArgument(requested)) return;
+    this.config.model = requested;
+    this.settingsDefaultModel = null;
+    this.answeringModelByPlanMode.clear();
+    this.lastRuntimeModel = null;
+    this.lastOptionsModel = requested;
+    this.cachedRuntimeInfo = null;
+    this.persistence = null;
+  }
+
   private hasModeDependentModel(): boolean {
     return isClaudeModeDependentModelAlias(this.config.model ?? this.settingsDefaultModel);
   }
@@ -4676,6 +4728,7 @@ class ClaudeAgentSession implements AgentSession {
       }
     }
     if (message.type === "assistant" && !readClaudeParentToolUseId(message)) {
+      this.observeAnsweringModel(message.message.model);
       this.enterPlanModeForSkillToolUse(message.message.content);
     }
     const assistantTimelineEvents = readClaudeParentToolUseId(message)
@@ -5472,6 +5525,10 @@ class ClaudeAgentSession implements AgentSession {
         "Captured runtime model from SDK init",
       );
       const sessionModel = this.config.model ?? this.settingsDefaultModel;
+      if (isClaudeModeDependentModelAlias(sessionModel) && normalizedRuntimeModel) {
+        // Init always names the model used outside plan mode.
+        this.rememberAnsweringModel(false, normalizedRuntimeModel);
+      }
       if (isClaudeModeDependentModelAlias(sessionModel)) {
         // Claude Code picks Opus or Sonnet each turn; keep the alias so it round-trips into
         // config.model instead of freezing the model the CLI reported at init.

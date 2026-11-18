@@ -4876,7 +4876,8 @@ export class AgentManager {
         newInfo.model !== agent.runtimeInfo?.model ||
         newInfo.thinkingOptionId !== agent.runtimeInfo?.thinkingOptionId ||
         newInfo.sessionId !== agent.runtimeInfo?.sessionId ||
-        newInfo.modeId !== agent.runtimeInfo?.modeId;
+        newInfo.modeId !== agent.runtimeInfo?.modeId ||
+        newInfo.extra?.runtimeModel !== agent.runtimeInfo?.extra?.runtimeModel;
       agent.runtimeInfo = newInfo;
       if (!agent.persistence && newInfo.sessionId) {
         agent.persistence = normalizePersistenceForConfig(
