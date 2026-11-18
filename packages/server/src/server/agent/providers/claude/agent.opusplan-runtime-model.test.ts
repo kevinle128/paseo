@@ -8,6 +8,9 @@ import type { ClaudeQueryInput } from "./query.js";
 const OUTSIDE_PLAN_MODEL = "claude-sonnet-5-5";
 const PLAN_MODEL = "claude-opus-4-8";
 
+// A turn that reports no model, as when the CLI has not answered under the alias yet.
+let reportModels = true;
+
 // Mimics the CLI under opusplan: init always reports the outside-plan model, while the model
 // that answers a turn depends on the permission mode when the turn starts.
 class OpusPlanQuery {
@@ -26,13 +29,15 @@ class OpusPlanQuery {
         type: "system",
         subtype: "init",
         session_id: "opusplan-session",
-        model: OUTSIDE_PLAN_MODEL,
+        ...(reportModels ? { model: OUTSIDE_PLAN_MODEL } : {}),
         permissionMode: this.mode,
       } as SDKMessage;
       yield {
         type: "assistant",
         message: {
-          model: this.mode === "plan" ? PLAN_MODEL : OUTSIDE_PLAN_MODEL,
+          ...(reportModels
+            ? { model: this.mode === "plan" ? PLAN_MODEL : OUTSIDE_PLAN_MODEL }
+            : {}),
           content: [{ type: "text", text: "ok" }],
         },
       } as SDKMessage;
@@ -59,6 +64,18 @@ class OpusPlanQuery {
   async setModel() {}
   async supportedCommands() {
     return [];
+  }
+  async supportedModels() {
+    return [
+      { value: "default", displayName: "Default", description: "" },
+      {
+        value: "sonnet",
+        resolvedModel: OUTSIDE_PLAN_MODEL,
+        displayName: "Sonnet",
+        description: "",
+      },
+      { value: "opus", resolvedModel: PLAN_MODEL, displayName: "Opus", description: "" },
+    ];
   }
   [Symbol.asyncIterator]() {
     return this;
@@ -119,6 +136,20 @@ test("a chat /model command makes the session follow the model the CLI switched 
     await runTurn("/model opusplan");
     expect(await session.getRuntimeInfo()).toMatchObject({ model: "opusplan" });
   } finally {
+    await session.close();
+  }
+});
+
+test("an opusplan session names the model for the current mode before any turn reported one", async () => {
+  reportModels = false;
+  const { session, runTurn } = await createOpusPlanSession("opusplan", "plan");
+  try {
+    await runTurn("hello");
+    expect((await session.getRuntimeInfo()).extra?.runtimeModel).toBe(PLAN_MODEL);
+    await session.setMode("acceptEdits");
+    expect((await session.getRuntimeInfo()).extra?.runtimeModel).toBe(OUTSIDE_PLAN_MODEL);
+  } finally {
+    reportModels = true;
     await session.close();
   }
 });

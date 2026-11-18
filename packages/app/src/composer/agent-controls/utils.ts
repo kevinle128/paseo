@@ -199,7 +199,9 @@ export function resolveAgentModelSelection(input: {
   );
   const runningModel = findModelById(models, normalizeModelId(runningModelId));
   const { activeModelId } = resolvedDisplay;
-  const displayModel = runningModel?.label ?? resolvedDisplay.displayModel;
+  // A running model missing from the catalog still beats the alias label: no model is named after the alias.
+  const displayModel =
+    runningModel?.label ?? normalizeModelId(runningModelId) ?? resolvedDisplay.displayModel;
 
   const thinkingOptions = selectedModel?.thinkingOptions ?? null;
   const resolvedThinkingId = resolveThinkingId(
