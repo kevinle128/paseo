@@ -2841,6 +2841,12 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async setMode(modeId: string): Promise<void> {
+    await this.applyPermissionMode(modeId);
+    // The host records the mode it set, so it counts as announced.
+    this.lastAnnouncedModeId = this.currentMode;
+  }
+
+  private async applyPermissionMode(modeId: string): Promise<void> {
     // Validate mode
     if (!VALID_CLAUDE_MODES.has(modeId)) {
       const validModesList = Array.from(VALID_CLAUDE_MODES).join(", ");
@@ -2868,6 +2874,7 @@ class ClaudeAgentSession implements AgentSession {
     } else {
       this.planResumeMode = normalized;
     }
+    if (this.currentMode !== normalized) this.cachedRuntimeInfo = null;
     this.currentMode = normalized;
   }
 
@@ -3304,13 +3311,13 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   /**
-   * Switches to plan mode and tells subscribers once. setMode records the mode without an event,
+   * Switches to plan mode and tells subscribers once. The switch records the mode without an event,
    * and the CLI's status frame announces it only if that frame is delivered before setMode ends.
    */
   private enterPlanModeForPlanSkill(trigger: "command" | "tool call"): Promise<void> {
     const switching = (async () => {
       try {
-        await this.setMode("plan");
+        await this.applyPermissionMode("plan");
       } catch (error) {
         this.logger.warn({ err: error }, `Failed to enter plan mode for plan skill ${trigger}`);
         return;
@@ -5483,6 +5490,7 @@ class ClaudeAgentSession implements AgentSession {
   /** Records a mode Claude Code reports, returning whether it differs from the current one. */
   private observePermissionMode(mode: PermissionMode): boolean {
     const changed = this.currentMode !== mode;
+    if (changed) this.cachedRuntimeInfo = null;
     this.currentMode = mode;
     if (mode !== "plan") {
       this.planResumeMode = mode;
