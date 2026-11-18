@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PROVIDER_CAPABILITIES,
   ProviderEventSchema,
@@ -13,7 +13,7 @@ import {
   type ProviderLaunch,
   type ProviderPersistence,
 } from "@getpaseo/plugin/server/provider";
-import { signalPlan } from "./internal/signals.js";
+import { signalPlan, signalProcess } from "./internal/signals.js";
 import { createAntigravityProvider } from "./provider.js";
 
 const temporary: string[] = [];
@@ -671,6 +671,29 @@ describe("discovery", () => {
 });
 
 describe("process signal plans", () => {
+  it.each(["ESRCH", "EPERM"])("ignores %s from a process group that already exited", (code) => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error(`kill ${code}`), { code });
+    });
+    try {
+      expect(() => signalProcess({ platform: "linux", pid: 123, signal: "SIGKILL" })).not.toThrow();
+      expect(kill).toHaveBeenCalledWith(-123, "SIGKILL");
+    } finally {
+      kill.mockRestore();
+    }
+  });
+  it("rethrows other kill errors", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error("kill EINVAL"), { code: "EINVAL" });
+    });
+    try {
+      expect(() => signalProcess({ platform: "linux", pid: 123, signal: "SIGKILL" })).toThrow(
+        "kill EINVAL",
+      );
+    } finally {
+      kill.mockRestore();
+    }
+  });
   it.each(["SIGINT", "SIGTERM", "SIGKILL"] as const)("kills the Windows tree for %s", (signal) => {
     expect(signalPlan({ platform: "win32", pid: 123, signal })).toEqual({
       type: "tree",
