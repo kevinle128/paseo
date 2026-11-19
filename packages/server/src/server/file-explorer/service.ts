@@ -822,6 +822,116 @@ async function isCaseOnlyRename(
   return isSameEntry && source.requestedPath.toLowerCase() === targetPath.toLowerCase();
 }
 
+export type ExplorerPathKind = "file" | "directory" | "symlink" | "other";
+
+export interface ExplorerPathInspection {
+  exists: boolean;
+  kind: ExplorerPathKind | null;
+  size: number | null;
+}
+
+/**
+ * Reports what the entry at `relativePath` is without following it: `lstat` runs on the entry
+ * itself, so a link is reported as a link. The parent directory is canonicalized and must stay
+ * inside the workspace, the same scoping `resolveScopedPath` applies to the other explorer
+ * operations. Content and link targets are never read.
+ */
+export async function inspectExplorerPath({
+  root,
+  relativePath = ".",
+}: ScopedPathParams): Promise<ExplorerPathInspection> {
+  const workspacePath = expandUserPath(root);
+  const requestedPath = resolvePathFromBase(workspacePath, relativePath);
+  assertWithinWorkspace(workspacePath, requestedPath);
+  const canonicalRoot = await fs.realpath(workspacePath);
+  const isWorkspaceRoot = path.relative(workspacePath, requestedPath) === "";
+  let entryPath = canonicalRoot;
+  if (!isWorkspaceRoot) {
+    const canonicalParent = await resolveParentWithinWorkspace({
+      canonicalRoot,
+      workspacePath,
+      segments: path.relative(workspacePath, path.dirname(requestedPath)).split(path.sep),
+    });
+    if (canonicalParent === null) return { exists: false, kind: null, size: null };
+    entryPath = path.join(canonicalParent, path.basename(requestedPath));
+  }
+  try {
+    const stats = await fs.lstat(entryPath);
+    return { exists: true, kind: pathKindFromStats(stats), size: stats.size };
+  } catch (error) {
+    if (isMissingEntryError(error)) return { exists: false, kind: null, size: null };
+    throw error;
+  }
+}
+
+const MAX_SYMLINK_HOPS = 40;
+
+/**
+ * Resolves the parent directory one segment at a time from the canonical
+ * workspace root, checking the workspace boundary before each step. A symlink
+ * that leaves the workspace is refused without touching its target, so the
+ * reply never tells whether a path outside the workspace exists.
+ * Returns null when a segment is missing or is not a directory.
+ */
+async function resolveParentWithinWorkspace({
+  canonicalRoot,
+  workspacePath,
+  segments,
+}: {
+  canonicalRoot: string;
+  workspacePath: string;
+  segments: string[];
+}): Promise<string | null> {
+  const pending = [...segments];
+  let current = canonicalRoot;
+  let hops = 0;
+  while (pending.length > 0) {
+    const segment = pending.shift() as string;
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      current = path.dirname(current);
+      assertWithinWorkspace(canonicalRoot, current);
+      continue;
+    }
+    const next = path.join(current, segment);
+    let stats: Stats;
+    try {
+      stats = await fs.lstat(next);
+    } catch (error) {
+      if (isMissingEntryError(error)) return null;
+      throw error;
+    }
+    if (stats.isSymbolicLink()) {
+      hops += 1;
+      if (hops > MAX_SYMLINK_HOPS) return null;
+      const target = await fs.readlink(next);
+      let remainder = target;
+      if (path.isAbsolute(target)) {
+        const anchor = [canonicalRoot, workspacePath].find(
+          (base) =>
+            target === base ||
+            target.startsWith(base.endsWith(path.sep) ? base : base + path.sep),
+        );
+        if (anchor === undefined) throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
+        remainder = target.slice(anchor.length);
+        current = canonicalRoot;
+      }
+      pending.unshift(...remainder.split(path.sep === "\\" ? /[\\/]/ : "/"));
+      continue;
+    }
+    if (!stats.isDirectory()) return null;
+    current = next;
+  }
+  return current;
+}
+
+function pathKindFromStats(stats: Stats): ExplorerPathKind {
+  if (stats.isSymbolicLink()) return "symlink";
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  return "other";
+}
+
 async function resolveScopedPath({
   root,
   relativePath = ".",

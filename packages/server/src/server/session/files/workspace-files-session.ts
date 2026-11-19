@@ -15,6 +15,7 @@ import type {
   FileEntryRenameRequest,
   FileExplorerRequest,
   FileUploadRequest,
+  FsPathInspectRequest,
   FileSubscribeRequest,
   FileUnsubscribeRequest,
   FileWriteRequest,
@@ -28,6 +29,7 @@ import {
   deleteExplorerEntry,
   duplicateExplorerEntry,
   getDownloadableFileInfo,
+  inspectExplorerPath,
   listDirectoryEntries,
   readExplorerFile,
   renameExplorerEntry,
@@ -242,6 +244,31 @@ export class WorkspaceFilesSession {
         requestId: request.requestId,
       },
     });
+  }
+
+  async handleFsPathInspectRequest(request: FsPathInspectRequest): Promise<void> {
+    const { cwd: workspaceCwd, path: requestedPath, requestId } = request;
+    const cwd = workspaceCwd.trim();
+    const respond = (result: {
+      exists: boolean;
+      kind: "file" | "directory" | "symlink" | "other" | null;
+      size: number | null;
+      error: string | null;
+    }) =>
+      this.host.emit({
+        type: "fs.path.inspect.response",
+        payload: { cwd: workspaceCwd, path: requestedPath, ...result, requestId },
+      });
+    if (!cwd) {
+      respond({ exists: false, kind: null, size: null, error: "cwd is required" });
+      return;
+    }
+    try {
+      const inspection = await inspectExplorerPath({ root: cwd, relativePath: requestedPath });
+      respond({ ...inspection, error: null });
+    } catch (error) {
+      respond({ exists: false, kind: null, size: null, error: getErrorMessage(error) });
+    }
   }
 
   async handleFileExplorerRequest(request: FileExplorerRequest, source?: object): Promise<void> {

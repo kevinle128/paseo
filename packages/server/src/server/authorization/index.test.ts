@@ -74,6 +74,17 @@ describe("SessionAuthorization", () => {
     ).toBe(false);
   });
 
+  test("path inspection needs the same authority as listing a directory", () => {
+    const reader = new SessionAuthorization(["workspace.read"]);
+    const daemonReader = new SessionAuthorization(["daemon.read"]);
+
+    expect(reader.allowsInbound(inboundMessage("file_explorer_request"))).toBe(true);
+    expect(reader.allowsInbound(inboundMessage("fs.path.inspect.request"))).toBe(true);
+    expect(reader.allowsOutbound(outboundMessage("fs.path.inspect.response"))).toBe(true);
+    expect(daemonReader.allowsInbound(inboundMessage("fs.path.inspect.request"))).toBe(false);
+    expect(daemonReader.allowsOutbound(outboundMessage("fs.path.inspect.response"))).toBe(false);
+  });
+
   test("Hub can operate ordinary agents and recover workspaces without daemon administration", () => {
     const authorization = new SessionAuthorization(["hub.execute"]);
     for (const type of [

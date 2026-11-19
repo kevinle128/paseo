@@ -3143,6 +3143,15 @@ export const FileEntryDeleteRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// Read-only metadata probe: lstat on the entry itself. It never follows a link, reads content,
+// or reports a link target.
+export const FsPathInspectRequestSchema = z.object({
+  type: z.literal("fs.path.inspect.request"),
+  cwd: z.string(),
+  path: z.string(),
+  requestId: z.string(),
+});
+
 export const ProjectIconRequestSchema = z.object({
   type: z.literal("project_icon_request"),
   cwd: z.string(),
@@ -3696,6 +3705,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   FileEntryRenameRequestSchema,
   FileEntryDuplicateRequestSchema,
   FileEntryDeleteRequestSchema,
+  FsPathInspectRequestSchema,
   ProjectIconRequestSchema,
   ProjectIconGetRequestSchema,
   FileDownloadTokenRequestSchema,
@@ -6596,6 +6606,19 @@ export const FileEntryDeleteResponseSchema = z.object({
   }),
 });
 
+export const FsPathInspectResponseSchema = z.object({
+  type: z.literal("fs.path.inspect.response"),
+  payload: z.object({
+    cwd: z.string(),
+    path: z.string(),
+    exists: z.boolean(),
+    kind: z.enum(["file", "directory", "symlink", "other"]).nullable(),
+    size: z.number().nullable(),
+    error: z.string().nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const FileUpdateSchema = z.object({
   type: z.literal("fs.file.update"),
   payload: z.object({
@@ -7614,6 +7637,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FileEntryRenameResponseSchema,
   FileEntryDuplicateResponseSchema,
   FileEntryDeleteResponseSchema,
+  FsPathInspectResponseSchema,
   FileUpdateSchema,
   ProjectIconResponseSchema,
   ProjectIconGetResponseSchema,
@@ -8081,6 +8105,8 @@ export type FileEntryDuplicateRequest = z.infer<typeof FileEntryDuplicateRequest
 export type FileEntryDuplicateResponse = z.infer<typeof FileEntryDuplicateResponseSchema>;
 export type FileEntryDeleteRequest = z.infer<typeof FileEntryDeleteRequestSchema>;
 export type FileEntryDeleteResponse = z.infer<typeof FileEntryDeleteResponseSchema>;
+export type FsPathInspectRequest = z.infer<typeof FsPathInspectRequestSchema>;
+export type FsPathInspectResponse = z.infer<typeof FsPathInspectResponseSchema>;
 export type FileWriteResult = z.infer<typeof FileWriteResultSchema>;
 export type FileUpdate = z.infer<typeof FileUpdateSchema>;
 export type ProjectIconRequest = z.infer<typeof ProjectIconRequestSchema>;
