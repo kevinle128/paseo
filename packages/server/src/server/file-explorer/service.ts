@@ -822,6 +822,56 @@ async function isCaseOnlyRename(
   return isSameEntry && source.requestedPath.toLowerCase() === targetPath.toLowerCase();
 }
 
+export type ExplorerPathKind = "file" | "directory" | "symlink" | "other";
+
+export interface ExplorerPathInspection {
+  exists: boolean;
+  kind: ExplorerPathKind | null;
+  size: number | null;
+}
+
+/**
+ * Reports what the entry at `relativePath` is without following it: `lstat` runs on the entry
+ * itself, so a link is reported as a link. The parent directory is canonicalized and must stay
+ * inside the workspace, the same scoping `resolveScopedPath` applies to the other explorer
+ * operations. Content and link targets are never read.
+ */
+export async function inspectExplorerPath({
+  root,
+  relativePath = ".",
+}: ScopedPathParams): Promise<ExplorerPathInspection> {
+  const workspacePath = expandUserPath(root);
+  const requestedPath = resolvePathFromBase(workspacePath, relativePath);
+  assertWithinWorkspace(workspacePath, requestedPath);
+  const canonicalRoot = await fs.realpath(workspacePath);
+  const isWorkspaceRoot = path.relative(workspacePath, requestedPath) === "";
+  let entryPath = requestedPath;
+  if (!isWorkspaceRoot) {
+    try {
+      const canonicalParent = await fs.realpath(path.dirname(requestedPath));
+      assertWithinWorkspace(canonicalRoot, canonicalParent);
+      entryPath = path.join(canonicalParent, path.basename(requestedPath));
+    } catch (error) {
+      if (isMissingEntryError(error)) return { exists: false, kind: null, size: null };
+      throw error;
+    }
+  }
+  try {
+    const stats = await fs.lstat(entryPath);
+    return { exists: true, kind: pathKindFromStats(stats), size: stats.size };
+  } catch (error) {
+    if (isMissingEntryError(error)) return { exists: false, kind: null, size: null };
+    throw error;
+  }
+}
+
+function pathKindFromStats(stats: Stats): ExplorerPathKind {
+  if (stats.isSymbolicLink()) return "symlink";
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  return "other";
+}
+
 async function resolveScopedPath({
   root,
   relativePath = ".",

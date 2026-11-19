@@ -4,12 +4,15 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  mkdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { isPlatform } from "../../../test-utils/platform.js";
 import pino from "pino";
 import {
   decodeFileTransferFrame,
@@ -610,5 +613,123 @@ describe("WorkspaceFilesSession", () => {
     expect(file.path.startsWith(join(paseoHome, "uploads"))).toBe(true);
     expect(readFileSync(file.path, "utf8")).toBe("hello world");
     await ownership.close();
+  });
+
+  describe.skipIf(isPlatform("win32"))("fs.path.inspect.request", () => {
+    async function inspect(cwd: string, path: string) {
+      const { subsystem, emitted } = makeSubsystem();
+      await subsystem.handleFsPathInspectRequest({
+        type: "fs.path.inspect.request",
+        cwd,
+        path,
+        requestId: "req-inspect",
+      });
+      expect(emitted).toHaveLength(1);
+      const message = emitted[0];
+      if (message.type !== "fs.path.inspect.response") {
+        throw new Error(`expected fs.path.inspect.response, got ${message.type}`);
+      }
+      return message.payload;
+    }
+
+    test("reports a regular file with its size", async () => {
+      const cwd = makeDir("workspace-inspect-file-");
+      writeFileSync(join(cwd, "notes.txt"), "hello");
+
+      const payload = await inspect(cwd, "notes.txt");
+
+      expect(payload).toMatchObject({
+        exists: true,
+        kind: "file",
+        size: 5,
+        error: null,
+        requestId: "req-inspect",
+      });
+    });
+
+    test("reports a directory", async () => {
+      const cwd = makeDir("workspace-inspect-dir-");
+      mkdirSync(join(cwd, "sub"));
+
+      const payload = await inspect(cwd, "sub");
+
+      expect(payload).toMatchObject({ exists: true, kind: "directory", error: null });
+    });
+
+    test("reports a symlink to a file as a symlink", async () => {
+      const cwd = makeDir("workspace-inspect-link-");
+      writeFileSync(join(cwd, "real.txt"), "hello");
+      symlinkSync("real.txt", join(cwd, "link.txt"));
+
+      const payload = await inspect(cwd, "link.txt");
+
+      expect(payload).toMatchObject({ exists: true, kind: "symlink", error: null });
+    });
+
+    test("reports a symlink to a missing target as a symlink", async () => {
+      const cwd = makeDir("workspace-inspect-dangling-");
+      symlinkSync("missing.txt", join(cwd, "dangling.txt"));
+
+      const payload = await inspect(cwd, "dangling.txt");
+
+      expect(payload).toMatchObject({ exists: true, kind: "symlink", error: null });
+    });
+
+    test("reports a missing path as not existing", async () => {
+      const cwd = makeDir("workspace-inspect-missing-");
+
+      const missing = await inspect(cwd, "nope.txt");
+      const belowMissingDir = await inspect(cwd, "nope/nested.txt");
+
+      expect(missing).toMatchObject({ exists: false, kind: null, size: null, error: null });
+      expect(belowMissingDir).toMatchObject({ exists: false, kind: null, error: null });
+    });
+
+    test("refuses a path outside the workspace", async () => {
+      const cwd = makeDir("workspace-inspect-scope-");
+      const outside = makeDir("workspace-inspect-outside-");
+      writeFileSync(join(outside, "secret.txt"), "top secret");
+      symlinkSync(outside, join(cwd, "outside-dir"));
+
+      const lexical = await inspect(cwd, join("..", "other.txt"));
+      const absolute = await inspect(cwd, join(outside, "secret.txt"));
+      const throughLink = await inspect(cwd, "outside-dir/secret.txt");
+
+      for (const payload of [lexical, absolute, throughLink]) {
+        expect(payload.exists).toBe(false);
+        expect(payload.kind).toBeNull();
+        expect(payload.error).toBe("Access outside of workspace is not allowed");
+      }
+    });
+
+    test("returns metadata only: no content and no link target", async () => {
+      const cwd = makeDir("workspace-inspect-content-");
+      writeFileSync(join(cwd, "secret.txt"), "TOP-SECRET-CONTENT");
+      symlinkSync("secret.txt", join(cwd, "link-to-secret"));
+
+      const file = await inspect(cwd, "secret.txt");
+      const link = await inspect(cwd, "link-to-secret");
+
+      for (const payload of [file, link]) {
+        const wire = JSON.stringify(payload);
+        expect(wire).not.toContain("TOP-SECRET-CONTENT");
+        expect(Object.keys(payload).sort()).toEqual([
+          "cwd",
+          "error",
+          "exists",
+          "kind",
+          "path",
+          "requestId",
+          "size",
+        ]);
+      }
+      expect(JSON.stringify(link)).not.toContain(join(cwd, "secret.txt"));
+    });
+
+    test("requires a cwd", async () => {
+      const payload = await inspect("  ", "notes.txt");
+
+      expect(payload).toMatchObject({ exists: false, kind: null, error: "cwd is required" });
+    });
   });
 });

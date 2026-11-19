@@ -4,7 +4,12 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { getDownloadableFileInfo, listDirectoryEntries, readExplorerFile } from "./service.js";
+import {
+  getDownloadableFileInfo,
+  inspectExplorerPath,
+  listDirectoryEntries,
+  readExplorerFile,
+} from "./service.js";
 import { isPlatform } from "../../test-utils/platform.js";
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -102,6 +107,43 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
       expect(info.absolutePath).toBe(await realpath(target));
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("inspects a symlink as a symlink without following it, even when the target is outside", async () => {
+    const root = await createTempDir("paseo-file-explorer-");
+    const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
+
+    try {
+      const externalFile = path.join(outsideRoot, "secret.txt");
+      await writeFile(externalFile, "top secret\n", "utf-8");
+      await symlink(externalFile, path.join(root, "escape-link"));
+
+      const inspection = await inspectExplorerPath({ root, relativePath: "escape-link" });
+
+      expect(inspection.exists).toBe(true);
+      expect(inspection.kind).toBe("symlink");
+      expect(Object.keys(inspection).sort()).toEqual(["exists", "kind", "size"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to inspect a path below a symlinked directory that leaves the workspace", async () => {
+    const root = await createTempDir("paseo-file-explorer-");
+    const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
+
+    try {
+      await writeFile(path.join(outsideRoot, "secret.txt"), "top secret\n", "utf-8");
+      await symlink(outsideRoot, path.join(root, "outside-dir"));
+
+      await expect(
+        inspectExplorerPath({ root, relativePath: "outside-dir/secret.txt" }),
+      ).rejects.toThrow("Access outside of workspace is not allowed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
     }
   });
 });

@@ -5762,6 +5762,23 @@ export class DaemonClient {
     });
   }
 
+  /**
+   * Reports what is at `path` (resolved against `cwd`) without following links or reading
+   * content. Resolves with `kind: "symlink"` for a link, whatever its target is. Rejects when
+   * the daemon does not answer within `timeout` ms (the session RPC default when omitted).
+   */
+  async inspectPath(
+    cwd: string,
+    path: string,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<CorrelatedResponsePayload<"fs.path.inspect.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"fs.path.inspect.response">({
+      requestId: options.requestId,
+      message: { type: "fs.path.inspect.request", cwd, path },
+      timeout: options.timeout,
+    });
+  }
+
   async checkoutDiscardChanges(
     cwd: string,
     input: { paths: string[] },
