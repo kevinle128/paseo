@@ -909,8 +909,7 @@ async function resolveParentWithinWorkspace({
       if (path.isAbsolute(target)) {
         const anchor = [canonicalRoot, workspacePath].find(
           (base) =>
-            target === base ||
-            target.startsWith(base.endsWith(path.sep) ? base : base + path.sep),
+            target === base || target.startsWith(base.endsWith(path.sep) ? base : base + path.sep),
         );
         if (anchor === undefined) throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
         remainder = target.slice(anchor.length);
