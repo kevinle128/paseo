@@ -146,4 +146,69 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
       await rm(outsideRoot, { recursive: true, force: true });
     }
   });
+
+  it("refuses a path below an escaping symlink whether or not the outside path exists", async () => {
+    const root = await createTempDir("paseo-file-explorer-");
+    const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
+
+    try {
+      await mkdir(path.join(outsideRoot, "present"));
+      await symlink(outsideRoot, path.join(root, "outside-dir"));
+      await symlink(path.join(outsideRoot, "gone"), path.join(root, "dangling-outside"));
+
+      for (const relativePath of [
+        "outside-dir/present/probe",
+        "outside-dir/absent/probe",
+        "dangling-outside/probe",
+      ]) {
+        await expect(inspectExplorerPath({ root, relativePath })).rejects.toThrow(
+          "Access outside of workspace is not allowed",
+        );
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("follows symlinked parent directories that stay inside the workspace", async () => {
+    const root = await createTempDir("paseo-file-explorer-");
+
+    try {
+      await mkdir(path.join(root, "real"));
+      await writeFile(path.join(root, "real", "notes.txt"), "hello", "utf-8");
+      await symlink("real", path.join(root, "relative-link"));
+      await symlink(path.join(root, "real"), path.join(root, "absolute-link"));
+
+      for (const relativePath of ["relative-link/notes.txt", "absolute-link/notes.txt"]) {
+        await expect(inspectExplorerPath({ root, relativePath })).resolves.toEqual({
+          exists: true,
+          kind: "file",
+          size: 5,
+        });
+      }
+      await expect(
+        inspectExplorerPath({ root, relativePath: "relative-link/missing/notes.txt" }),
+      ).resolves.toEqual({ exists: false, kind: null, size: null });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("inspects the workspace root as a directory when the root is a symlink", async () => {
+    const realRoot = await createTempDir("paseo-file-explorer-real-");
+    const linkParent = await createTempDir("paseo-file-explorer-link-");
+    const root = path.join(linkParent, "workspace-link");
+
+    try {
+      await symlink(realRoot, root);
+
+      const inspection = await inspectExplorerPath({ root, relativePath: "." });
+
+      expect(inspection).toMatchObject({ exists: true, kind: "directory" });
+    } finally {
+      await rm(linkParent, { recursive: true, force: true });
+      await rm(realRoot, { recursive: true, force: true });
+    }
+  });
 });

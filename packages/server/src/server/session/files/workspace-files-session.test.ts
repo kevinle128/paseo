@@ -723,7 +723,7 @@ describe("WorkspaceFilesSession", () => {
           "size",
         ]);
       }
-      expect(JSON.stringify(link)).not.toContain(join(cwd, "secret.txt"));
+      expect(JSON.stringify(link)).not.toContain("secret.txt");
     });
 
     test("requires a cwd", async () => {
