@@ -5555,10 +5555,6 @@ class ClaudeAgentSession implements AgentSession {
         "Captured runtime model from SDK init",
       );
       const sessionModel = this.config.model ?? this.settingsDefaultModel;
-      if (isClaudeModeDependentModelAlias(sessionModel) && normalizedRuntimeModel) {
-        // Init always names the model used outside plan mode.
-        this.rememberAnsweringModel(false, normalizedRuntimeModel);
-      }
       if (isClaudeModeDependentModelAlias(sessionModel)) {
         // Claude Code picks Opus or Sonnet each turn; keep the alias so it round-trips into
         // config.model instead of freezing the model the CLI reported at init.
