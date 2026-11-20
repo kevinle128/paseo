@@ -10,6 +10,10 @@ const PLAN_MODEL = "claude-opus-4-8";
 
 // A turn that reports no model, as when the CLI has not answered under the alias yet.
 let reportModels = true;
+// A local command such as /model produces no model answer, only init.
+let answerReportsModel = true;
+// What init names; it can lag behind a `/model` command that ran in the same turn.
+let initModel = OUTSIDE_PLAN_MODEL;
 
 // Mimics the CLI under opusplan: init always reports the outside-plan model, while the model
 // that answers a turn depends on the permission mode when the turn starts.
@@ -29,13 +33,13 @@ class OpusPlanQuery {
         type: "system",
         subtype: "init",
         session_id: "opusplan-session",
-        ...(reportModels ? { model: OUTSIDE_PLAN_MODEL } : {}),
+        ...(reportModels ? { model: initModel } : {}),
         permissionMode: this.mode,
       } as SDKMessage;
       yield {
         type: "assistant",
         message: {
-          ...(reportModels
+          ...(reportModels && answerReportsModel
             ? { model: this.mode === "plan" ? PLAN_MODEL : OUTSIDE_PLAN_MODEL }
             : {}),
           content: [{ type: "text", text: "ok" }],
@@ -150,6 +154,22 @@ test("an opusplan session names the model for the current mode before any turn r
     expect((await session.getRuntimeInfo()).extra?.runtimeModel).toBe(OUTSIDE_PLAN_MODEL);
   } finally {
     reportModels = true;
+    await session.close();
+  }
+});
+
+test("a stale init model after a chat /model command is not taken for the outside-plan model", async () => {
+  initModel = PLAN_MODEL;
+  answerReportsModel = false;
+  const { session, runTurn } = await createOpusPlanSession("claude-opus-4-8", "acceptEdits");
+  try {
+    await runTurn("/model opusplan");
+    // Init still names the model the session had before the command. The turn answered no model,
+    // so the label comes from what the sonnet alias resolves to, not from init.
+    expect((await session.getRuntimeInfo()).extra?.runtimeModel).toBe(OUTSIDE_PLAN_MODEL);
+  } finally {
+    initModel = OUTSIDE_PLAN_MODEL;
+    answerReportsModel = true;
     await session.close();
   }
 });
