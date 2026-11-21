@@ -41,7 +41,7 @@ describe("server config", () => {
   });
 
   test.each([undefined, false, true])(
-    "restart recovery requires explicit opt-in (%s)",
+    "restart recovery is on unless explicitly disabled (%s)",
     async (enabled) => {
       const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-recovery-"));
       roots.push(paseoHome);
@@ -53,7 +53,7 @@ describe("server config", () => {
         }),
       );
       const config = loadConfig(paseoHome, { env: {} });
-      expect(config.resumeOnStartup).toBe(enabled === true);
+      expect(config.resumeOnStartup).toBe(enabled !== false);
       expect(config.resumePrompt).toBe("Continue exactly.\n");
     },
   );
