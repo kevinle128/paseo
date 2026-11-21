@@ -831,7 +831,12 @@ describe("model validation with the agent environment", () => {
         history: "replay",
         config: {
           cwd,
-          env: gateway === undefined ? {} : { AGY_TEST_GATEWAY: gateway },
+          env: {
+            PASEO_AGENT_ID: "agent-m",
+            PASEO_AGENT_CWD: cwd,
+            PASEO_WORKSPACE_ID: "workspace-m",
+            ...(gateway === undefined ? {} : { AGY_TEST_GATEWAY: gateway }),
+          },
           settings: {},
           mcpServers: {},
           persist: false,
@@ -898,6 +903,7 @@ describe("model validation with the agent environment", () => {
         error: { code: "INVALID_MODEL", message: `Unknown Antigravity model: ${target}` },
       }),
     );
+    expect((await probes(h)).map((entry) => entry.gateway)).toEqual(["stale", "hang"]);
   }, 30_000);
 
   it("does not probe again when the agent adds nothing to the launch environment", async () => {

@@ -73,6 +73,13 @@ export function validateSelection(
     );
 }
 
+// The daemon sets these on every session, so they say nothing about the gateway or credentials.
+const SESSION_IDENTITY_ENV_KEYS = new Set([
+  "PASEO_AGENT_ID",
+  "PASEO_AGENT_CWD",
+  "PASEO_WORKSPACE_ID",
+]);
+
 interface Selection {
   model?: string;
   mode?: string;
@@ -97,7 +104,9 @@ export async function validateSelectionWithAgentEnv(
     return;
   } catch (error) {
     const overlay = selected.env ?? {};
-    const differs = Object.entries(overlay).some(([key, value]) => launch.env[key] !== value);
+    const differs = Object.entries(overlay).some(
+      ([key, value]) => !SESSION_IDENTITY_ENV_KEYS.has(key) && launch.env[key] !== value,
+    );
     if (!(error instanceof AntigravityError) || error.code !== "INVALID_MODEL" || !differs)
       throw error;
     let fresh: ProviderCatalog;
