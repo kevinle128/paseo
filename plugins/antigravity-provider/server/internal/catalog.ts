@@ -72,3 +72,50 @@ export function validateSelection(
       "UNSUPPORTED_THINKING",
     );
 }
+
+interface Selection {
+  model?: string;
+  mode?: string;
+  thinkingOption?: string;
+}
+
+/**
+ * Validates against the shared catalog first. The shared catalog is probed with the daemon launch
+ * environment only, but the agent runs with the launch environment plus its own overlay (for
+ * example a gateway address injected just before the agent opens). When the shared catalog does
+ * not know the model, probe once with the agent's environment and validate against that result.
+ * The fresh catalog is used for this check only and never replaces the shared one. If that probe
+ * fails, the original error is thrown.
+ */
+export async function validateSelectionWithAgentEnv(
+  selected: Selection & { cwd?: string; env?: Record<string, string> },
+  catalog: ProviderCatalog,
+  launch: ProviderLaunch,
+): Promise<void> {
+  try {
+    validateSelection(selected, catalog);
+    return;
+  } catch (error) {
+    const overlay = selected.env ?? {};
+    const differs = Object.entries(overlay).some(([key, value]) => launch.env[key] !== value);
+    if (!(error instanceof AntigravityError) || error.code !== "INVALID_MODEL" || !differs)
+      throw error;
+    let fresh: ProviderCatalog;
+    try {
+      fresh = await getCatalog({ ...launch, env: { ...launch.env, ...overlay } }, selected.cwd);
+    } catch {
+      throw error;
+    }
+    try {
+      validateSelection(selected, fresh);
+    } catch (freshError) {
+      if (!(freshError instanceof AntigravityError) || freshError.code !== "INVALID_MODEL")
+        throw freshError;
+      const available = fresh.models.map((model) => model.id).join(", ");
+      throw new AntigravityError(
+        `${freshError.message}. Available models: ${available}`,
+        "INVALID_MODEL",
+      );
+    }
+  }
+}
