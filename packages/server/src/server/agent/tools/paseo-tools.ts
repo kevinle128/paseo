@@ -1219,7 +1219,7 @@ function createToolCatalog(
       .boolean()
       .optional()
       .describe(
-        "True creates a background agent: hidden from tabs, default lists, your subagent track and notifications. You still get its finish notification and can address it by id. Omit to inherit your own value (false without a caller); use it for helpers the user does not need to watch.",
+        "True creates a background agent: hidden from tabs, default lists, your subagent track and notifications. You still get its finish notification and can address it by id. Omit to inherit your own value (false without a caller). Set true only when the user asks to hide the agent. A normal sub-agent must stay visible so the user sees its progress and its finish.",
       ),
   };
   const legacyCreateAgentPlacementFields = {
