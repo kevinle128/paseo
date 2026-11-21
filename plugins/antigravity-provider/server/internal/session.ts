@@ -12,7 +12,7 @@ import type {
   ProviderUsage,
 } from "@getpaseo/plugin/server/provider";
 import { startDriver, selection, type Driver } from "./process.js";
-import { validateSelection } from "./catalog.js";
+import { validateSelectionWithAgentEnv } from "./catalog.js";
 import { PromptFiles } from "./prompt.js";
 import { toolItem } from "./timeline.js";
 import { AntigravityError, diagnostic, type Frame, type Step } from "./wire.js";
@@ -57,7 +57,11 @@ export class Session {
       ? persistenceSchema.parse(options.persistence).data.conversationId
       : null;
     this.firstMessage = this.conversationId === null;
-    validateSelection(this.config, options.catalog());
+  }
+
+  /** Rejects an unusable model or mode before the session is registered. */
+  async validate(): Promise<void> {
+    await validateSelectionWithAgentEnv(this.config, this.options.catalog(), this.options.launch);
   }
 
   async open(requestId: string, capabilities: readonly string[]): Promise<void> {
@@ -128,7 +132,7 @@ export class Session {
     }
   }
 
-  configure(changes: ProviderConfigChanges): void {
+  async configure(changes: ProviderConfigChanges): Promise<void> {
     const config = {
       ...this.config,
       model: changes.model === null ? undefined : (changes.model ?? this.config.model),
@@ -140,7 +144,7 @@ export class Session {
     };
     if (changes.settings && Object.keys(changes.settings).length > 0)
       throw new AntigravityError("Antigravity has no configurable settings");
-    validateSelection(config, this.options.catalog());
+    await validateSelectionWithAgentEnv(config, this.options.catalog(), this.options.launch);
     this.config = config;
     this.publishConfig();
   }

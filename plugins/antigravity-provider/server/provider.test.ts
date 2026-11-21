@@ -59,13 +59,13 @@ async function harness(env: Record<string, string> = {}) {
     ProviderEventSchema.parse(event);
     events.push(event);
   });
-  async function wait(predicate: (event: ProviderEvent) => boolean) {
-    await expect.poll(() => events.some(predicate), { timeout: 5000, interval: 10 }).toBe(true);
+  async function wait(predicate: (event: ProviderEvent) => boolean, timeout = 5000) {
+    await expect.poll(() => events.some(predicate), { timeout, interval: 10 }).toBe(true);
     const event = events.find(predicate);
     if (!event) throw new Error("Expected event missing");
     return event;
   }
-  async function request(input: ProviderInput) {
+  async function request(input: ProviderInput, timeout?: number) {
     await connection.send(input);
     if ("requestId" in input)
       await wait(
@@ -76,6 +76,7 @@ async function harness(env: Record<string, string> = {}) {
             event.type === "request.failed" ||
             event.type === "session.ready" ||
             event.type === "catalog"),
+        timeout,
       );
   }
   async function open(restored?: ProviderPersistence, sessionId = "s") {
@@ -812,3 +813,123 @@ it.runIf(process.platform === "win32")(
     });
   },
 );
+
+describe("model validation with the agent environment", () => {
+  const target = "gemini-3.7-flash-high";
+  async function openWith(
+    h: Awaited<ReturnType<typeof harness>>,
+    gateway: string | undefined,
+    model: string,
+    timeout?: number,
+  ) {
+    const cwd = temporary[temporary.length - 1];
+    await h.request(
+      {
+        type: "session.open",
+        requestId: "open-model",
+        sessionId: "m",
+        history: "replay",
+        config: {
+          cwd,
+          env: {
+            PASEO_AGENT_ID: "agent-m",
+            PASEO_AGENT_CWD: cwd,
+            PASEO_WORKSPACE_ID: "workspace-m",
+            ...(gateway === undefined ? {} : { AGY_TEST_GATEWAY: gateway }),
+          },
+          settings: {},
+          mcpServers: {},
+          persist: false,
+          model,
+        },
+      },
+      timeout,
+    );
+  }
+  async function probes(h: Awaited<ReturnType<typeof harness>>) {
+    return (await h.records()).filter((entry) => entry.args?.includes("models"));
+  }
+
+  it("accepts a model the agent environment knows after one extra probe", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "fresh", target);
+    expect(h.events).toContainEqual(expect.objectContaining({ type: "session.ready" }));
+    const seen = await probes(h);
+    expect(seen.map((entry) => entry.gateway)).toEqual(["stale", "fresh"]);
+    // An explicit refresh probes with the launch environment, so the fresh probe never reached the shared catalog.
+    await h.request({ type: "catalog", requestId: "shared" });
+    expect((await probes(h)).map((entry) => entry.gateway)).toEqual(["stale", "fresh", "stale"]);
+  });
+
+  it("does not probe again when the shared catalog already has the model", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "fresh", "gemini-3.8-flash-low");
+    expect(h.events).toContainEqual(expect.objectContaining({ type: "session.ready" }));
+    expect(await probes(h)).toHaveLength(1);
+  });
+
+  it("keeps the unknown-model error and lists the fresh catalog when both lack the model", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "fresh", "no-such-model");
+    const failed = h.events.find((event) => event.type === "request.failed");
+    expect(failed).toMatchObject({
+      error: {
+        code: "INVALID_MODEL",
+        message: expect.stringContaining("Unknown Antigravity model: no-such-model"),
+      },
+    });
+    expect(JSON.stringify(failed)).toContain(target);
+    expect(await probes(h)).toHaveLength(2);
+  });
+
+  it("keeps the original error when the second probe fails", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "broken", target);
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        type: "request.failed",
+        error: { code: "INVALID_MODEL", message: `Unknown Antigravity model: ${target}` },
+      }),
+    );
+    expect(await probes(h)).toHaveLength(2);
+  });
+
+  it("keeps the original error when the second probe times out", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "hang", target, 20_000);
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        type: "request.failed",
+        error: { code: "INVALID_MODEL", message: `Unknown Antigravity model: ${target}` },
+      }),
+    );
+    expect((await probes(h)).map((entry) => entry.gateway)).toEqual(["stale", "hang"]);
+  }, 30_000);
+
+  it("does not probe again when the agent adds nothing to the launch environment", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, undefined, target);
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        type: "request.failed",
+        error: expect.objectContaining({ code: "INVALID_MODEL" }),
+      }),
+    );
+    expect(await probes(h)).toHaveLength(1);
+  });
+
+  it("re-probes a model change with the agent environment", async () => {
+    const h = await harness({ AGY_TEST_GATEWAY: "stale" });
+    await openWith(h, "fresh", "gemini-3.8-flash-low");
+    await h.request({
+      type: "session.configure",
+      requestId: "switch",
+      sessionId: "m",
+      changes: { model: target },
+    });
+    expect(h.events).toContainEqual(
+      expect.objectContaining({ type: "request.completed", requestId: "switch" }),
+    );
+    expect((await probes(h)).map((entry) => entry.gateway)).toEqual(["stale", "fresh"]);
+  });
+});

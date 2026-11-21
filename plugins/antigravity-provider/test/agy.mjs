@@ -6,7 +6,12 @@ const log = process.env.AGY_TEST_LOG;
 function record(value) {
   if (log) appendFileSync(log, `${JSON.stringify(value)}\n`);
 }
-record({ args, pid: process.pid, env: process.env.AGY_SESSION_VALUE });
+record({
+  args,
+  pid: process.pid,
+  env: process.env.AGY_SESSION_VALUE,
+  gateway: process.env.AGY_TEST_GATEWAY,
+});
 function fixture(name, stream = "stdout") {
   return readFileSync(new URL(`./fixtures/${name}.${stream}.ndjson`, import.meta.url), "utf8")
     .trim()
@@ -23,7 +28,12 @@ if (args.includes("models")) {
     process.stderr.write(fixture("models-unauthenticated", "stderr").join("\n"));
     process.exit(1);
   }
-  process.stdout.write(fixture("models-api-key").join("\n") + "\n");
+  // The gateway value stands in for the key the daemon launches with versus the one an agent gets.
+  const gateway = process.env.AGY_TEST_GATEWAY;
+  if (gateway === "broken") process.exit(1);
+  if (gateway === "hang") await new Promise(() => setInterval(() => undefined, 1000));
+  const models = fixture("models-api-key");
+  process.stdout.write((gateway === "stale" ? models.slice(0, 3) : models).join("\n") + "\n");
   process.exit(0);
 }
 if (process.env.AGY_TEST_STARTUP === "auth") {

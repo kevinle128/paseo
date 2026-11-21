@@ -99,6 +99,12 @@ function createConnection(
           launch,
           emit,
         });
+        try {
+          await opened.validate();
+        } catch (error) {
+          await opened.close();
+          throw error;
+        }
         sessions.set(input.sessionId, opened);
         try {
           await opened.open(input.requestId, negotiated);
@@ -113,7 +119,7 @@ function createConnection(
         await session(input.sessionId).prompt(input.prompt);
         return;
       case "session.configure":
-        session(input.sessionId).configure(input.changes);
+        await session(input.sessionId).configure(input.changes);
         break;
       case "session.interrupt":
         await session(input.sessionId).interrupt();
