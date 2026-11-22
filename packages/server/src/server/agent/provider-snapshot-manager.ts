@@ -275,7 +275,6 @@ export class ProviderSnapshotManager {
     );
     this.generation = this.createGeneration(
       this.buildRegistry(this.runtimeSettings, this.providerOverrides),
-      this.providerOverrides,
     );
     this.providerClients = {
       ...this.extraClients,
@@ -440,7 +439,7 @@ export class ProviderSnapshotManager {
       }
     }
     for (const client of Object.values(clients)) this.ownedClients.add(client);
-    const generation = this.createGeneration(definitions, this.providerOverrides);
+    const generation = this.createGeneration(definitions);
     const state = this.createAgentManagerState(definitions, clients);
     this.installGeneration(generation, clients, changed);
     return { ...state, retiredProviders };
@@ -629,7 +628,7 @@ export class ProviderSnapshotManager {
       }
     }
     Object.assign(clients, this.extraClients);
-    const generation = this.createGeneration(definitions, providerOverrides);
+    const generation = this.createGeneration(definitions);
     const agentManagerState = this.createAgentManagerState(definitions, clients);
     return {
       agentManagerState,
@@ -834,7 +833,6 @@ export class ProviderSnapshotManager {
 
   private createGeneration(
     definitions: Record<AgentProvider, ProviderDefinition>,
-    overrides: Record<string, ProviderOverride> | undefined,
   ): RegistryGeneration {
     const order = Object.keys(definitions);
     const providerStates = new Map<
@@ -848,9 +846,7 @@ export class ProviderSnapshotManager {
         providerStates.set(provider, previous!);
         continue;
       }
-      const configuredExtends = !BUILTIN_PROVIDER_IDS.includes(provider)
-        ? overrides?.[provider]?.extends?.trim() || undefined
-        : undefined;
+      const configuredExtends = definition.configuration?.extends?.trim() || undefined;
       const custom = this.pluginProviders.has(provider) || !!configuredExtends;
       providerStates.set(provider, {
         discoveryLimit: previous?.discoveryLimit ?? pLimit({ concurrency: 4, rejectOnClear: true }),

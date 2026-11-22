@@ -1831,6 +1831,27 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
     }
   });
 
+  test("reload updates the snapshot extends when the cursor provider switches between acp and cursor", () => {
+    const wrapper = { label: "Cursor", command: ["cursor-agent", "acp"] };
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: { cursor: { extends: "acp", ...wrapper } },
+    });
+    const extendsOf = () =>
+      manager.getSnapshot().records.find((record) => record.entry.provider === "cursor")?.entry
+        .extends;
+    try {
+      expect(extendsOf()).toBe("acp");
+      manager.applyMutableProviderConfig(
+        { cursor: { extends: "cursor", ...wrapper } },
+        { replace: true },
+      );
+      expect(extendsOf()).toBe("cursor");
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("preparation leaves installed reads untouched and commit installs all target memberships before notification", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),

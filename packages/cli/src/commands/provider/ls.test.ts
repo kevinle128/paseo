@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
-import { renderJson } from "../../output/json.js";
+import { render } from "../../output/index.js";
 import { runLsCommand } from "./ls.js";
 
 const getProvidersSnapshot = vi.fn<() => Promise<{ entries: ProviderSnapshotEntry[] }>>();
@@ -47,9 +47,9 @@ describe("provider ls command", () => {
       { daemonTarget: { kind: "instance", home: "/tmp/provider-ls-test" } },
       {} as never,
     );
-    const parsed = JSON.parse(
-      renderJson(result, { format: "json", quiet: false, color: false }),
-    ) as Array<Record<string, unknown>>;
+    const parsed = JSON.parse(render(result, { format: "json" })) as Array<
+      Record<string, unknown>
+    >;
     const claude = parsed.find((entry) => entry.provider === "claude");
     const cursorPeer = parsed.find((entry) => entry.provider === "cursor-peer");
 
