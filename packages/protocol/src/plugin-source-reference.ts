@@ -1,3 +1,8 @@
+import {
+  FORK_SOURCE_PREFIX,
+  isForkRegistryIdentity,
+  parseForkRegistryReference,
+} from "./fork-plugin-source.js";
 import { parsePluginRegistryReference } from "./plugin-registry.js";
 import type { PluginInstallation } from "./messages.js";
 export interface PluginSourceReference {
@@ -7,6 +12,10 @@ export interface PluginSourceReference {
 }
 
 export function parsePluginSourceReference(reference: string): PluginSourceReference {
+  // The colon in `fork:owner/slug` is the source prefix. A later split would treat `fork` as the source.
+  if (parseForkRegistryReference(reference)) {
+    return { kind: "managed", source: reference, pluginPath: undefined };
+  }
   const prefix = /^(npm:|github:|git:(?!\/\/))/.exec(reference)?.[0];
   const source = prefix ? reference.slice(prefix.length) : reference;
   const parsed = splitPluginPath(source, { scp: prefix !== "npm:" });
@@ -66,7 +75,12 @@ function isPortableRelativePluginPath(pluginPath: string): boolean {
 
 export function formatPluginIdentity(identity: PluginInstallation["identity"]): string {
   if (identity.kind === "directory") return identity.path;
-  if (identity.registry) return `${new URL(identity.registry.url).host}/${identity.registry.id}`;
+  if (identity.registry) {
+    // `host/owner/slug` addresses the host root, which skips the fork registry's path prefix.
+    if (isForkRegistryIdentity(identity.registry))
+      return `${FORK_SOURCE_PREFIX}${identity.registry.id}`;
+    return `${new URL(identity.registry.url).host}/${identity.registry.id}`;
+  }
   const source = identity.kind === "npm" ? `npm:${identity.packageName}` : `git:${identity.remote}`;
   return identity.pluginPath === "." ? source : `${source}:${identity.pluginPath}`;
 }

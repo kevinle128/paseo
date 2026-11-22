@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListItem } from "@getpaseo/protocol/messages";
 import type { PluginListing } from "@getpaseo/protocol/plugin-registry";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
@@ -15,6 +16,7 @@ import { useToast } from "@/contexts/toast-api-context";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { pluginDisplayName } from "@/plugins/plugin-list";
+import { installSourceFor, listingKey } from "./fork-source";
 import { listingAuthor, listingSource, listingText, listingVersion } from "./listing";
 import { dismissFailedOperation, installPlugin, usePluginOperation } from "./operations";
 
@@ -22,7 +24,9 @@ const PLUGIN_SOURCE_DOCS_URL = "https://paseo.sh/docs/plugins/reference#plugin-s
 const SOURCE_SUBJECT = "source";
 
 /** What the sheet installs: a directory listing, or a source the user types. */
-export type InstallTarget = { kind: "listing"; listing: PluginListing } | { kind: "source" };
+export type InstallTarget =
+  | { kind: "listing"; listing: PluginListing; source?: PluginSourceKind }
+  | { kind: "source" };
 
 export function useHostLabel(serverId: string): string {
   const hosts = useHosts();
@@ -74,7 +78,11 @@ export function InstallPluginSheet({
     if (!client) return;
     const request = { client, queryClient, serverId, enablePlugins: pluginsOff, onInstalled };
     if (target.kind === "listing") {
-      void installPlugin({ ...request, source: target.listing.id, subject: target.listing.id });
+      void installPlugin({
+        ...request,
+        source: installSourceFor(target.source ?? "paseo", target.listing.id),
+        subject: listingKey(target.source, target.listing.id),
+      });
       onClose();
       return;
     }

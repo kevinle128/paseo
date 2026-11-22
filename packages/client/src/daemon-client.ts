@@ -16,6 +16,10 @@ import {
 } from "@getpaseo/protocol/binary-frames/index";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
+import {
+  FORK_SOURCE_PREFIX,
+  type PluginSourceKind,
+} from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListingDetail, PluginListingIndex } from "@getpaseo/protocol/plugin-registry";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
 import { subscribeTimeline, type TimelineMessage } from "./timeline-subscription/index.js";
@@ -6565,6 +6569,7 @@ export class DaemonClient {
     if (this.getLastServerInfoMessage()?.features?.pluginSourceInstallation !== true) {
       throw new Error("Update the host to install plugin sources.");
     }
+    if (input.source.startsWith(FORK_SOURCE_PREFIX)) this.requireForkPluginSource("fork");
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
       message: {
@@ -6600,26 +6605,44 @@ export class DaemonClient {
       throw new Error("Update the host to browse plugins.");
   }
 
-  /** The host's default plugin registry directory. */
-  async listPluginRegistry(): Promise<PluginListingIndex> {
+  /** An older host strips `source` and would answer from the default registry instead. */
+  private requireForkPluginSource(source: PluginSourceKind | undefined): void {
+    if (source !== "fork") return;
+    if (this.getLastServerInfoMessage()?.features?.forkPluginSource !== true)
+      throw new Error("Update the host to use the fork plugin registry.");
+  }
+
+  /** A plugin registry directory. Omits the default source so an older host sees the same request. */
+  async listPluginRegistry(source?: PluginSourceKind): Promise<PluginListingIndex> {
     this.requirePluginRegistry();
+    this.requireForkPluginSource(source);
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "plugin.registry.list.request", requestId },
+      message: {
+        type: "plugin.registry.list.request",
+        requestId,
+        ...(source && source !== "paseo" ? { source } : {}),
+      },
       responseType: "plugin.registry.list.response",
       timeout: 60_000,
     });
     return payload.index;
   }
 
-  /** One registry listing with its overview. */
-  async getRegistryPlugin(id: string): Promise<PluginListingDetail> {
+  /** One registry listing with its overview. Omits the default source so an older host sees the same request. */
+  async getRegistryPlugin(id: string, source?: PluginSourceKind): Promise<PluginListingDetail> {
     this.requirePluginRegistry();
+    this.requireForkPluginSource(source);
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "plugin.registry.get.request", requestId, id },
+      message: {
+        type: "plugin.registry.get.request",
+        requestId,
+        id,
+        ...(source && source !== "paseo" ? { source } : {}),
+      },
       responseType: "plugin.registry.get.response",
       timeout: 60_000,
     });

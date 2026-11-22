@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListing } from "@getpaseo/protocol/plugin-registry";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,8 @@ import { useInstalledPlugins } from "@/plugins/registry";
 import { BrowseTab } from "./browse-tab";
 import { InstallPluginSheet, type InstallTarget } from "./install-sheet";
 import { InstalledTab } from "./installed-tab";
-import { installedByListing } from "./listing";
+import { installedByListingKey, installedPluginsForSource, listingKey } from "./fork-source";
+import { PluginSourceMenu } from "./source-menu";
 import { PluginsOffAlert } from "./plugins-off-alert";
 import { useLivePluginList, usePluginDirectory } from "./queries";
 import { PluginRowsSkeleton } from "./skeletons";
@@ -31,26 +33,50 @@ export function PluginGalleryPage({ serverId }: { serverId: string }) {
   const supported = useHostFeature(serverId, "pluginManagement");
   useInstalledPlugins();
   const plugins = useLivePluginList(serverId);
-  const directory = usePluginDirectory(serverId);
+  const forkSource = useHostFeature(serverId, "forkPluginSource");
+  const paseoDirectory = usePluginDirectory(serverId, "paseo");
+  const forkDirectory = usePluginDirectory(serverId, "fork");
   const [chosenTab, setChosenTab] = useState<GalleryTab | null>(null);
   const [query, setQuery] = useState("");
+  const [source, setSource] = useState<PluginSourceKind>("paseo");
   const [installTarget, setInstallTarget] = useState<InstallTarget | null>(null);
   const installed = useMemo(() => plugins.data ?? [], [plugins.data]);
   // The opening tab is chosen once, so installing the first plugin does not move the user off Browse.
-  if (chosenTab === null && plugins.data)
+  // A host with only fork installs opens on the Fork source, so Installed is not empty.
+  if (chosenTab === null && plugins.data) {
     setChosenTab(plugins.data.length === 0 ? "browse" : "installed");
+    if (
+      forkSource &&
+      plugins.data.length > 0 &&
+      installedPluginsForSource(plugins.data, "paseo").length === 0
+    )
+      setSource("fork");
+  }
   const tab: GalleryTab = chosenTab ?? "installed";
-  const byListing = useMemo(() => installedByListing(installed), [installed]);
-  const listings = useMemo(
-    () => new Map((directory.query.data?.plugins ?? []).map((listing) => [listing.id, listing])),
-    [directory.query.data],
+  const browseSource: PluginSourceKind = forkSource && source === "fork" ? "fork" : "paseo";
+  const visibleInstalled = useMemo(
+    () => (forkSource ? installedPluginsForSource(installed, browseSource) : installed),
+    [browseSource, forkSource, installed],
   );
+  const byListing = useMemo(() => installedByListingKey(installed), [installed]);
+  const listings = useMemo(() => {
+    const merged = new Map<string, PluginListing>();
+    for (const listing of paseoDirectory.query.data?.plugins ?? []) {
+      merged.set(listingKey("paseo", listing.id), listing);
+    }
+    if (forkSource) {
+      for (const listing of forkDirectory.query.data?.plugins ?? []) {
+        merged.set(listingKey("fork", listing.id), listing);
+      }
+    }
+    return merged;
+  }, [forkDirectory.query.data, forkSource, paseoDirectory.query.data]);
   const tabs = useMemo(
     () => [
       {
         value: "installed" as const,
         label: plugins.data
-          ? t("settings.plugins.gallery.tabs.installedCount", { count: plugins.data.length })
+          ? t("settings.plugins.gallery.tabs.installedCount", { count: visibleInstalled.length })
           : t("settings.plugins.gallery.tabs.installed"),
         testID: "plugin-tab-installed",
       },
@@ -60,12 +86,13 @@ export function PluginGalleryPage({ serverId }: { serverId: string }) {
         testID: "plugin-tab-browse",
       },
     ],
-    [plugins.data, t],
+    [plugins.data, t, visibleInstalled.length],
   );
   const browse = useCallback(() => setChosenTab("browse"), []);
   const install = useCallback(
-    (listing: PluginListing) => setInstallTarget({ kind: "listing", listing }),
-    [],
+    (listing: PluginListing) =>
+      setInstallTarget({ kind: "listing", listing, source: browseSource }),
+    [browseSource],
   );
   const closeInstall = useCallback(() => setInstallTarget(null), []);
   const retry = useCallback(() => void plugins.refetch(), [plugins]);
@@ -101,13 +128,19 @@ export function PluginGalleryPage({ serverId }: { serverId: string }) {
       tab === "installed" ? (
         <InstalledTab
           serverId={serverId}
-          plugins={installed}
+          plugins={visibleInstalled}
           listings={listings}
           query={query}
           onBrowse={browse}
         />
       ) : (
-        <BrowseTab serverId={serverId} installed={byListing} query={query} onInstall={install} />
+        <BrowseTab
+          serverId={serverId}
+          installed={byListing}
+          query={query}
+          source={browseSource}
+          onInstall={install}
+        />
       );
   }
 
@@ -120,6 +153,7 @@ export function PluginGalleryPage({ serverId }: { serverId: string }) {
           onValueChange={setChosenTab}
           testID="plugin-tabs"
         />
+        {forkSource ? <PluginSourceMenu value={browseSource} onChange={setSource} /> : null}
         <View style={styles.search}>
           <SearchField
             value={query}

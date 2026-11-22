@@ -630,6 +630,7 @@ export function resolveConfigFromPersisted(
     worktreesRoot: resolveWorktreesRoot(paseoHome, persisted),
     pluginRegistries: persisted.pluginRegistries,
     pluginRegistryUrl: env.PASEO_PLUGIN_REGISTRY,
+    forkPluginRegistryUrl: env.PASEO_FORK_PLUGIN_REGISTRY,
     mcpDebug: env.MCP_DEBUG === "1",
     isDev: resolvePaseoNodeEnv(env) === "development",
     agentStoragePath: path.join(paseoHome, "agents"),

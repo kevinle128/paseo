@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Image, ScrollView, Text, View } from "react-native";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
 import { StyleSheet } from "react-native-unistyles";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListItem, PluginUpdatePreview } from "@getpaseo/protocol/messages";
 import { formatPluginInstallation } from "@getpaseo/protocol/plugin-source-reference";
 import type {
@@ -31,9 +32,9 @@ import { usePluginActions, type PluginAction } from "./actions";
 import { useListingMeta } from "./browse-tab";
 import { ListingInstallControl } from "./install-control";
 import { InstallPluginSheet, type InstallTarget } from "./install-sheet";
+import { installedByListingKey, installedSource, listingKey } from "./fork-source";
 import {
   categoryLabel,
-  installedByListing,
   installedListingId,
   listingAuthorAvatar,
   listingImages,
@@ -58,19 +59,22 @@ import { pluginErrorText } from "./error-text";
 /** Which plugin the page is for: one installed on the host, or one listed in the directory. */
 export type PluginPageSubject =
   | { kind: "installed"; pluginId: string; screenId?: string }
-  | { kind: "listing"; listingId: string };
+  | { kind: "listing"; listingId: string; source?: PluginSourceKind };
 
 function useResolvedPlugin(serverId: string, subject: PluginPageSubject) {
   const plugins = useLivePluginList(serverId);
   const plugin = useMemo(() => {
     const list = plugins.data ?? [];
     if (subject.kind === "installed") return list.find((item) => item.id === subject.pluginId);
-    return installedByListing(list).get(subject.listingId);
+    return installedByListingKey(list).get(
+      listingKey(subject.source ?? "paseo", subject.listingId),
+    );
   }, [plugins.data, subject]);
+  const source = subject.kind === "listing" ? (subject.source ?? "paseo") : installedSource(plugin);
   const listingId =
     subject.kind === "listing" ? subject.listingId : plugin && installedListingId(plugin);
-  const detail = usePluginListing(serverId, listingId);
-  const directory = usePluginDirectory(serverId);
+  const detail = usePluginListing(serverId, listingId, source);
+  const directory = usePluginDirectory(serverId, source);
   // The directory the user came from already has the listing, so the page shows it at once and
   // only the overview waits for the listing's own request.
   const listing =
@@ -81,6 +85,7 @@ function useResolvedPlugin(serverId: string, subject: PluginPageSubject) {
     listingId,
     listing,
     detail,
+    source,
     loading: plugins.isLoading || (subject.kind === "listing" && listingLoading),
   };
 }
@@ -283,6 +288,7 @@ function usePluginPageModel({
   plugin,
   listing,
   detail,
+  source,
   installOperation,
 }: {
   serverId: string;
@@ -291,10 +297,11 @@ function usePluginPageModel({
   listing?: PluginListing;
   /** The listing with its overview, once its own request returns. */
   detail?: PluginListingDetail;
+  source?: PluginSourceKind;
   installOperation: PluginOperation | undefined;
 }): PluginPageModel {
   const { i18n } = useTranslation();
-  const directory = usePluginDirectory(serverId);
+  const directory = usePluginDirectory(serverId, source);
   const meta = useListingMeta();
   const pluginId = plugin?.id ?? "";
   const installedPlugin = useInstalledPlugin(serverId, pluginId);
@@ -403,29 +410,37 @@ export function PluginPage({
 }) {
   const { t } = useTranslation();
   const compact = useIsCompactFormFactor();
-  const { plugin, listingId, listing, detail, loading } = useResolvedPlugin(serverId, subject);
-  const installOperation = usePluginOperation(serverId, listingId);
+  const { plugin, listingId, listing, detail, source, loading } = useResolvedPlugin(
+    serverId,
+    subject,
+  );
+  const installOperation = usePluginOperation(
+    serverId,
+    listingId ? listingKey(source, listingId) : undefined,
+  );
   const model = usePluginPageModel({
     serverId,
     subject,
     plugin,
     listing,
     detail: detail.data,
+    source,
     installOperation,
   });
   const [installTarget, setInstallTarget] = useState<InstallTarget | null>(null);
   const install = useCallback(
-    (target: PluginListing) => setInstallTarget({ kind: "listing", listing: target }),
-    [],
+    (target: PluginListing) =>
+      setInstallTarget({ kind: "listing", listing: target, ...(source ? { source } : {}) }),
+    [source],
   );
   const closeInstall = useCallback(() => setInstallTarget(null), []);
   // An installed page finds its listing through the plugin, which uninstalling removes. A listed
   // plugin's page becomes its listing's page, offering Install again; any other returns to Plugins.
   const onRemoved = useCallback(() => {
     if (subject.kind !== "installed") return;
-    if (listingId) router.replace(buildPluginListingRoute(serverId, listingId));
+    if (listingId) router.replace(buildPluginListingRoute(serverId, listingId, source));
     else onBack();
-  }, [listingId, onBack, serverId, subject.kind]);
+  }, [listingId, onBack, serverId, source, subject.kind]);
 
   const back = compact ? null : (
     <Button onPress={onBack} variant="ghost" leftIcon={ArrowLeft} style={styles.back}>
