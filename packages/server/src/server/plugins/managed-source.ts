@@ -160,8 +160,10 @@ export class ManagedPluginSources {
     input: InstallInput,
     target?: PluginUpdateTarget,
   ): Promise<ManagedPluginCandidate> {
+    // A fork install stores the canonical fork URL, which clients recognize; the configured fork
+    // registry is applied when the daemon fetches.
     const registry =
-      parseForkRegistryReference(input.source, this.registryOptions.forkUrl) ??
+      parseForkRegistryReference(input.source) ??
       parsePluginRegistryReference(input.source, this.registryOptions.defaultUrl);
     if (registry) {
       if (input.ref)

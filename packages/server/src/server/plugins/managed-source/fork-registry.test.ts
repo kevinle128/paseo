@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FORK_PLUGIN_REGISTRY_URL } from "@getpaseo/protocol/fork-plugin-source";
 import { ManagedPluginSources } from "../managed-source.js";
 import { registryBaseFor } from "./fork-registry.js";
-import { getRegistryPlugin, listRegistryPlugins, type RegistryOptions } from "./registry.js";
+import {
+  getRegistryPlugin,
+  listRegistryPlugins,
+  resolveRegistryPlugin,
+  type RegistryOptions,
+} from "./registry.js";
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -166,13 +171,32 @@ describe("fork registry browsing", () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-fork-registry-"));
     roots.push(home);
     const fork = await listen({
-      "/plugins/kevinle128/x.json": { id: "kevinle128/other" },
+      "/plugins/kevinle128/x.json": listing("kevinle128/other", "Other"),
     });
     const sources = new ManagedPluginSources(home, { forkUrl: fork.base });
 
-    await expect(sources.prepareInstall({ source: "fork:kevinle128/x" })).rejects.toThrow();
+    await expect(sources.prepareInstall({ source: "fork:kevinle128/x" })).rejects.toThrow(
+      "Registry returned a different plugin ID",
+    );
     expect(fork.requests).toEqual([
       { path: "/plugins/kevinle128/x.json", authorization: undefined, install: "1" },
+    ]);
+  });
+
+  it("resolves a stored canonical fork identity through the configured fork registry", async () => {
+    const fork = await listen({
+      "/plugins/kevinle128/x.json": listing("kevinle128/x", "X"),
+    });
+    const options: RegistryOptions = { forkUrl: `${fork.base}/` };
+
+    const resolved = await resolveRegistryPlugin(
+      { url: FORK_PLUGIN_REGISTRY_URL, id: "kevinle128/x" },
+      options,
+      false,
+    );
+    expect(resolved.target).toEqual({ kind: "git", commit: "a".repeat(40) });
+    expect(fork.requests).toEqual([
+      { path: "/plugins/kevinle128/x.json", authorization: undefined, install: undefined },
     ]);
   });
 });

@@ -76,7 +76,7 @@ function ListingRow({
 }) {
   const { i18n } = useTranslation();
   const meta = useListingMeta();
-  const operation = usePluginOperation(serverId, listing.id);
+  const operation = usePluginOperation(serverId, listingKey(source, listing.id));
   const { name, description } = listingText(listing, i18n.language);
   const open = useCallback(
     () => router.push(buildPluginListingRoute(serverId, listing.id, source)),

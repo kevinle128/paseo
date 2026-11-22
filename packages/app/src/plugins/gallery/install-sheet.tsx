@@ -16,7 +16,7 @@ import { useToast } from "@/contexts/toast-api-context";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { pluginDisplayName } from "@/plugins/plugin-list";
-import { installSourceFor } from "./fork-source";
+import { installSourceFor, listingKey } from "./fork-source";
 import { listingAuthor, listingSource, listingText, listingVersion } from "./listing";
 import { dismissFailedOperation, installPlugin, usePluginOperation } from "./operations";
 
@@ -81,7 +81,7 @@ export function InstallPluginSheet({
       void installPlugin({
         ...request,
         source: installSourceFor(target.source ?? "paseo", target.listing.id),
-        subject: target.listing.id,
+        subject: listingKey(target.source, target.listing.id),
       });
       onClose();
       return;

@@ -16,7 +16,10 @@ import {
 } from "@getpaseo/protocol/binary-frames/index";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
-import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
+import {
+  FORK_SOURCE_PREFIX,
+  type PluginSourceKind,
+} from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListingDetail, PluginListingIndex } from "@getpaseo/protocol/plugin-registry";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
 import { subscribeTimeline, type TimelineMessage } from "./timeline-subscription/index.js";
@@ -6566,6 +6569,7 @@ export class DaemonClient {
     if (this.getLastServerInfoMessage()?.features?.pluginSourceInstallation !== true) {
       throw new Error("Update the host to install plugin sources.");
     }
+    if (input.source.startsWith(FORK_SOURCE_PREFIX)) this.requireForkPluginSource("fork");
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
       message: {
@@ -6601,9 +6605,17 @@ export class DaemonClient {
       throw new Error("Update the host to browse plugins.");
   }
 
+  /** An older host strips `source` and would answer from the default registry instead. */
+  private requireForkPluginSource(source: PluginSourceKind | undefined): void {
+    if (source !== "fork") return;
+    if (this.getLastServerInfoMessage()?.features?.forkPluginSource !== true)
+      throw new Error("Update the host to use the fork plugin registry.");
+  }
+
   /** A plugin registry directory. Omits the default source so an older host sees the same request. */
   async listPluginRegistry(source?: PluginSourceKind): Promise<PluginListingIndex> {
     this.requirePluginRegistry();
+    this.requireForkPluginSource(source);
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
@@ -6621,6 +6633,7 @@ export class DaemonClient {
   /** One registry listing with its overview. Omits the default source so an older host sees the same request. */
   async getRegistryPlugin(id: string, source?: PluginSourceKind): Promise<PluginListingDetail> {
     this.requirePluginRegistry();
+    this.requireForkPluginSource(source);
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,

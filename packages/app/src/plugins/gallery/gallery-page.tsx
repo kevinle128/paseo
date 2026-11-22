@@ -42,8 +42,16 @@ export function PluginGalleryPage({ serverId }: { serverId: string }) {
   const [installTarget, setInstallTarget] = useState<InstallTarget | null>(null);
   const installed = useMemo(() => plugins.data ?? [], [plugins.data]);
   // The opening tab is chosen once, so installing the first plugin does not move the user off Browse.
-  if (chosenTab === null && plugins.data)
+  // A host with only fork installs opens on the Fork source, so Installed is not empty.
+  if (chosenTab === null && plugins.data) {
     setChosenTab(plugins.data.length === 0 ? "browse" : "installed");
+    if (
+      forkSource &&
+      plugins.data.length > 0 &&
+      installedPluginsForSource(plugins.data, "paseo").length === 0
+    )
+      setSource("fork");
+  }
   const tab: GalleryTab = chosenTab ?? "installed";
   const browseSource: PluginSourceKind = forkSource && source === "fork" ? "fork" : "paseo";
   const visibleInstalled = useMemo(

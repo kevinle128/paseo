@@ -9,7 +9,10 @@ import {
   type PluginRegistryIndex,
   type PluginRegistryIdentity,
 } from "@getpaseo/protocol/plugin-registry";
-import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
+import {
+  isForkRegistryIdentity,
+  type PluginSourceKind,
+} from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginUpdateTarget } from "@getpaseo/protocol/messages";
 import { z } from "zod";
 import { registryBaseFor } from "./fork-registry.js";
@@ -110,10 +113,14 @@ export async function resolveRegistryPlugin(
   options: RegistryOptions,
   install: boolean,
 ) {
-  const base = new URL(identity.url);
-  const headers = registryHeaders(identity.url, options);
+  // A fork identity names the canonical fork registry; fetch from the one this daemon configures.
+  const registryUrl = isForkRegistryIdentity(identity)
+    ? (registryBaseFor("fork", options) ?? identity.url)
+    : identity.url;
+  const base = new URL(registryUrl);
+  const headers = registryHeaders(registryUrl, options);
   if (install) headers["X-Paseo-Install"] = "1";
-  const url = `${identity.url.replace(/\/+$/, "")}/plugins/${identity.id}.json`;
+  const url = `${registryUrl.replace(/\/+$/, "")}/plugins/${identity.id}.json`;
   let response: Response;
   try {
     response = await fetch(url, {

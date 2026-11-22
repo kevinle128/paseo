@@ -414,7 +414,10 @@ export function PluginPage({
     serverId,
     subject,
   );
-  const installOperation = usePluginOperation(serverId, listingId);
+  const installOperation = usePluginOperation(
+    serverId,
+    listingId ? listingKey(source, listingId) : undefined,
+  );
   const model = usePluginPageModel({
     serverId,
     subject,
