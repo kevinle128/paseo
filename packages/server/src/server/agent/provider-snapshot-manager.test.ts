@@ -1779,6 +1779,32 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
     }
   });
 
+  test("reload replaces a custom ACP client when extends switches from acp to cursor", () => {
+    const wrapper = {
+      label: "Cursor Wrapper",
+      description: "Cursor wrapper",
+      command: ["/opt/wrapper/cursor-acp"],
+    };
+    const config = { "cursor-wrapper": { extends: "acp", ...wrapper } };
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: config,
+    });
+    try {
+      const before = manager.getAgentManagerProviderState().clients;
+      const unchanged = manager.applyMutableProviderConfig(config, { replace: true }).clients;
+      expect(unchanged["cursor-wrapper"]).toBe(before["cursor-wrapper"]);
+      const switched = manager.applyMutableProviderConfig(
+        { "cursor-wrapper": { extends: "cursor", ...wrapper } },
+        { replace: true },
+      ).clients;
+      expect(switched["cursor-wrapper"]).toBeDefined();
+      expect(switched["cursor-wrapper"]).not.toBe(before["cursor-wrapper"]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("preparation leaves installed reads untouched and commit installs all target memberships before notification", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),

@@ -141,6 +141,8 @@ interface ResolvedProvider {
   profileModelsAreAdditive: boolean;
   enabled: boolean;
   derivedFromProviderId: string | null;
+  // Client adapter of a custom ACP provider, so a switch between "acp" and "cursor" changes the configuration.
+  acpClient?: "cursor" | "generic";
   providerOptions?: ProviderOptions;
   createBaseClient: (logger: Logger) => AgentClient;
   contract: ProviderContract;
@@ -810,6 +812,68 @@ function buildResolvedBuiltinProviders(
   return resolvedProviders;
 }
 
+function resolveCustomACPProvider(
+  providerId: string,
+  override: ProviderOverride,
+): ResolvedProvider {
+  const usesCursorClient = providerId === "cursor" || override.extends === "cursor";
+  const configuredCommand =
+    override.command && isNonEmptyStringArray(override.command) ? override.command : null;
+  if (!configuredCommand && override.extends === "acp") {
+    throw new Error(`ACP provider '${providerId}' requires a command`);
+  }
+  // Capture command in const for closure - TypeScript can't track type refinement inside closures
+  const command = configuredCommand ?? getCursorACPCommand(undefined);
+
+  return {
+    definition: createDerivedDefinition(
+      providerId,
+      {
+        id: providerId,
+        label: override.label ?? providerId,
+        description: override.description ?? (usesCursorClient ? "Cursor" : "Custom ACP provider"),
+        defaultModeId: null,
+        modes: [],
+      },
+      override,
+    ),
+    runtimeSettings: toRuntimeSettings(override),
+    profileModels: override.models ?? [],
+    additionalModels: override.additionalModels ?? [],
+    profileModelsAreAdditive: false,
+    enabled: override.enabled !== false,
+    derivedFromProviderId: null,
+    acpClient: usesCursorClient ? "cursor" : "generic",
+    providerOptions: configuredProviderOptions(override),
+    createBaseClient: (logger) => {
+      const acpOptions = {
+        logger,
+        command,
+        env: override.env,
+        providerId,
+        label: override.label ?? providerId,
+      };
+      if (usesCursorClient) {
+        return new CursorACPAgentClient(acpOptions);
+      }
+      if (providerId === "kimi") {
+        return new KimiACPAgentClient(acpOptions);
+      }
+      if (providerId === "kiro") {
+        return new KiroACPAgentClient(acpOptions);
+      }
+      if (providerId === "traecli") {
+        return new TraeACPAgentClient(acpOptions);
+      }
+      return new GenericACPAgentClient(acpOptions);
+    },
+    contract:
+      providerId === HUB_E2E_PROVIDER_ID
+        ? HUB_E2E_PROVIDER_CONTRACT
+        : UNSUPPORTED_PROVIDER_CONTRACT,
+  };
+}
+
 function addDerivedProviders(
   resolvedProviders: Map<string, ResolvedProvider>,
   providerOverrides: Record<string, ProviderOverride>,
@@ -825,59 +889,8 @@ function addDerivedProviders(
       continue;
     }
 
-    if (override.extends === "acp") {
-      if (!override.command || !isNonEmptyStringArray(override.command)) {
-        throw new Error(`ACP provider '${providerId}' requires a command`);
-      }
-      // Capture command in const for closure - TypeScript can't track type refinement inside closures
-      const command = override.command;
-
-      resolvedProviders.set(providerId, {
-        definition: createDerivedDefinition(
-          providerId,
-          {
-            id: providerId,
-            label: override.label ?? providerId,
-            description: override.description ?? "Custom ACP provider",
-            defaultModeId: null,
-            modes: [],
-          },
-          override,
-        ),
-        runtimeSettings: toRuntimeSettings(override),
-        profileModels: override.models ?? [],
-        additionalModels: override.additionalModels ?? [],
-        profileModelsAreAdditive: false,
-        enabled: override.enabled !== false,
-        derivedFromProviderId: null,
-        providerOptions: configuredProviderOptions(override),
-        createBaseClient: (logger) => {
-          const acpOptions = {
-            logger,
-            command,
-            env: override.env,
-            providerId,
-            label: override.label ?? providerId,
-          };
-          if (providerId === "cursor") {
-            return new CursorACPAgentClient(acpOptions);
-          }
-          if (providerId === "kimi") {
-            return new KimiACPAgentClient(acpOptions);
-          }
-          if (providerId === "kiro") {
-            return new KiroACPAgentClient(acpOptions);
-          }
-          if (providerId === "traecli") {
-            return new TraeACPAgentClient(acpOptions);
-          }
-          return new GenericACPAgentClient(acpOptions);
-        },
-        contract:
-          providerId === HUB_E2E_PROVIDER_ID
-            ? HUB_E2E_PROVIDER_CONTRACT
-            : UNSUPPORTED_PROVIDER_CONTRACT,
-      });
+    if (override.extends === "acp" || override.extends === "cursor") {
+      resolvedProviders.set(providerId, resolveCustomACPProvider(providerId, override));
       continue;
     }
 

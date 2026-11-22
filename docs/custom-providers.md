@@ -738,7 +738,7 @@ Every entry under `agents.providers` accepts these fields:
 
 | Field              | Type                      | Required          | Description                                                        |
 | ------------------ | ------------------------- | ----------------- | ------------------------------------------------------------------ |
-| `extends`          | `string`                  | Yes (custom only) | Built-in provider ID to inherit from, or `"acp"`                   |
+| `extends`          | `string`                  | Yes (custom only) | Built-in provider ID to inherit from, `"acp"`, or `"cursor"`       |
 | `label`            | `string`                  | Yes (custom only) | Display name in the UI                                             |
 | `description`      | `string`                  | No                | Short description shown in the UI                                  |
 | `command`          | `string[]`                | Yes (ACP only)    | Command to spawn the agent process                                 |
@@ -809,6 +809,8 @@ Use `disallowedTools` to disable unsupported tools:
 Built-in providers: `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`
 
 Special value: `acp` — creates a generic ACP provider (requires `command`)
+
+Special value: `cursor` — an ACP provider that keeps the Cursor client: the `cursor/list_available_models` catalog, fast mode and the wait for slash commands. `command` is optional and defaults to `cursor-agent acp`; set it to run a wrapper. Use this instead of `acp` for any provider ID other than `cursor` that launches Cursor, because `acp` only selects the Cursor client for the ID `cursor`.
 
 ### Full example
 

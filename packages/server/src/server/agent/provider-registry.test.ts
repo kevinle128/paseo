@@ -853,6 +853,33 @@ test("cursor provider extending acp uses CursorACPAgentClient", () => {
   expect(mockState.constructorArgs.genericAcp).toEqual([]);
 });
 
+test("a provider extending cursor runs its own command with CursorACPAgentClient", () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: {
+      "slp-cursor-peer": {
+        extends: "cursor",
+        label: "SLP Cursor Peer",
+        command: ["/opt/slp/cursor-peer"],
+      },
+    },
+  });
+
+  expect(registry["slp-cursor-peer"].createClient(logger).provider).toBe("slp-cursor-peer");
+  expect(mockState.constructorArgs.cursor[0]).toEqual({ command: ["/opt/slp/cursor-peer"] });
+  expect(mockState.constructorArgs.genericAcp).toEqual([]);
+});
+
+test("a provider extending cursor without a command runs cursor-agent acp", () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: {
+      "cursor-fast": { extends: "cursor", label: "Cursor Fast" },
+    },
+  });
+
+  registry["cursor-fast"].createClient(logger);
+  expect(mockState.constructorArgs.cursor[0]).toEqual({ command: ["cursor-agent", "acp"] });
+});
+
 test("wrapped cursor client lists ACP controls through the inner provider", async () => {
   const registry = buildProviderRegistry(logger, {
     providerOverrides: {
