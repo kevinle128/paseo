@@ -1,3 +1,5 @@
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
+import { parseForkRegistryReference } from "@getpaseo/protocol/fork-plugin-source";
 import {
   PluginRegistryIdentitySchema,
   parsePluginRegistryReference,
@@ -158,7 +160,9 @@ export class ManagedPluginSources {
     input: InstallInput,
     target?: PluginUpdateTarget,
   ): Promise<ManagedPluginCandidate> {
-    const registry = parsePluginRegistryReference(input.source, this.registryOptions.defaultUrl);
+    const registry =
+      parseForkRegistryReference(input.source, this.registryOptions.forkUrl) ??
+      parsePluginRegistryReference(input.source, this.registryOptions.defaultUrl);
     if (registry) {
       if (input.ref)
         throw new Error(
@@ -362,12 +366,12 @@ export class ManagedPluginSources {
     }
   }
 
-  listRegistry() {
-    return listRegistryPlugins(this.registryOptions);
+  listRegistry(source?: PluginSourceKind) {
+    return listRegistryPlugins(this.registryOptions, source);
   }
 
-  getRegistryPlugin(id: string) {
-    return getRegistryPlugin(id, this.registryOptions);
+  getRegistryPlugin(id: string, source?: PluginSourceKind) {
+    return getRegistryPlugin(id, this.registryOptions, source);
   }
 
   async status(pluginId: string, configuredPath: string): Promise<PluginSourceStatusItem> {

@@ -1,4 +1,5 @@
 import { router, type Href } from "expo-router";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import {
   navigateToWorkspace,
   navigateToLastWorkspace,
@@ -36,7 +37,7 @@ export function openSettingsFromSidebar(input: {
 
 export type SettingsView =
   | { kind: "plugin"; serverId: string; pluginId: string; screenId?: string }
-  | { kind: "pluginListing"; serverId: string; listingId: string }
+  | { kind: "pluginListing"; serverId: string; listingId: string; source?: PluginSourceKind }
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
   | { kind: "host"; serverId: string; section: HostSectionSlug }

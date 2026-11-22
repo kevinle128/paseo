@@ -19,6 +19,7 @@ import {
   HostsRouteFrameSchema,
   HostsRouteClosedSchema,
 } from "./hosts.js";
+import { PluginSourceKindSchema } from "./fork-plugin-source.js";
 import {
   PluginRegistryIdSchema,
   PluginRegistryIdentitySchema,
@@ -1681,12 +1682,14 @@ export const PluginSourceStatusRequestSchema = z.object({
 export const PluginRegistryListRequestSchema = z.object({
   type: z.literal("plugin.registry.list.request"),
   requestId: z.string(),
+  source: PluginSourceKindSchema.optional(),
 });
 
 export const PluginRegistryGetRequestSchema = z.object({
   type: z.literal("plugin.registry.get.request"),
   requestId: z.string(),
   id: PluginRegistryIdSchema,
+  source: PluginSourceKindSchema.optional(),
 });
 
 export const PluginSourceUpdateRequestSchema = z.object({
@@ -4003,6 +4006,8 @@ export const ServerInfoStatusPayloadSchema = z
         pluginSourceUpdates: z.boolean().optional(),
         // COMPAT(pluginRegistry): added in v0.16.0, remove gate after 2027-05-15.
         pluginRegistry: z.boolean().optional(),
+        // Hosts that advertise this flag can browse the fork plugin registry.
+        forkPluginSource: z.boolean().optional(),
         // COMPAT(pluginThemes): added in v0.5.0, remove gate after 2027-08-20.
         // A daemon that predates this flag keeps `addTheme` in the server bundle it compiles,
         // so a theme plugin cannot start there at all.

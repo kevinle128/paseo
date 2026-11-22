@@ -17,6 +17,7 @@ import { usePluginEvaluationError } from "@/plugins/registry";
 import { pluginDisplayName } from "@/plugins/plugin-list";
 import { settingsStyles } from "@/styles/settings";
 import { usePluginActions } from "./actions";
+import { installedSource, listingKey } from "./fork-source";
 import { listingAuthor, listingAuthorAvatar, installedListingId } from "./listing";
 import { updatePlugins, usePluginOperation } from "./operations";
 import { PluginRow } from "./plugin-row";
@@ -195,7 +196,7 @@ export function InstalledTab({
   const pendingUpdates = (updates.data ?? []).filter((preview) => byId.has(preview.id));
   const listingOf = (plugin: PluginListItem) => {
     const id = installedListingId(plugin);
-    return id ? listings.get(id) : undefined;
+    return id ? listings.get(listingKey(installedSource(plugin), id)) : undefined;
   };
   const toggle = useCallback(
     (plugin: PluginListItem, enabled: boolean) =>

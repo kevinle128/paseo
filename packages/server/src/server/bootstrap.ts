@@ -437,6 +437,7 @@ export interface PaseoDaemonConfig {
   plugins?: Record<string, PluginSource>;
   pluginRegistries?: PluginRegistries;
   pluginRegistryUrl?: string;
+  forkPluginRegistryUrl?: string;
   staticDir: string;
   mcpDebug: boolean;
   isDev?: boolean;
@@ -680,6 +681,7 @@ export async function createPaseoDaemon(
     managedSources: new ManagedPluginSources(config.paseoHome, {
       registries: config.pluginRegistries,
       defaultUrl: config.pluginRegistryUrl,
+      forkUrl: config.forkPluginRegistryUrl,
     }),
     builtinPlugins: resolveBuiltinPluginLoader(dependencies),
     settingsDirectory: path.join(config.paseoHome, "plugin-settings"),

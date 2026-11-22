@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginListItem } from "@getpaseo/protocol/messages";
 import type { PluginListingIndex, PluginListing } from "@getpaseo/protocol/plugin-registry";
 import { SettingsCard, SettingsSection } from "@/components/settings";
@@ -15,6 +16,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { settingsStyles } from "@/styles/settings";
 import { usePluginActions } from "./actions";
+import { listingKey } from "./fork-source";
 import { ListingInstallControl } from "./install-control";
 import {
   ALL_CATEGORIES,
@@ -57,6 +59,7 @@ export function useListingMeta() {
 
 function ListingRow({
   serverId,
+  source,
   listing,
   installedPlugin,
   uninstalling,
@@ -64,6 +67,7 @@ function ListingRow({
   onUninstall,
 }: {
   serverId: string;
+  source: PluginSourceKind;
   listing: PluginListing;
   installedPlugin?: PluginListItem;
   uninstalling: boolean;
@@ -75,8 +79,8 @@ function ListingRow({
   const operation = usePluginOperation(serverId, listing.id);
   const { name, description } = listingText(listing, i18n.language);
   const open = useCallback(
-    () => router.push(buildPluginListingRoute(serverId, listing.id)),
-    [listing.id, serverId],
+    () => router.push(buildPluginListingRoute(serverId, listing.id, source)),
+    [listing.id, serverId, source],
   );
   return (
     <PluginRow
@@ -104,15 +108,23 @@ function ListingRow({
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
-function FeaturedCard({ serverId, listing }: { serverId: string; listing: PluginListing }) {
+function FeaturedCard({
+  serverId,
+  source,
+  listing,
+}: {
+  serverId: string;
+  source: PluginSourceKind;
+  listing: PluginListing;
+}) {
   const { i18n } = useTranslation();
   const meta = useListingMeta();
   const { name, description } = listingText(listing, i18n.language);
   const image = listingImages(listing)[0];
-  const source = useMemo(() => (image ? { uri: image } : null), [image]);
+  const imageSource = useMemo(() => (image ? { uri: image } : null), [image]);
   const open = useCallback(
-    () => router.push(buildPluginListingRoute(serverId, listing.id)),
-    [listing.id, serverId],
+    () => router.push(buildPluginListingRoute(serverId, listing.id, source)),
+    [listing.id, serverId, source],
   );
   const cardStyle = useCallback(
     ({ hovered }: HoverState) => [styles.featured, hovered && styles.featuredHovered],
@@ -128,7 +140,9 @@ function FeaturedCard({ serverId, listing }: { serverId: string; listing: Plugin
       testID={`plugin-featured-${listing.id}`}
     >
       <View style={styles.media}>
-        {source ? <Image source={source} style={styles.mediaImage} resizeMode="cover" /> : null}
+        {imageSource ? (
+          <Image source={imageSource} style={styles.mediaImage} resizeMode="cover" />
+        ) : null}
       </View>
       <View style={styles.featuredBody}>
         <View style={styles.featuredTitle}>
@@ -147,7 +161,15 @@ function FeaturedCard({ serverId, listing }: { serverId: string; listing: Plugin
 }
 
 /** Every featured listing: a row to swipe on a phone, a grid of four or two columns otherwise. */
-function Featured({ serverId, listings }: { serverId: string; listings: PluginListing[] }) {
+function Featured({
+  serverId,
+  source,
+  listings,
+}: {
+  serverId: string;
+  source: PluginSourceKind;
+  listings: PluginListing[];
+}) {
   const { t } = useTranslation();
   const compact = useIsCompactFormFactor();
   const grid = useContainerWidthBelow(FEATURED_FOUR_COLUMNS, { initialIsBelow: false });
@@ -162,7 +184,7 @@ function Featured({ serverId, listings }: { serverId: string; listings: PluginLi
         >
           {listings.map((listing) => (
             <View key={listing.id} style={styles.cellSwipe}>
-              <FeaturedCard serverId={serverId} listing={listing} />
+              <FeaturedCard serverId={serverId} source={source} listing={listing} />
             </View>
           ))}
         </ScrollView>
@@ -170,7 +192,7 @@ function Featured({ serverId, listings }: { serverId: string; listings: PluginLi
         <View style={styles.featuredGrid} onLayout={grid.onLayout}>
           {listings.map((listing) => (
             <View key={listing.id} style={cellStyle}>
-              <FeaturedCard serverId={serverId} listing={listing} />
+              <FeaturedCard serverId={serverId} source={source} listing={listing} />
             </View>
           ))}
         </View>
@@ -239,11 +261,13 @@ function FilterMenu<Value extends string>({
  */
 function ListingList({
   serverId,
+  source,
   listings,
   installed,
   onInstall,
 }: {
   serverId: string;
+  source: PluginSourceKind;
   listings: PluginListing[];
   installed: ReadonlyMap<string, PluginListItem>;
   onInstall(listing: PluginListing): void;
@@ -273,11 +297,12 @@ function ListingList({
           <ListingRow
             key={listing.id}
             serverId={serverId}
+            source={source}
             listing={listing}
-            installedPlugin={installed.get(listing.id)}
+            installedPlugin={installed.get(listingKey(source, listing.id))}
             uninstalling={
               actions.pending?.action === "remove" &&
-              actions.pending.pluginId === installed.get(listing.id)?.id
+              actions.pending.pluginId === installed.get(listingKey(source, listing.id))?.id
             }
             onInstall={onInstall}
             onUninstall={uninstall}
@@ -297,12 +322,14 @@ function ListingList({
 
 function Directory({
   serverId,
+  source,
   index,
   installed,
   query,
   onInstall,
 }: {
   serverId: string;
+  source: PluginSourceKind;
   index: PluginListingIndex;
   installed: ReadonlyMap<string, PluginListItem>;
   query: string;
@@ -311,6 +338,12 @@ function Directory({
   const { t, i18n } = useTranslation();
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [sort, setSort] = useState<DirectorySort>("popular");
+  const [seenSource, setSeenSource] = useState(source);
+  // The two registries do not share categories, so a category chosen in one would hide the other.
+  if (seenSource !== source) {
+    setSeenSource(source);
+    setCategory(ALL_CATEGORIES);
+  }
   const listings = filterDirectory(index, { query, category, sort }, i18n.language);
   const browsing = !query.trim() && category === ALL_CATEGORIES;
   const featured = browsing ? featuredListings(index) : [];
@@ -348,11 +381,14 @@ function Directory({
           testID="plugin-sort"
         />
       </View>
-      {featured.length ? <Featured serverId={serverId} listings={featured} /> : null}
+      {featured.length ? (
+        <Featured serverId={serverId} source={source} listings={featured} />
+      ) : null}
       <SettingsSection title={listTitle}>
         <ListingList
-          key={`${query}\n${category}\n${sort}`}
+          key={`${source}\n${query}\n${category}\n${sort}`}
           serverId={serverId}
+          source={source}
           listings={listings}
           installed={installed}
           onInstall={onInstall}
@@ -366,16 +402,18 @@ export function BrowseTab({
   serverId,
   installed,
   query,
+  source,
   onInstall,
 }: {
   serverId: string;
   /** Installed plugins by the listing they came from. */
   installed: ReadonlyMap<string, PluginListItem>;
   query: string;
+  source: PluginSourceKind;
   onInstall(listing: PluginListing): void;
 }) {
   const { t } = useTranslation();
-  const directory = usePluginDirectory(serverId);
+  const directory = usePluginDirectory(serverId, source);
   const retry = useCallback(() => void directory.query.refetch(), [directory.query]);
   if (!directory.supported)
     return (
@@ -398,6 +436,7 @@ export function BrowseTab({
   return (
     <Directory
       serverId={serverId}
+      source={source}
       index={directory.query.data}
       installed={installed}
       query={query}

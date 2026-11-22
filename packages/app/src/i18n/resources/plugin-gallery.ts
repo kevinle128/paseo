@@ -3,6 +3,7 @@ export const pluginGallery = {
   en: {
     tabs: { installed: "Installed", installedCount: "Installed · {{count}}", browse: "Browse" },
     search: { installed: "Search installed", browse: "Search plugins", clear: "Clear search" },
+    source: { label: "Source", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "Category",
       allCategories: "All categories",
@@ -62,6 +63,7 @@ export const pluginGallery = {
   ar: {
     tabs: { installed: "المثبّتة", installedCount: "المثبّتة · {{count}}", browse: "تصفّح" },
     search: { installed: "ابحث في المثبّتة", browse: "ابحث عن إضافات", clear: "مسح البحث" },
+    source: { label: "المصدر", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "الفئة",
       allCategories: "كل الفئات",
@@ -121,6 +123,7 @@ export const pluginGallery = {
   es: {
     tabs: { installed: "Instalados", installedCount: "Instalados · {{count}}", browse: "Explorar" },
     search: { installed: "Buscar instalados", browse: "Buscar plugins", clear: "Borrar búsqueda" },
+    source: { label: "Origen", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "Categoría",
       allCategories: "Todas las categorías",
@@ -184,6 +187,7 @@ export const pluginGallery = {
       browse: "Rechercher des plugins",
       clear: "Effacer la recherche",
     },
+    source: { label: "Source", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "Catégorie",
       allCategories: "Toutes les catégories",
@@ -251,6 +255,7 @@ export const pluginGallery = {
       browse: "プラグインを検索",
       clear: "検索をクリア",
     },
+    source: { label: "ソース", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "カテゴリ",
       allCategories: "すべてのカテゴリ",
@@ -315,6 +320,7 @@ export const pluginGallery = {
   ko: {
     tabs: { installed: "설치됨", installedCount: "설치됨 · {{count}}", browse: "찾아보기" },
     search: { installed: "설치된 항목 검색", browse: "플러그인 검색", clear: "검색 지우기" },
+    source: { label: "소스", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "카테고리",
       allCategories: "모든 카테고리",
@@ -374,6 +380,7 @@ export const pluginGallery = {
   "pt-BR": {
     tabs: { installed: "Instalados", installedCount: "Instalados · {{count}}", browse: "Explorar" },
     search: { installed: "Buscar instalados", browse: "Buscar plugins", clear: "Limpar busca" },
+    source: { label: "Origem", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "Categoria",
       allCategories: "Todas as categorias",
@@ -441,6 +448,7 @@ export const pluginGallery = {
       browse: "Поиск плагинов",
       clear: "Очистить поиск",
     },
+    source: { label: "Источник", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "Категория",
       allCategories: "Все категории",
@@ -500,6 +508,7 @@ export const pluginGallery = {
   "zh-CN": {
     tabs: { installed: "已安装", installedCount: "已安装 · {{count}}", browse: "浏览" },
     search: { installed: "搜索已安装", browse: "搜索插件", clear: "清除搜索" },
+    source: { label: "来源", paseo: "Paseo", fork: "Fork" },
     filters: {
       category: "分类",
       allCategories: "全部分类",

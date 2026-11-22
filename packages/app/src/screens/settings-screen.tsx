@@ -1279,7 +1279,10 @@ export default function SettingsScreen({ view }: SettingsScreenProps) {
         subject: { kind: "installed", pluginId: view.pluginId, screenId: view.screenId },
       };
     if (view.kind === "pluginListing")
-      return { serverId: view.serverId, subject: { kind: "listing", listingId: view.listingId } };
+      return {
+        serverId: view.serverId,
+        subject: { kind: "listing", listingId: view.listingId, source: view.source },
+      };
     return null;
   }, [view]);
   const detailTitle = ((): string | undefined => {

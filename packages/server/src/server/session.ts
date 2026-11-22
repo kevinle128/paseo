@@ -541,9 +541,12 @@ export interface SessionOptions {
     statusSources(
       pluginId?: string,
     ): Promise<import("@getpaseo/protocol/messages").PluginSourceStatusItem[]>;
-    listRegistry(): Promise<import("@getpaseo/protocol/plugin-registry").PluginRegistryIndex>;
+    listRegistry(
+      source?: import("@getpaseo/protocol/fork-plugin-source").PluginSourceKind,
+    ): Promise<import("@getpaseo/protocol/plugin-registry").PluginRegistryIndex>;
     getRegistryPlugin(
       id: string,
+      source?: import("@getpaseo/protocol/fork-plugin-source").PluginSourceKind,
     ): Promise<import("@getpaseo/protocol/plugin-registry").PublishedPluginDetail>;
     previewUpdates(input: {
       pluginId?: string;
@@ -2911,7 +2914,7 @@ export class Session {
   private dispatchPluginRegistryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugin.registry.list.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
-      return this.pluginRuntime.listRegistry().then((index) => {
+      return this.pluginRuntime.listRegistry(msg.source).then((index) => {
         this.emit({
           type: "plugin.registry.list.response",
           payload: { requestId: msg.requestId, index },
@@ -2921,7 +2924,7 @@ export class Session {
     }
     if (msg.type === "plugin.registry.get.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
-      return this.pluginRuntime.getRegistryPlugin(msg.id).then((plugin) => {
+      return this.pluginRuntime.getRegistryPlugin(msg.id, msg.source).then((plugin) => {
         this.emit({
           type: "plugin.registry.get.response",
           payload: { requestId: msg.requestId, plugin },

@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import { usePluginList } from "@/plugins/plugin-list";
 import { useFetchQuery } from "@/data/query";
 import { useHostFeature } from "@/runtime/host-features";
@@ -17,17 +18,18 @@ function useHostReady(serverId: string) {
 }
 
 /** The host's plugin directory. `supported` is false until the host proxies the registry. */
-export function usePluginDirectory(serverId: string) {
+export function usePluginDirectory(serverId: string, source: PluginSourceKind = "paseo") {
   const { client, ready } = useHostReady(serverId);
   // COMPAT(pluginRegistry): added in v0.16.0, remove gate after 2027-05-15.
   const supported = useHostFeature(serverId, "pluginRegistry");
+  const forkSource = useHostFeature(serverId, "forkPluginSource");
   const query = useFetchQuery({
-    queryKey: ["plugin-directory", serverId] as const,
+    queryKey: ["plugin-directory", serverId, source] as const,
     queryFn: () => {
       if (!client) throw new Error("Plugin host is offline");
-      return client.listPluginRegistry();
+      return client.listPluginRegistry(source);
     },
-    enabled: ready && supported,
+    enabled: ready && supported && (source !== "fork" || forkSource),
     dataShape: "value",
     staleTimeMs: DIRECTORY_STALE_MS,
     refetchOnMount: true,
@@ -36,17 +38,22 @@ export function usePluginDirectory(serverId: string) {
 }
 
 /** One listing with its overview. */
-export function usePluginListing(serverId: string, listingId: string | undefined) {
+export function usePluginListing(
+  serverId: string,
+  listingId: string | undefined,
+  source: PluginSourceKind = "paseo",
+) {
   const { client, ready } = useHostReady(serverId);
   // COMPAT(pluginRegistry): added in v0.16.0, remove gate after 2027-05-15.
   const supported = useHostFeature(serverId, "pluginRegistry");
+  const forkSource = useHostFeature(serverId, "forkPluginSource");
   return useFetchQuery({
-    queryKey: ["plugin-listing", serverId, listingId] as const,
+    queryKey: ["plugin-listing", serverId, listingId, source] as const,
     queryFn: () => {
       if (!client || !listingId) throw new Error("Plugin host is offline");
-      return client.getRegistryPlugin(listingId);
+      return client.getRegistryPlugin(listingId, source);
     },
-    enabled: ready && supported && listingId !== undefined,
+    enabled: ready && supported && listingId !== undefined && (source !== "fork" || forkSource),
     dataShape: "value",
     staleTimeMs: DIRECTORY_STALE_MS,
     refetchOnMount: true,

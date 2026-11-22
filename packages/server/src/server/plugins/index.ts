@@ -16,6 +16,7 @@ import {
   type PluginUpdatePreview,
   type PluginUpdateResult,
 } from "@getpaseo/protocol/messages";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import { parsePluginSourceReference } from "@getpaseo/protocol/plugin-source-reference";
 import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirements";
 import { BUILTIN_PROVIDER_IDS } from "@getpaseo/protocol/provider-manifest";
@@ -396,13 +397,13 @@ export class PluginService {
     });
   }
 
-  /** Reads the default registry's directory. Not queued: it touches no local state. */
-  listRegistry() {
-    return this.requireManagedSources().listRegistry();
+  /** Reads a registry directory. Not queued: it touches no local state. */
+  listRegistry(source?: PluginSourceKind) {
+    return this.requireManagedSources().listRegistry(source);
   }
 
-  getRegistryPlugin(id: string) {
-    return this.requireManagedSources().getRegistryPlugin(id);
+  getRegistryPlugin(id: string, source?: PluginSourceKind) {
+    return this.requireManagedSources().getRegistryPlugin(id, source);
   }
 
   async statusSources(pluginId?: string): Promise<PluginSourceStatusItem[]> {

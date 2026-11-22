@@ -56,6 +56,7 @@ interface TestPaseoDaemonOptions {
   resumePrompt?: string;
   pluginsEnabled?: PaseoDaemonConfig["pluginsEnabled"];
   pluginRegistryUrl?: PaseoDaemonConfig["pluginRegistryUrl"];
+  forkPluginRegistryUrl?: PaseoDaemonConfig["forkPluginRegistryUrl"];
   builtinPlugins?: BuiltinPluginLoader;
   plugins?: PaseoDaemonConfig["plugins"];
 }
@@ -234,6 +235,7 @@ async function prepareTestDaemonConfig(
     pluginsEnabled: options.pluginsEnabled,
     plugins: options.plugins,
     pluginRegistryUrl: options.pluginRegistryUrl,
+    forkPluginRegistryUrl: options.forkPluginRegistryUrl,
   };
   return { config, paseoHomeRoot, paseoHome, staticDir, createdDirs };
 }

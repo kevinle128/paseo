@@ -9,8 +9,10 @@ import {
   type PluginRegistryIndex,
   type PluginRegistryIdentity,
 } from "@getpaseo/protocol/plugin-registry";
+import type { PluginSourceKind } from "@getpaseo/protocol/fork-plugin-source";
 import type { PluginUpdateTarget } from "@getpaseo/protocol/messages";
 import { z } from "zod";
+import { registryBaseFor } from "./fork-registry.js";
 
 // Install reads only these fields; the rest of a published plugin is the directory's display data.
 const RegistryInstallDocumentSchema = z.object({
@@ -20,6 +22,7 @@ const RegistryInstallDocumentSchema = z.object({
 
 export interface RegistryOptions {
   defaultUrl?: string;
+  forkUrl?: string;
   registries?: PluginRegistries;
 }
 /** Request headers for a registry, with its configured credentials. Rejects unsafe bases. */
@@ -41,9 +44,12 @@ function defaultRegistryUrl(options: RegistryOptions): string {
   return (options.defaultUrl ?? DEFAULT_PLUGIN_REGISTRY_URL).replace(/\/+$/, "");
 }
 
-/** Reads a display document from the default registry; never used to choose what installs. */
-async function readRegistryDocument(options: RegistryOptions, path: string): Promise<unknown> {
-  const base = defaultRegistryUrl(options);
+/** Reads a display document from a registry; never used to choose what installs. */
+async function readRegistryDocument(
+  options: RegistryOptions,
+  path: string,
+  base = defaultRegistryUrl(options),
+): Promise<unknown> {
   const url = `${base}/${path}`;
   // Built before the request, so a registry setup error reaches the user instead of "Retry later".
   const headers = registryHeaders(base, options);
@@ -66,10 +72,13 @@ const RegistryIndexDocumentSchema = PluginRegistryIndexSchema.extend({
   plugins: z.array(z.unknown()),
 });
 
-/** The default registry's plugin directory, for browsing, without listings this host cannot read. */
-export async function listRegistryPlugins(options: RegistryOptions): Promise<PluginRegistryIndex> {
+/** A registry's plugin directory, for browsing, without listings this host cannot read. */
+export async function listRegistryPlugins(
+  options: RegistryOptions,
+  source?: PluginSourceKind,
+): Promise<PluginRegistryIndex> {
   const index = RegistryIndexDocumentSchema.parse(
-    await readRegistryDocument(options, "index.json"),
+    await readRegistryDocument(options, "index.json", registryBaseFor(source, options)),
   );
   const plugins = index.plugins.flatMap((listing) => {
     const parsed = PublishedPluginSchema.safeParse(listing);
@@ -79,10 +88,18 @@ export async function listRegistryPlugins(options: RegistryOptions): Promise<Plu
 }
 
 /** One listing with its overview, for the plugin's page. */
-export async function getRegistryPlugin(id: string, options: RegistryOptions) {
+export async function getRegistryPlugin(
+  id: string,
+  options: RegistryOptions,
+  source?: PluginSourceKind,
+) {
   const pluginId = PluginRegistryIdSchema.parse(id);
   const plugin = PublishedPluginDetailSchema.parse(
-    await readRegistryDocument(options, `plugins/${pluginId}.json`),
+    await readRegistryDocument(
+      options,
+      `plugins/${pluginId}.json`,
+      registryBaseFor(source, options),
+    ),
   );
   if (plugin.id !== pluginId) throw new Error("Registry returned a different plugin ID");
   return plugin;

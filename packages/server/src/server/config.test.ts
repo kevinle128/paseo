@@ -267,9 +267,13 @@ test("loads private plugin registry settings through the configuration boundary"
     const pluginRegistries = { "plugins.example.test": { authorization: "Bearer fixture" } };
     await writeFile(path.join(home, "config.json"), JSON.stringify({ pluginRegistries }));
     const config = loadConfig(home, {
-      env: { PASEO_PLUGIN_REGISTRY: "https://plugins.example.test/internal" },
+      env: {
+        PASEO_PLUGIN_REGISTRY: "https://plugins.example.test/internal",
+        PASEO_FORK_PLUGIN_REGISTRY: "http://127.0.0.1:9/plugins",
+      },
     });
     expect(config.pluginRegistryUrl).toBe("https://plugins.example.test/internal");
+    expect(config.forkPluginRegistryUrl).toBe("http://127.0.0.1:9/plugins");
     expect(config.pluginRegistries).toEqual(pluginRegistries);
   } finally {
     await rm(home, { recursive: true, force: true });
