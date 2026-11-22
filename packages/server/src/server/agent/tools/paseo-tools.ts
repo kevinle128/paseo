@@ -190,6 +190,7 @@ interface ProviderSummary {
   label: string;
   description: string;
   enabled: boolean;
+  extends?: string;
   modes: AgentMode[];
   status: string;
   error?: string;
@@ -317,6 +318,7 @@ function toProviderSummary(entry: {
   label?: string;
   description?: string;
   enabled: boolean;
+  extends?: string;
   modes?: AgentMode[];
   status: string;
   error?: string;
@@ -326,6 +328,7 @@ function toProviderSummary(entry: {
     label: entry.label ?? entry.provider,
     description: entry.description ?? "",
     enabled: entry.enabled,
+    ...(entry.extends ? { extends: entry.extends } : {}),
     modes: entry.modes ?? [],
     status: entry.status === "ready" ? "available" : entry.status,
     ...(entry.error ? { error: entry.error } : {}),

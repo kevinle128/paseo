@@ -50,6 +50,27 @@ describe("provider snapshot message schemas", () => {
     expect(parsed.source).toBe("custom");
   });
 
+  test("preserves provider snapshot entry extends and omits it when absent", () => {
+    const withExtends = ProviderSnapshotEntrySchema.parse({
+      provider: "cursor-peer",
+      status: "ready",
+      enabled: true,
+      source: "custom",
+      extends: "cursor",
+      label: "Cursor Peer",
+    });
+    const withoutExtends = ProviderSnapshotEntrySchema.parse({
+      provider: "claude",
+      status: "ready",
+      enabled: true,
+      source: "builtin",
+      label: "Claude",
+    });
+
+    expect(withExtends.extends).toBe("cursor");
+    expect(Object.prototype.hasOwnProperty.call(withoutExtends, "extends")).toBe(false);
+  });
+
   test("defaults missing enabled state in providers snapshot response entries", () => {
     const parsed = GetProvidersSnapshotResponseMessageSchema.parse({
       type: "get_providers_snapshot_response",

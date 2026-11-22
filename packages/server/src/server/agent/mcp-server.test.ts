@@ -5865,6 +5865,45 @@ describe("provider listing MCP tool", () => {
       ],
     });
   });
+
+  it("includes extends in list_providers when present and omits it when absent", async () => {
+    const { agentManager, agentStorage } = createTestDeps();
+    const provStub = createProviderSnapshotManagerStub();
+    provStub.listRegisteredProviderIds.mockReturnValue(["claude", "cursor-peer"]);
+    provStub.listProviders.mockResolvedValue([
+      buildSnapshotEntry({
+        provider: "claude",
+        label: "Claude",
+        description: "Anthropic Claude",
+      }),
+      {
+        ...buildSnapshotEntry({
+          provider: "cursor-peer",
+          label: "Cursor Peer",
+          description: "Cursor ACP",
+        }),
+        extends: "cursor",
+      },
+    ]);
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: provStub.manager,
+      logger,
+    });
+    const tool = registeredTool(server, "list_providers");
+    const response = await tool.handler({});
+    const providers = response.structuredContent.providers as Array<Record<string, unknown>>;
+    const claude = providers.find((provider) => provider.id === "claude");
+    const cursorPeer = providers.find((provider) => provider.id === "cursor-peer");
+
+    expect(cursorPeer).toMatchObject({
+      id: "cursor-peer",
+      extends: "cursor",
+    });
+    expect(claude).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(claude, "extends")).toBe(false);
+  });
 });
 
 function daemonConfigStoreStub(agentProfiles?: AgentProfile[]): Pick<DaemonConfigStore, "get"> {
