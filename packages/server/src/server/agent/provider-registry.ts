@@ -141,6 +141,8 @@ interface ResolvedProvider {
   profileModelsAreAdditive: boolean;
   enabled: boolean;
   derivedFromProviderId: string | null;
+  // Client adapter of a custom ACP provider, so a switch between "acp" and "cursor" changes the configuration.
+  acpClient?: "cursor" | "generic";
   providerOptions?: ProviderOptions;
   createBaseClient: (logger: Logger) => AgentClient;
   contract: ProviderContract;
@@ -841,6 +843,7 @@ function resolveCustomACPProvider(
     profileModelsAreAdditive: false,
     enabled: override.enabled !== false,
     derivedFromProviderId: null,
+    acpClient: usesCursorClient ? "cursor" : "generic",
     providerOptions: configuredProviderOptions(override),
     createBaseClient: (logger) => {
       const acpOptions = {
