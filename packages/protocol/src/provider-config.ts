@@ -72,7 +72,8 @@ export const ProviderOverridesSchema = z
   .record(z.string(), ProviderOverrideSchema)
   .superRefine((providers, ctx) => {
     const builtinProviderIdSet = new Set<string>(BUILTIN_PROVIDER_IDS);
-    const validExtendsValues = new Set<string>([...BUILTIN_PROVIDER_IDS, "acp"]);
+    // "cursor" is an ACP provider that keeps the Cursor client (model catalog, fast mode).
+    const validExtendsValues = new Set<string>([...BUILTIN_PROVIDER_IDS, "acp", "cursor"]);
 
     for (const [providerId, provider] of Object.entries(providers)) {
       if (!PROVIDER_ID_PATTERN.test(providerId)) {

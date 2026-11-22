@@ -480,6 +480,21 @@ describe("provider overrides (new format)", () => {
     expect(result.success).toBe(false);
   });
 
+  test("extends cursor is accepted without a command", () => {
+    const result = PersistedConfigSchema.safeParse({
+      agents: {
+        providers: {
+          "slp-cursor-peer": {
+            extends: "cursor",
+            label: "SLP Cursor Peer",
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   test("extends unknown provider → error", () => {
     const result = PersistedConfigSchema.safeParse({
       agents: {
