@@ -848,9 +848,10 @@ export class ProviderSnapshotManager {
         providerStates.set(provider, previous!);
         continue;
       }
-      const custom =
-        this.pluginProviders.has(provider) ||
-        (!BUILTIN_PROVIDER_IDS.includes(provider) && !!overrides?.[provider]?.extends);
+      const configuredExtends = !BUILTIN_PROVIDER_IDS.includes(provider)
+        ? overrides?.[provider]?.extends?.trim() || undefined
+        : undefined;
+      const custom = this.pluginProviders.has(provider) || !!configuredExtends;
       providerStates.set(provider, {
         discoveryLimit: previous?.discoveryLimit ?? pLimit({ concurrency: 4, rejectOnClear: true }),
         initial: identifyEntry({
@@ -858,6 +859,7 @@ export class ProviderSnapshotManager {
           status: definition.enabled ? "loading" : "unavailable",
           enabled: definition.enabled,
           source: custom ? "custom" : "builtin",
+          ...(configuredExtends ? { extends: configuredExtends } : {}),
           label: definition.label,
           description: definition.description,
           iconSvg: definition.iconSvg,

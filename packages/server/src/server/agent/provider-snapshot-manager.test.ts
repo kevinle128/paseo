@@ -1805,6 +1805,32 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
     }
   });
 
+  test("exposes configured extends on custom provider snapshot entries and omits it otherwise", () => {
+    const wrapper = {
+      label: "Cursor Peer",
+      description: "Cursor peer",
+      command: ["/opt/wrapper/cursor-acp"],
+    };
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        "cursor-peer": { extends: "cursor", ...wrapper },
+        claude: { label: "Claude" },
+      },
+    });
+    try {
+      const entries = manager.getSnapshot().records.map((record) => record.entry);
+      const customEntry = entries.find((entry) => entry.provider === "cursor-peer");
+      const builtinEntry = entries.find((entry) => entry.provider === "claude");
+
+      expect(customEntry?.extends).toBe("cursor");
+      expect(builtinEntry).toBeDefined();
+      expect(Object.prototype.hasOwnProperty.call(builtinEntry, "extends")).toBe(false);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("preparation leaves installed reads untouched and commit installs all target memberships before notification", () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),
