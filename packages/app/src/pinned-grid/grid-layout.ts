@@ -1,7 +1,7 @@
 import type { WorkspacePresence } from "@/screens/workspace/workspace-presence";
 
 /** A row never shrinks below this height when the user drags a row divider. */
-export const MIN_GRID_ROW_HEIGHT = 120;
+export const MIN_GRID_ROW_HEIGHT = 48;
 
 /**
  * The cell that owns input. Local focus wins because it changes in the same commit as the click,
