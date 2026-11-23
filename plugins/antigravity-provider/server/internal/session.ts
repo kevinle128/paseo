@@ -76,7 +76,6 @@ export class Session {
       cwd: this.config.cwd,
       title: this.config.title,
     });
-    this.publishFullAccessNotice();
     this.publishConfig();
     this.emit({ type: "session.commands", sessionId: this.options.id, commands: [] });
     this.emit({ type: "session.ready", requestId, sessionId: this.options.id });
@@ -181,20 +180,6 @@ export class Session {
         state: "canceled",
       });
     }
-  }
-
-  private publishFullAccessNotice(): void {
-    this.emit({
-      type: "session.notice",
-      sessionId: this.options.id,
-      notice: {
-        id: `${this.options.id}:full-access`,
-        severity: "warning",
-        title: "Antigravity is running with full access",
-        description:
-          "Antigravity's CLI cannot ask for permission when another app drives it, so Paseo starts it with --dangerously-skip-permissions. Every tool call, including shell commands, runs without asking.",
-      },
-    });
   }
 
   private async ensureDriver(): Promise<void> {

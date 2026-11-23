@@ -431,23 +431,9 @@ it("rejects plan and keeps the full-access selection without respawning", async 
   ).toHaveLength(1);
 });
 
-it("emits one full-access warning per open, none on respawn, and one again on resume", async () => {
+it("starts every launch with full access and emits no full-access notice", async () => {
   const h = await harness();
   await h.open();
-  const warning = {
-    type: "session.notice",
-    sessionId: "s",
-    notice: {
-      id: "s:full-access",
-      severity: "warning",
-      title: "Antigravity is running with full access",
-      description:
-        "Antigravity's CLI cannot ask for permission when another app drives it, so Paseo starts it with --dangerously-skip-permissions. Every tool call, including shell commands, runs without asking.",
-    },
-  };
-  const opened = h.events.findIndex((event) => event.type === "session.opened");
-  expect(h.events[opened + 1]).toEqual(warning);
-  expect(h.events.slice(0, opened).some((event) => event.type === "session.notice")).toBe(false);
   await h.completed(await h.prompt("HELLO"));
   await h.request({
     type: "session.configure",
@@ -456,7 +442,7 @@ it("emits one full-access warning per open, none on respawn, and one again on re
     changes: { model: "gemini-3.8-flash-low" },
   });
   await h.completed(await h.prompt("HELLO"));
-  expect(h.events.filter((event) => event.type === "session.notice")).toEqual([warning]);
+  expect(h.events.filter((event) => event.type === "session.notice")).toEqual([]);
   const launches = (await h.records()).filter((entry) => entry.args?.includes("--input-format"));
   expect(launches).toHaveLength(2);
   for (const launch of launches) {
@@ -468,7 +454,7 @@ it("emits one full-access warning per open, none on respawn, and one again on re
   const resumed = await harness();
   await resumed.open(persistence);
   await resumed.completed(await resumed.prompt("RESUME"));
-  expect(resumed.events.filter((event) => event.type === "session.notice")).toEqual([warning]);
+  expect(resumed.events.filter((event) => event.type === "session.notice")).toEqual([]);
 });
 
 it("defers model and mode changes until the next prompt, then respawns with validated flags", async () => {
