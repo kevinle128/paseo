@@ -341,7 +341,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: package-lock.json
+          # A relative lockfile is hashed from the realpath cwd, outside the symlinked GITHUB_WORKSPACE on the mini.
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
