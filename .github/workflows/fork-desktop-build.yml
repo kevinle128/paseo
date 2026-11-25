@@ -267,9 +267,12 @@ jobs:
     steps:
       # The mini also runs the Buzz desktop build through its own runner. Both
       # jobs take this lock, so only one desktop build runs on the mini at a
-      # time. lockf holds the lock while its child sleeps; the last step kills
-      # the child, and the runner kills it when the job ends, so a cancelled
-      # job also frees the lock.
+      # time. lockf holds the lock while its child runs. The child watches this
+      # job's Runner.Worker and
+      # ends when the worker is gone, so a job that the runner stops at its time
+      # limit frees the lock too: that job skips every later step, and a child
+      # that only slept left the lock held for six hours. The last step still
+      # ends the child at once on a normal finish.
       - name: Wait for the mini build lock
         if: runner.environment == 'self-hosted'
         shell: bash
@@ -278,8 +281,16 @@ jobs:
           lock="$HOME/.mini-desktop-build.lock"
           ready="$RUNNER_TEMP/mini-build-lock.pid"
           rm -f "$ready"
-          # shellcheck disable=SC2016 # $$ and $1 expand in the child shell.
-          nohup /usr/bin/lockf -k -t 3600 "$lock" /bin/sh -c 'echo $$ > "$1"; exec sleep 21600' sh "$ready" \
+          # The parent of this step is the job's Runner.Worker. When it is not
+          # (a different runner layout), keep the old six hour sleep instead of
+          # a holder that would end with this step and drop the lock at once.
+          worker="$PPID"
+          case "$(ps -o command= -p "$worker" 2> /dev/null)" in
+            *Runner.Worker*) hold='while kill -0 "$2" 2> /dev/null; do sleep 5; done' ;;
+            *) worker=0; hold='exec sleep 21600' ;;
+          esac
+          # shellcheck disable=SC2016 # $$, $1 and $2 expand in the child shell.
+          nohup /usr/bin/lockf -k -t 3600 "$lock" /bin/sh -c 'echo $$ > "$1"; '"$hold" sh "$ready" "$worker" \
             > /dev/null 2>&1 &
           holder=$!
           for _ in $(seq 3600); do
