@@ -497,7 +497,13 @@ class AcpRuntime {
   ): Promise<readonly ProviderCapability[]> {
     const mcpServers = toAcpMcpServers(input.config);
     const nativeSessionId = readNativeSessionId(input.persistence);
+    const vendorMeta: Record<string, ReturnType<typeof jsonValue>> = {};
+    for (const transformer of this.transformers) {
+      const extra = transformer.sessionMeta?.(input.config);
+      if (extra) Object.assign(vendorMeta, jsonRecord(extra));
+    }
     const metadata = {
+      ...vendorMeta,
       _paseo: {
         systemPrompt: input.config.systemPrompt,
         providerOptions: input.config.providerOptions,
@@ -537,7 +543,21 @@ class AcpRuntime {
     }
     this.modes = response.modes;
     this.configOptions = response.configOptions ?? [];
-    await this.applyInitialConfig(input.config);
+    // Suppress partial session.config updates from intermediate set_config_option notifications
+    // until all opening changes (including mode) settle and session.opened has been emitted.
+    this.configTransaction = true;
+    this.stagedTransformerConfig = null;
+    let committedConfig: ProviderConfigState;
+    try {
+      if (await this.applyInitialConfig(input.config)) {
+        await this.drainNotifications();
+      }
+      committedConfig =
+        this.stagedTransformerConfig ?? toProviderConfigState(this.modes, this.configOptions);
+    } finally {
+      this.configTransaction = false;
+      this.stagedTransformerConfig = null;
+    }
     const sessionCapabilities = connectionCapabilities.filter(
       (capability) =>
         capability !== "session.configure" ||
@@ -555,7 +575,7 @@ class AcpRuntime {
       title: input.config.title,
       cwd: input.config.cwd,
     });
-    this.emitConfig();
+    this.emitConfigSnapshot(committedConfig);
     if (this.options.options.acpOptions?.waitForInitialCommands) {
       await this.waitForInitialCommands();
     }
@@ -785,7 +805,7 @@ class AcpRuntime {
     }
   }
 
-  private async applyInitialConfig(config: ProviderSessionConfig): Promise<void> {
+  private async applyInitialConfig(config: ProviderSessionConfig): Promise<boolean> {
     const requested: AcpConfigChange[] = [];
     if (config.model) requested.push({ target: "model", value: config.model });
     if (config.mode) requested.push({ target: "mode", value: config.mode });
@@ -795,7 +815,9 @@ class AcpRuntime {
     for (const [id, value] of Object.entries(config.settings)) {
       requested.push({ target: "setting", id, value });
     }
-    for (const change of this.inAgentOrder(requested)) await this.applyConfigChange(change);
+    const ordered = this.inAgentOrder(requested);
+    for (const change of ordered) await this.applyConfigChange(change);
+    return ordered.length > 0;
   }
 
   // One option can reset another: choosing an fx provider also selects that provider's saved

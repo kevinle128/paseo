@@ -5,6 +5,7 @@ import type {
   ProviderConfigState,
   ProviderNotice,
   ProviderRegistration,
+  ProviderSessionConfig,
   ProviderTimelineItem,
 } from "./provider.js";
 import { createAcpProviderConnection } from "./acp-internal/connection.js";
@@ -91,6 +92,7 @@ export type AcpVendorUpdate =
   | { type: "notice"; notice: ProviderNotice };
 
 export interface AcpTransformer {
+  sessionMeta?(config: ProviderSessionConfig): Readonly<Record<string, JsonValue>> | undefined;
   discover?(
     catalog: ProviderCatalog,
     context: AcpDiscoveryContext,
