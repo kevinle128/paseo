@@ -95,6 +95,13 @@ export const antigravityAcpTransformer: AcpTransformer = {
   toolCall(toolCall) {
     const input = asRecord(toolCall.input);
     const filePath = pickString(input, FILE_PATH_KEYS) ?? toolCall.locations[0];
+    if (toolCall.name === "write_file" || toolCall.name === "write_to_file") {
+      return {
+        ...toolCall,
+        kind: "other",
+        ...(filePath ? { input: { ...(input ?? {}), filePath } } : {}),
+      };
+    }
     if (!filePath) return toolCall;
     if (
       toolCall.name === "edit_file" ||
@@ -106,13 +113,6 @@ export const antigravityAcpTransformer: AcpTransformer = {
         ...toolCall,
         kind: "edit",
         input: { filePath, oldString, newString },
-      };
-    }
-    if (toolCall.name === "write_file" || toolCall.name === "write_to_file") {
-      return {
-        ...toolCall,
-        kind: "other",
-        input: { ...(input ?? {}), filePath },
       };
     }
     if (toolCall.name === "read_file" || toolCall.name === "view_file") {

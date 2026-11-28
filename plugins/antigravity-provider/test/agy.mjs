@@ -221,6 +221,22 @@ function emitToolSuite(sessionId) {
     },
     {
       sessionUpdate: "tool_call",
+      toolCallId: "tool-write-streaming",
+      name: "write_to_file",
+      kind: "edit",
+      title: "Write streamed.md",
+      status: "in_progress",
+      rawInput: {},
+    },
+    {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-write-streaming",
+      status: "completed",
+      locations: [{ path: "/repo/streamed.md" }],
+      rawInput: { TargetFile: "/repo/streamed.md", CodeContent: "streamed" },
+    },
+    {
+      sessionUpdate: "tool_call",
       toolCallId: "tool-edit",
       name: "multi_replace_file_content",
       kind: "edit",

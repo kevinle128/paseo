@@ -419,6 +419,18 @@ describe("sessions, persistence and history replay", () => {
           detail: { type: "write", filePath: "/repo/empty.txt", content: "" },
         }),
         expect.objectContaining({
+          id: "tool-write-streaming",
+          name: "write_to_file",
+          status: "running",
+          detail: { type: "unknown", input: {}, output: null },
+        }),
+        expect.objectContaining({
+          id: "tool-write-streaming",
+          name: "write_to_file",
+          status: "completed",
+          detail: { type: "write", filePath: "/repo/streamed.md", content: "streamed" },
+        }),
+        expect.objectContaining({
           name: "multi_replace_file_content",
           detail: {
             type: "edit",
@@ -622,6 +634,66 @@ describe("sessions, persistence and history replay", () => {
       )
       .map((event) => event.config.mode);
     expect(pipeModes).toEqual(["full-access", "accept-edits"]);
+
+    // Failed pipelined full-access configure followed by a no-op configure must not promote accept-edits to full-access.
+    const failedPipeStart = h.events.length;
+    await h.connection.send({
+      type: "session.configure",
+      requestId: "pipe-fail",
+      sessionId: "s",
+      changes: { mode: "full-access", model: "nonexistent-model" },
+    });
+    await h.connection.send({
+      type: "session.configure",
+      requestId: "pipe-noop",
+      sessionId: "s",
+      changes: {},
+    });
+    await h.wait((event) => event.type === "request.completed" && event.requestId === "pipe-noop");
+    expect(h.events.slice(failedPipeStart)).toContainEqual(
+      expect.objectContaining({ type: "request.failed", requestId: "pipe-fail" }),
+    );
+    const failedPipeModes = h.events
+      .slice(failedPipeStart)
+      .filter(
+        (event): event is Extract<ProviderEvent, { type: "session.config" }> =>
+          event.type === "session.config",
+      )
+      .map((event) => event.config.mode);
+    expect(failedPipeModes).toEqual(["accept-edits"]);
+
+    const permAfterFailedPipeStart = h.events.length;
+    const permTurn = await h.prompt("PERMISSION");
+    const permEvent = await h.wait(
+      (event) =>
+        h.events.indexOf(event) >= permAfterFailedPipeStart && event.type === "session.permission",
+    );
+    if (permEvent.type !== "session.permission") throw new Error("Expected permission event");
+    await h.connection.send({
+      type: "session.permission",
+      sessionId: "s",
+      permissionId: permEvent.request.id,
+      response: { behavior: "allow", selectedActionId: "allow" },
+    });
+    await h.completed(permTurn);
+
+    // Concurrent duplicate session.open rejects while the first open is still in-flight.
+    const openInput = {
+      type: "session.open" as const,
+      sessionId: "s-concurrent-dup",
+      history: "skip" as const,
+      config: { cwd: h.cwd, env: {}, settings: {}, mcpServers: {}, persist: true },
+    };
+    await h.connection.send({ ...openInput, requestId: "dup-race-1" });
+    await expect(
+      h.connection.send({ ...openInput, requestId: "dup-race-2" }),
+    ).rejects.toThrow("Session already exists: s-concurrent-dup");
+    await h.wait((event) => event.type === "session.ready" && event.requestId === "dup-race-1");
+    expect(
+      h.events.filter(
+        (event) => event.type === "session.opened" && event.sessionId === "s-concurrent-dup",
+      ),
+    ).toHaveLength(1);
 
     // Malformed persistence on an open connection emits request.failed.
     await h.request({
