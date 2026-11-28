@@ -1,12 +1,20 @@
-import type { AcpTransformer } from "@getpaseo/plugin/server/acp";
+import type { AcpToolCallSnapshot, AcpTransformer } from "@getpaseo/plugin/server/acp";
 import type {
   ProviderTimelineItem,
   ProviderToolCallDetail,
 } from "@getpaseo/plugin/server/provider";
 
+type JsonRecord = Record<string, AcpToolCallSnapshot["input"]>;
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asJsonRecord(value: AcpToolCallSnapshot["input"]): JsonRecord | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as JsonRecord)
     : null;
 }
 
@@ -92,14 +100,14 @@ export const antigravityAcpTransformer: AcpTransformer = {
       ? { antigravity: { systemPrompt: { append: config.systemPrompt } } }
       : undefined;
   },
-  toolCall(toolCall) {
-    const input = asRecord(toolCall.input);
+  toolCall(toolCall): AcpToolCallSnapshot {
+    const input = asJsonRecord(toolCall.input);
     const filePath = pickString(input, FILE_PATH_KEYS) ?? toolCall.locations[0];
     if (toolCall.name === "write_file" || toolCall.name === "write_to_file") {
       return {
         ...toolCall,
         kind: "other",
-        ...(filePath ? { input: { ...(input ?? {}), filePath } } : {}),
+        ...(filePath ? { input: { ...input, filePath } } : {}),
       };
     }
     if (!filePath) return toolCall;
@@ -118,7 +126,7 @@ export const antigravityAcpTransformer: AcpTransformer = {
     if (toolCall.name === "read_file" || toolCall.name === "view_file") {
       return {
         ...toolCall,
-        input: { ...(input ?? {}), filePath },
+        input: { ...input, filePath },
       };
     }
     return toolCall;

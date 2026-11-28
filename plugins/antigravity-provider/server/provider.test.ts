@@ -685,9 +685,9 @@ describe("sessions, persistence and history replay", () => {
       config: { cwd: h.cwd, env: {}, settings: {}, mcpServers: {}, persist: true },
     };
     await h.connection.send({ ...openInput, requestId: "dup-race-1" });
-    await expect(
-      h.connection.send({ ...openInput, requestId: "dup-race-2" }),
-    ).rejects.toThrow("Session already exists: s-concurrent-dup");
+    await expect(h.connection.send({ ...openInput, requestId: "dup-race-2" })).rejects.toThrow(
+      "Session already exists: s-concurrent-dup",
+    );
     await h.wait((event) => event.type === "session.ready" && event.requestId === "dup-race-1");
     expect(
       h.events.filter(

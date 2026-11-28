@@ -2,7 +2,6 @@ import { runAcpProvider } from "@getpaseo/plugin/server/acp";
 import {
   ProviderInputSchema,
   requireProviderCapabilities,
-  type ProviderCapability,
   type ProviderConnection,
   type ProviderEvent,
   type ProviderInput,
@@ -55,8 +54,7 @@ function selectAutoAllowAction(
   }
   return (
     allows.find(
-      (action) =>
-        action.id === "allow" || action.id === "allow_once" || action.id === "allow-once",
+      (action) => action.id === "allow" || action.id === "allow_once" || action.id === "allow-once",
     ) ?? allows[0]!
   );
 }
@@ -102,6 +100,7 @@ export function createAntigravityProvider(): ProviderRegistration {
   };
 }
 
+type OpenInput = Extract<ProviderInput, { type: "session.open" }>;
 type ConfigureInput = Extract<ProviderInput, { type: "session.configure" }>;
 type SessionConfigEvent = Extract<ProviderEvent, { type: "session.config" }>;
 
@@ -119,7 +118,7 @@ interface ActiveConfigure {
 function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): ProviderConnection {
   const listeners = new Set<(event: ProviderEvent) => void>();
   const activeSessions = new Set<string>();
-  const sessionCapabilities = new Map<string, readonly ProviderCapability[]>();
+  const sessionCapabilities = new Map<string, readonly string[]>();
   const fullAccessSessions = new Set<string>();
   const closedSessions = new Set<string>();
   const pendingOpens = new Map<string, { sessionId: string; wantsFullAccess: boolean }>();
@@ -350,6 +349,76 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
     emit(event);
   });
 
+  async function sendSessionOpen(parsed: OpenInput): Promise<void> {
+    requireProviderCapabilities(inner.capabilities, parsed);
+    if (activeSessions.has(parsed.sessionId) || hasPendingOpen(parsed.sessionId)) {
+      throw new Error(`Session already exists: ${parsed.sessionId}`);
+    }
+    let persistence: ProviderPersistence | undefined;
+    try {
+      persistence = normalizePersistence(parsed.persistence);
+    } catch (error) {
+      emit({
+        type: "request.failed",
+        requestId: parsed.requestId,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      });
+      return;
+    }
+    const wantsFullAccess = parsed.config.mode === FULL_ACCESS_MODE_ID;
+    pendingOpens.set(parsed.requestId, {
+      sessionId: parsed.sessionId,
+      wantsFullAccess,
+    });
+    try {
+      await inner.send({
+        ...parsed,
+        persistence,
+        config: wantsFullAccess
+          ? { ...parsed.config, mode: NATIVE_FULL_ACCESS_BASE_MODE }
+          : parsed.config,
+      });
+    } catch (error) {
+      pendingOpens.delete(parsed.requestId);
+      throw error;
+    }
+  }
+
+  async function sendSessionConfigure(parsed: ConfigureInput): Promise<void> {
+    const modeChange = parsed.changes.mode;
+    const wantsFullAccess =
+      modeChange === undefined ? undefined : modeChange === FULL_ACCESS_MODE_ID;
+    const forwarded: ConfigureInput = wantsFullAccess
+      ? { ...parsed, changes: { ...parsed.changes, mode: NATIVE_FULL_ACCESS_BASE_MODE } }
+      : parsed;
+    if (activeConfigures.has(parsed.sessionId)) {
+      const capabilities = sessionCapabilities.get(parsed.sessionId);
+      if (!capabilities) throw new Error(`Unknown session: ${parsed.sessionId}`);
+      requireProviderCapabilities(capabilities, parsed);
+      const queue = queuedConfigures.get(parsed.sessionId) ?? [];
+      queue.push({ input: forwarded, wantsFullAccess });
+      queuedConfigures.set(parsed.sessionId, queue);
+      return;
+    }
+    const active: ActiveConfigure = {
+      requestId: parsed.requestId,
+      wantsFullAccess,
+      heldConfigEvents: [],
+    };
+    activeConfigures.set(parsed.sessionId, active);
+    try {
+      await inner.send(forwarded);
+    } catch (error) {
+      if (activeConfigures.get(parsed.sessionId) === active) {
+        activeConfigures.delete(parsed.sessionId);
+        for (const held of active.heldConfigEvents) {
+          emitSessionConfig(held);
+        }
+      }
+      throw error;
+    }
+  }
+
   return {
     version: inner.version,
     capabilities: inner.capabilities,
@@ -362,82 +431,14 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
       }
       if (input.type === "session.open") {
         const parsed = ProviderInputSchema.parse(input);
-        if (parsed.type !== "session.open") {
-          await inner.send(parsed);
-          return;
-        }
-        requireProviderCapabilities(inner.capabilities, parsed);
-        if (activeSessions.has(parsed.sessionId) || hasPendingOpen(parsed.sessionId)) {
-          throw new Error(`Session already exists: ${parsed.sessionId}`);
-        }
-        let persistence: ProviderPersistence | undefined;
-        try {
-          persistence = normalizePersistence(parsed.persistence);
-        } catch (error) {
-          emit({
-            type: "request.failed",
-            requestId: parsed.requestId,
-            error: { message: error instanceof Error ? error.message : String(error) },
-          });
-          return;
-        }
-        const wantsFullAccess = parsed.config.mode === FULL_ACCESS_MODE_ID;
-        pendingOpens.set(parsed.requestId, {
-          sessionId: parsed.sessionId,
-          wantsFullAccess,
-        });
-        try {
-          await inner.send({
-            ...parsed,
-            persistence,
-            config: wantsFullAccess
-              ? { ...parsed.config, mode: NATIVE_FULL_ACCESS_BASE_MODE }
-              : parsed.config,
-          });
-        } catch (error) {
-          pendingOpens.delete(parsed.requestId);
-          throw error;
-        }
+        if (parsed.type === "session.open") await sendSessionOpen(parsed);
+        else await inner.send(parsed);
         return;
       }
       if (input.type === "session.configure") {
         const parsed = ProviderInputSchema.parse(input);
-        if (parsed.type !== "session.configure") {
-          await inner.send(parsed);
-          return;
-        }
-        const modeChange = parsed.changes.mode;
-        const wantsFullAccess =
-          modeChange === undefined ? undefined : modeChange === FULL_ACCESS_MODE_ID;
-        const forwarded: ConfigureInput = wantsFullAccess
-          ? { ...parsed, changes: { ...parsed.changes, mode: NATIVE_FULL_ACCESS_BASE_MODE } }
-          : parsed;
-        if (activeConfigures.has(parsed.sessionId)) {
-          const capabilities = sessionCapabilities.get(parsed.sessionId);
-          if (!capabilities) throw new Error(`Unknown session: ${parsed.sessionId}`);
-          requireProviderCapabilities(capabilities, parsed);
-          const queue = queuedConfigures.get(parsed.sessionId) ?? [];
-          queue.push({ input: forwarded, wantsFullAccess });
-          queuedConfigures.set(parsed.sessionId, queue);
-          return;
-        }
-        const active: ActiveConfigure = {
-          requestId: parsed.requestId,
-          wantsFullAccess,
-          heldConfigEvents: [],
-        };
-        activeConfigures.set(parsed.sessionId, active);
-        try {
-          await inner.send(forwarded);
-        } catch (error) {
-          if (activeConfigures.get(parsed.sessionId) === active) {
-            activeConfigures.delete(parsed.sessionId);
-            for (const held of active.heldConfigEvents) {
-              emitSessionConfig(held);
-            }
-          }
-          throw error;
-        }
+        if (parsed.type === "session.configure") await sendSessionConfigure(parsed);
+        else await inner.send(parsed);
         return;
       }
       if (input.type === "session.close") {

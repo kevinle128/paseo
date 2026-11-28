@@ -2080,13 +2080,13 @@ describe("ACP session history replay", () => {
         { id: "accept-edits", name: "Accept edits" },
       ],
     };
-    const baseOptions = [
+    const modelOptions = (currentValue: string) => [
       {
         id: "model",
         name: "Model",
         category: "model",
         type: "select",
-        currentValue: "m1",
+        currentValue,
         options: [
           { value: "m1", name: "M1" },
           { value: "m2", name: "M2" },
@@ -2112,14 +2112,14 @@ describe("ACP session history replay", () => {
           instance.respond(request, {
             sessionId: "connector-session",
             modes: baseModes,
-            configOptions: baseOptions,
+            configOptions: modelOptions("m1"),
           });
           return true;
         }
         if (request.method === "session/set_config_option") {
           const params = request.params as { configId: string; value: string };
           if (params.configId === "model") currentModel = params.value;
-          const updated = baseOptions.map((option) => ({ ...option, currentValue: currentModel }));
+          const updated = modelOptions(currentModel);
           instance.notify("session/update", {
             sessionId: "connector-session",
             update: { sessionUpdate: "config_option_update", configOptions: updated },
