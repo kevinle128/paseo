@@ -497,7 +497,13 @@ class AcpRuntime {
   ): Promise<readonly ProviderCapability[]> {
     const mcpServers = toAcpMcpServers(input.config);
     const nativeSessionId = readNativeSessionId(input.persistence);
+    const vendorMeta: Record<string, ReturnType<typeof jsonValue>> = {};
+    for (const transformer of this.transformers) {
+      const extra = transformer.sessionMeta?.(input.config);
+      if (extra) Object.assign(vendorMeta, jsonRecord(extra));
+    }
     const metadata = {
+      ...vendorMeta,
       _paseo: {
         systemPrompt: input.config.systemPrompt,
         providerOptions: input.config.providerOptions,
@@ -537,7 +543,14 @@ class AcpRuntime {
     }
     this.modes = response.modes;
     this.configOptions = response.configOptions ?? [];
-    await this.applyInitialConfig(input.config);
+    // Suppress partial session.config updates from intermediate set_config_option notifications
+    // until all opening changes (including mode) settle and session.opened has been emitted.
+    this.configTransaction = true;
+    try {
+      await this.applyInitialConfig(input.config);
+    } finally {
+      this.configTransaction = false;
+    }
     const sessionCapabilities = connectionCapabilities.filter(
       (capability) =>
         capability !== "session.configure" ||

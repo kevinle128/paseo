@@ -1,130 +1,209 @@
+import { createHash } from "node:crypto";
+import { execCommand } from "@getpaseo/plugin/server";
 import type {
-  ProviderCatalog,
   ProviderLaunch,
-  ProviderModel,
   ProviderMode,
+  ProviderModel,
   ProviderStatus,
 } from "@getpaseo/plugin/server/provider";
-import { probe } from "./process.js";
-import { AntigravityError } from "./wire.js";
 
-const modes: readonly ProviderMode[] = [
-  {
-    id: "full-access",
-    icon: "ShieldOff",
-    colorTier: "dangerous",
-    label: "Full access",
-    description:
-      "Antigravity cannot ask for permission when another app drives it. Paseo starts it with --dangerously-skip-permissions.",
-    isUnattended: true,
-  },
-];
+const MIN_VERSION = [1, 5, 15] as const;
 
-export async function getCatalog(launch: ProviderLaunch, cwd?: string): Promise<ProviderCatalog> {
-  const output = await probe({ launch, args: ["models"], cwd });
-  const models: ProviderModel[] = [];
-  for (const line of output.trim().split(/\r?\n/)) {
-    const [id, label, ...extra] = line.split("\t");
-    if (!id || !label || extra.length > 0)
-      throw new AntigravityError("Invalid `agy models` output", "INVALID_CATALOG");
-    if (models.some((model) => model.id === id))
-      throw new AntigravityError(`Duplicate Antigravity model: ${id}`, "INVALID_CATALOG");
-    models.push({ id, label });
+const EFFORT_OPTIONS = [
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["xhigh", "Extra"],
+  ["max", "Max"],
+] as const;
+
+const MODE_VISUALS: Readonly<Record<string, Pick<ProviderMode, "icon" | "colorTier">>> = {
+  default: { icon: "ShieldCheck", colorTier: "safe" },
+  "accept-edits": { icon: "ShieldAlert", colorTier: "moderate" },
+  auto: { icon: "ShieldAlert", colorTier: "moderate" },
+  plan: { icon: "ShieldCheck", colorTier: "planning" },
+};
+
+export const FULL_ACCESS_MODE_ID = "full-access";
+export const NATIVE_FULL_ACCESS_BASE_MODE = "accept-edits";
+
+const FULL_ACCESS_MODE: ProviderMode = {
+  id: FULL_ACCESS_MODE_ID,
+  label: "Full access",
+  description: "Approve edits and commands without asking.",
+  icon: "ShieldOff",
+  colorTier: "dangerous",
+  isUnattended: true,
+};
+
+const variantCache = new Map<string, ReadonlySet<string>>();
+
+export function acpLaunch(launch: ProviderLaunch): ProviderLaunch {
+  if (launch.args.includes("acp")) return launch;
+  return { ...launch, args: [...launch.args, "acp"] };
+}
+
+function cliArgs(launch: ProviderLaunch, subcommand: readonly string[]): string[] {
+  const index = launch.args.indexOf("acp");
+  const base =
+    index === -1 ? launch.args : [...launch.args.slice(0, index), ...launch.args.slice(index + 1)];
+  return [...base, ...subcommand];
+}
+
+export function catalogCacheKey(launch: ProviderLaunch): string {
+  const normalized = acpLaunch(launch);
+  const env = Object.entries(normalized.env).sort(([left], [right]) => left.localeCompare(right));
+  return createHash("sha256")
+    .update(JSON.stringify([normalized.command, normalized.args, env]))
+    .digest("hex");
+}
+
+function isSupportedVersion(version: string): boolean | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return null;
+  const [, major, minor, patch] = match.map(Number);
+  const [minMajor, minMinor, minPatch] = MIN_VERSION;
+  if (major !== minMajor) return major > minMajor;
+  if (minor !== minMinor) return minor > minMinor;
+  return patch >= minPatch;
+}
+
+export function diagnostic(error: unknown): string {
+  const stderr =
+    error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+      ? error.stderr.trim()
+      : "";
+  const message = stderr || (error instanceof Error ? error.message : String(error));
+  if (/auth|sign.in|log.in/i.test(message)) {
+    return "Antigravity authentication failed. Run `agy` and sign in, then retry.";
   }
-  return { models, modes, thinkingOptions: [], defaultMode: "full-access" };
+  return message;
+}
+
+function parseModelIds(output: string): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const line of output.trim().split(/\r?\n/)) {
+    if (!line) continue;
+    const [id, label, ...extra] = line.split("\t");
+    if (!id || !label || extra.length > 0) {
+      throw new Error("Invalid `agy models` output");
+    }
+    ids.add(id);
+  }
+  return ids;
+}
+
+function cacheVariants(key: string, variants: ReadonlySet<string>): void {
+  if (variantCache.size >= 16 && !variantCache.has(key)) {
+    const oldest = variantCache.keys().next().value;
+    if (oldest !== undefined) variantCache.delete(oldest);
+  }
+  variantCache.set(key, variants);
 }
 
 export async function getStatus(launch: ProviderLaunch): Promise<ProviderStatus> {
   try {
-    const version = (await probe({ launch, args: ["--version"] })).trim();
-    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-    if (!match)
+    const { stdout: rawVersion } = await execCommand(
+      launch.command,
+      cliArgs(launch, ["--version"]),
+      { env: launch.env, timeout: 10_000 },
+    );
+    const version = rawVersion.trim();
+    const supported = isSupportedVersion(version);
+    if (supported === null) {
       return {
         available: false,
-        diagnostic: "Could not read the Antigravity version. Update `agy` to 1.1.15 or later.",
+        diagnostic: `Could not read the Antigravity version. Update \`agy\` to ${MIN_VERSION.join(".")} or later.`,
       };
-    const [, major, minor, patch] = match.map(Number);
-    const supported = major > 1 || (major === 1 && (minor > 1 || (minor === 1 && patch >= 15)));
-    if (!supported)
+    }
+    if (!supported) {
       return {
         available: false,
-        diagnostic: `Antigravity ${version} is unsupported. Update \`agy\` to 1.1.15 or later.`,
+        diagnostic: `Antigravity ${version} is unsupported. Update \`agy\` to ${MIN_VERSION.join(".")} or later.`,
       };
-    await getCatalog(launch);
+    }
+    const { stdout: modelsOutput } = await execCommand(
+      launch.command,
+      cliArgs(launch, ["models"]),
+      {
+        env: launch.env,
+        timeout: 10_000,
+      },
+    );
+    cacheVariants(catalogCacheKey(launch), parseModelIds(modelsOutput));
     return { available: true };
   } catch (error) {
-    if (!(error instanceof AntigravityError)) throw error;
-    return { available: false, diagnostic: error.message };
+    return { available: false, diagnostic: diagnostic(error) };
   }
 }
 
-export function validateSelection(
-  config: { model?: string; mode?: string; thinkingOption?: string },
-  catalog: ProviderCatalog,
-): void {
-  if (config.model && !catalog.models.some((model) => model.id === config.model))
-    throw new AntigravityError(`Unknown Antigravity model: ${config.model}`, "INVALID_MODEL");
-  if (config.mode && !catalog.modes.some((mode) => mode.id === config.mode))
-    throw new AntigravityError(`Unknown Antigravity mode: ${config.mode}`, "INVALID_MODE");
-  if (config.thinkingOption)
-    throw new AntigravityError(
-      "Antigravity effort is selected through the model ID",
-      "UNSUPPORTED_THINKING",
-    );
+export function cachedModelVariants(launch: ProviderLaunch): ReadonlySet<string> {
+  return variantCache.get(catalogCacheKey(launch)) ?? new Set();
 }
 
-// The daemon sets these on every session, so they say nothing about the gateway or credentials.
-const SESSION_IDENTITY_ENV_KEYS = new Set([
-  "PASEO_AGENT_ID",
-  "PASEO_AGENT_CWD",
-  "PASEO_WORKSPACE_ID",
-]);
-
-interface Selection {
-  model?: string;
-  mode?: string;
-  thinkingOption?: string;
-}
-
-/**
- * Validates against the shared catalog first. The shared catalog is probed with the daemon launch
- * environment only, but the agent runs with the launch environment plus its own overlay (for
- * example a gateway address injected just before the agent opens). When the shared catalog does
- * not know the model, probe once with the agent's environment and validate against that result.
- * The fresh catalog is used for this check only and never replaces the shared one. If that probe
- * fails, the original error is thrown.
- */
-export async function validateSelectionWithAgentEnv(
-  selected: Selection & { cwd?: string; env?: Record<string, string> },
-  catalog: ProviderCatalog,
+export async function refreshModelVariants(
   launch: ProviderLaunch,
-): Promise<void> {
+  cwd?: string,
+): Promise<ReadonlySet<string>> {
   try {
-    validateSelection(selected, catalog);
-    return;
-  } catch (error) {
-    const overlay = selected.env ?? {};
-    const differs = Object.entries(overlay).some(
-      ([key, value]) => !SESSION_IDENTITY_ENV_KEYS.has(key) && launch.env[key] !== value,
-    );
-    if (!(error instanceof AntigravityError) || error.code !== "INVALID_MODEL" || !differs)
-      throw error;
-    let fresh: ProviderCatalog;
-    try {
-      fresh = await getCatalog({ ...launch, env: { ...launch.env, ...overlay } }, selected.cwd);
-    } catch {
-      throw error;
-    }
-    try {
-      validateSelection(selected, fresh);
-    } catch (freshError) {
-      if (!(freshError instanceof AntigravityError) || freshError.code !== "INVALID_MODEL")
-        throw freshError;
-      const available = fresh.models.map((model) => model.id).join(", ");
-      throw new AntigravityError(
-        `${freshError.message}. Available models: ${available}`,
-        "INVALID_MODEL",
-      );
-    }
+    const { stdout } = await execCommand(launch.command, cliArgs(launch, ["models"]), {
+      env: launch.env,
+      cwd,
+      timeout: 10_000,
+    });
+    const parsed = parseModelIds(stdout);
+    cacheVariants(catalogCacheKey(launch), parsed);
+    return parsed;
+  } catch {
+    return cachedModelVariants(launch);
   }
+}
+
+function pickDefaultThinkingId(
+  options: ReadonlyArray<{ id: string }>,
+  preferred: string | undefined,
+): string | undefined {
+  if (options.length === 0) return undefined;
+  if (preferred && options.some((option) => option.id === preferred)) return preferred;
+  for (const fallback of ["high", "medium"]) {
+    if (options.some((option) => option.id === fallback)) return fallback;
+  }
+  return options.at(-1)?.id;
+}
+
+export function enrichModels(
+  models: readonly ProviderModel[],
+  variants: ReadonlySet<string>,
+  preferredThinking?: string,
+): ProviderModel[] {
+  if (variants.size === 0) return [...models];
+  const baseIds = new Set(models.map((model) => model.id));
+  return models.map((model) => {
+    const thinkingOptions = EFFORT_OPTIONS.filter(([effort]) => {
+      const candidate = `${model.id}-${effort}`;
+      return variants.has(candidate) && !baseIds.has(candidate);
+    }).map(([id, label]) => ({ id, label }));
+    const defaultThinkingOptionId = pickDefaultThinkingId(thinkingOptions, preferredThinking);
+    const aliases =
+      thinkingOptions.length > 0
+        ? thinkingOptions.map((option) => `${model.id}-${option.id}`)
+        : undefined;
+    return {
+      ...model,
+      thinkingOptions,
+      defaultThinkingOptionId,
+      ...(aliases ? { aliases } : {}),
+    };
+  });
+}
+
+export function enrichModes(modes: readonly ProviderMode[]): ProviderMode[] {
+  const decorated = modes.map((mode) => ({
+    ...mode,
+    ...MODE_VISUALS[mode.id],
+  }));
+  if (!decorated.some((mode) => mode.id === FULL_ACCESS_MODE_ID)) {
+    decorated.push(FULL_ACCESS_MODE);
+  }
+  return decorated;
 }

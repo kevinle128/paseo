@@ -2014,4 +2014,61 @@ describe("ACP session history replay", () => {
       await connection.close();
     }
   });
+
+  it("merges transformer sessionMeta alongside _paseo on new and loaded sessions", async () => {
+    const harness = connectorHarness({ capabilities: { loadSession: true } });
+    const registration = runAcpProvider({
+      id: "meta-acp",
+      label: "Meta ACP",
+      connector: harness.connector,
+      transformers: [
+        {
+          sessionMeta(config) {
+            return config.systemPrompt
+              ? { vendor: { systemPrompt: { append: config.systemPrompt } } }
+              : undefined;
+          },
+        },
+      ],
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: ["prompt.message", "session.persistence"],
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      const first = openInput();
+      first.config.systemPrompt = "APPEND_ME";
+      await connection.send(first);
+      await waitForEvent(
+        events,
+        (event) => event.type === "session.ready" && event.requestId === "open-1",
+      );
+
+      const second = openInput();
+      second.requestId = "open-2";
+      second.sessionId = "session-2";
+      second.config.systemPrompt = "APPEND_LOADED";
+      second.persistence = { version: 1, data: { sessionId: "connector-session" } };
+      await connection.send(second);
+      await waitForEvent(
+        events,
+        (event) => event.type === "session.ready" && event.requestId === "open-2",
+      );
+
+      const newReq = harness.instances[1]!.requests.find((req) => req.method === "session/new");
+      const loadReq = harness.instances[2]!.requests.find((req) => req.method === "session/load");
+      expect((newReq?.params as { _meta?: unknown } | undefined)?._meta).toMatchObject({
+        vendor: { systemPrompt: { append: "APPEND_ME" } },
+        _paseo: { systemPrompt: "APPEND_ME" },
+      });
+      expect((loadReq?.params as { _meta?: unknown } | undefined)?._meta).toMatchObject({
+        vendor: { systemPrompt: { append: "APPEND_LOADED" } },
+        _paseo: { systemPrompt: "APPEND_LOADED" },
+      });
+    } finally {
+      await connection.close();
+    }
+  });
 });

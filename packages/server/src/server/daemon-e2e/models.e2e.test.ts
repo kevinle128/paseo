@@ -105,22 +105,28 @@ describe("daemon E2E", () => {
   });
 });
 
-test("Antigravity creates an agent and answers a prompt with real agy", async ({ skip }) => {
+test("Antigravity creates an agent, answers a prompt, and replays history after restart with real agy", async ({
+  skip,
+}) => {
   const command = await findExecutable(process.env.AGY_COMMAND ?? "agy");
   if (command === null) {
     skip("agy is not resolvable");
     return;
   }
   const cwd = await mkdtemp(path.join(os.tmpdir(), "paseo-antigravity-e2e-"));
-  const daemon = await createTestPaseoDaemon({
+  const home = await mkdtemp(path.join(os.tmpdir(), "paseo-antigravity-home-"));
+  const options = {
+    paseoHomeRoot: home,
+    cleanup: false,
     agentClients: {},
     mcpEnabled: false,
     builtinPlugins: new BuiltinPluginLoader(undefined, ["antigravity-provider"]),
     providerOverrides: { antigravity: { command: [command], paseoTools: { enabled: false } } },
-  });
-  const client = new DaemonClient({
+  };
+  let daemon = await createTestPaseoDaemon(options);
+  let client = new DaemonClient({
     url: `ws://127.0.0.1:${daemon.port}/ws`,
-    appVersion: "0.10.0",
+    appVersion: "0.16.0",
   });
   try {
     await client.connect();
@@ -136,17 +142,12 @@ test("Antigravity creates an agent and answers a prompt with real agy", async ({
       cwd,
       title: "Antigravity E2E",
     });
-    expect(agent.currentModeId).toBe("full-access");
-    expect(agent.availableModes?.map((mode) => mode.id)).toEqual(["full-access"]);
+    expect(["default", "accept-edits", "auto", "plan"]).toContain(agent.currentModeId);
+    expect(agent.availableModes?.map((mode) => mode.id)).toEqual(
+      expect.arrayContaining(["default", "accept-edits", "plan", "full-access"]),
+    );
     const openedTimeline = await client.fetchAgentTimeline(agent.id, { limit: 100 });
-    expect(openedTimeline.entries.map((entry) => entry.item)).toEqual([
-      {
-        type: "notification",
-        level: "warning",
-        message:
-          "Antigravity is running with full access\nAntigravity's CLI cannot ask for permission when another app drives it, so Paseo starts it with --dangerously-skip-permissions. Every tool call, including shell commands, runs without asking.",
-      },
-    ]);
+    expect(openedTimeline.entries).toEqual([]);
     await client.sendMessage(agent.id, "Reply with exactly ANTIGRAVITY_E2E_OK. No tools.");
     const result = await client.waitForFinish(agent.id, 90000);
     expect(result.status).toBe("idle");
@@ -157,9 +158,36 @@ test("Antigravity creates an agent and answers a prompt with real agy", async ({
           entry.item.type === "assistant_message" && entry.item.text.includes("ANTIGRAVITY_E2E_OK"),
       ),
     ).toBe(true);
+
+    // Restart the daemon on the same Paseo home and confirm history replays from Antigravity ACP.
+    const staticDir = daemon.staticDir;
+    await client.close();
+    await daemon.close();
+    daemon = await createTestPaseoDaemon({ ...options, staticDir });
+    client = new DaemonClient({
+      url: `ws://127.0.0.1:${daemon.port}/ws`,
+      appVersion: "0.16.0",
+    });
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    const replayed = await client.fetchAgentTimeline(agent.id, { limit: 100 });
+    expect(
+      replayed.entries.some(
+        (entry) =>
+          entry.item.type === "user_message" && entry.item.text.includes("ANTIGRAVITY_E2E_OK"),
+      ),
+    ).toBe(true);
+    expect(
+      replayed.entries.some(
+        (entry) =>
+          entry.item.type === "assistant_message" && entry.item.text.includes("ANTIGRAVITY_E2E_OK"),
+      ),
+    ).toBe(true);
   } finally {
     await client.close();
     await daemon.close();
+    await rm(daemon.staticDir, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
     await rm(cwd, { recursive: true, force: true });
   }
 }, 120000);
