@@ -407,16 +407,24 @@ describe("sessions, persistence and history replay", () => {
           detail: { type: "read", filePath: "/repo/README.md", content: "# README\n" },
         }),
         expect.objectContaining({
+          name: "read_file",
+          detail: { type: "read", filePath: "/repo/LOC.md", content: "loc" },
+        }),
+        expect.objectContaining({
           name: "write_to_file",
           detail: { type: "write", filePath: "/repo/notes.md", content: "notes" },
+        }),
+        expect.objectContaining({
+          name: "write_file",
+          detail: { type: "write", filePath: "/repo/empty.txt", content: "" },
         }),
         expect.objectContaining({
           name: "multi_replace_file_content",
           detail: {
             type: "edit",
             filePath: "/repo/src/app.ts",
-            oldString: "oldCode",
-            newString: "newCode",
+            oldString: "removedLine\n...\noldCode",
+            newString: "\n...\nnewCode",
           },
         }),
         expect.objectContaining({
@@ -431,6 +439,16 @@ describe("sessions, persistence and history replay", () => {
             description: "Check ACP docs",
             childSessionId: "b6f02329-7415-49a7-a9a9-1cd09e898d26",
             log: "",
+          },
+        }),
+        expect.objectContaining({
+          name: "invoke_subagent",
+          detail: {
+            type: "sub_agent",
+            subAgentType: "research",
+            description: "Check live output",
+            childSessionId: "c7f02329-7415-49a7-a9a9-1cd09e898d99",
+            log: "file:///tmp/subagent.log",
           },
         }),
       ]),
@@ -514,6 +532,125 @@ describe("sessions, persistence and history replay", () => {
     expect(h.events.slice(afterBad).filter((event) => event.type === "session.permission")).toEqual(
       [],
     );
+
+    // Hyphenated allow-once is preferred over allow-always.
+    const hyphenStart = h.events.length;
+    await h.completed(await h.prompt("PERMISSION_HYPHEN"));
+    expect(h.events.slice(hyphenStart)).toContainEqual(
+      expect.objectContaining({
+        type: "timeline.item",
+        item: expect.objectContaining({ type: "assistant_message", text: "SELECTED:allow-once" }),
+      }),
+    );
+
+    // Duplicate session.open rejection does not strip full-access from the live session.
+    await expect(
+      h.connection.send({
+        type: "session.open",
+        requestId: "dup-open",
+        sessionId: "s",
+        history: "skip",
+        config: {
+          cwd: h.cwd,
+          env: {},
+          settings: {},
+          mcpServers: {},
+          persist: true,
+          mode: "full-access",
+        },
+      }),
+    ).rejects.toThrow("Session already exists");
+    const afterDup = h.events.length;
+    await h.completed(await h.prompt("PERMISSION"));
+    expect(h.events.slice(afterDup).filter((event) => event.type === "session.permission")).toEqual(
+      [],
+    );
+
+    // Leaving full-access for accept-edits restores interactive permission prompts.
+    const leaveStart = h.events.length;
+    await h.request({
+      type: "session.configure",
+      requestId: "cfg-accept-edits",
+      sessionId: "s",
+      changes: { mode: "accept-edits" },
+    });
+    expect(h.events.slice(leaveStart)).toContainEqual(
+      expect.objectContaining({
+        type: "session.config",
+        config: expect.objectContaining({ mode: "accept-edits" }),
+      }),
+    );
+    const afterLeave = h.events.length;
+    const interactiveTurn = await h.prompt("PERMISSION");
+    const interactivePerm = await h.wait(
+      (event) => h.events.indexOf(event) >= afterLeave && event.type === "session.permission",
+    );
+    if (interactivePerm.type !== "session.permission") throw new Error("Expected permission event");
+    await h.connection.send({
+      type: "session.permission",
+      sessionId: "s",
+      permissionId: interactivePerm.request.id,
+      response: { behavior: "allow", selectedActionId: "allow" },
+    });
+    await h.completed(interactiveTurn);
+  });
+
+  it("handles pipelined configures, invalid persistence payloads, and closed-connection sends", async () => {
+    const h = await harness();
+    await h.open({ config: { mode: "default" } });
+
+    // Pipelined configures: first switches to full-access, second switches back to accept-edits.
+    const pipeStart = h.events.length;
+    await h.connection.send({
+      type: "session.configure",
+      requestId: "pipe-1",
+      sessionId: "s",
+      changes: { mode: "full-access" },
+    });
+    await h.connection.send({
+      type: "session.configure",
+      requestId: "pipe-2",
+      sessionId: "s",
+      changes: { mode: "accept-edits" },
+    });
+    await h.wait((event) => event.type === "request.completed" && event.requestId === "pipe-2");
+    const pipeModes = h.events
+      .slice(pipeStart)
+      .filter(
+        (event): event is Extract<ProviderEvent, { type: "session.config" }> =>
+          event.type === "session.config",
+      )
+      .map((event) => event.config.mode);
+    expect(pipeModes).toEqual(["full-access", "accept-edits"]);
+
+    // Malformed persistence on an open connection emits request.failed.
+    await h.request({
+      type: "session.open",
+      requestId: "bad-persist",
+      sessionId: "s-bad-persist",
+      persistence: { version: 2, data: {} },
+      history: "replay",
+      config: { cwd: h.cwd, env: {}, settings: {}, mcpServers: {}, persist: true },
+    });
+    expect(h.events).toContainEqual(
+      expect.objectContaining({ type: "request.failed", requestId: "bad-persist" }),
+    );
+
+    // Closed connection rejects session.open (even with invalid persistence) and catalog immediately.
+    await h.connection.close();
+    await expect(
+      h.connection.send({
+        type: "session.open",
+        requestId: "closed-open",
+        sessionId: "s-closed",
+        persistence: { version: 2, data: {} },
+        history: "skip",
+        config: { cwd: h.cwd, env: {}, settings: {}, mcpServers: {}, persist: true },
+      }),
+    ).rejects.toThrow("ACP provider connection is closed");
+    await expect(
+      h.connection.send({ type: "catalog", requestId: "closed-cat", cwd: h.cwd }),
+    ).rejects.toThrow("ACP provider connection is closed");
   });
 
   it("cancels an in-flight turn cleanly via session/cancel", async () => {

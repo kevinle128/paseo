@@ -2071,4 +2071,122 @@ describe("ACP session history replay", () => {
       await connection.close();
     }
   });
+
+  it("batches opening config updates inside configTransaction, drains notifications, and commits staged transformer config", async () => {
+    const baseModes = {
+      currentModeId: "default",
+      availableModes: [
+        { id: "default", name: "Default" },
+        { id: "accept-edits", name: "Accept edits" },
+      ],
+    };
+    const baseOptions = [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "m1",
+        options: [
+          { value: "m1", name: "M1" },
+          { value: "m2", name: "M2" },
+        ],
+      },
+    ];
+    let currentModel = "m1";
+    let currentMode = "default";
+    const stagedConfig = {
+      model: "m2-transformed",
+      mode: "accept-edits",
+      models: [{ id: "m2-transformed", label: "M2 Transformed" }],
+      modes: [
+        { id: "default", label: "Default" },
+        { id: "accept-edits", label: "Accept edits" },
+      ],
+      thinkingOptions: [],
+      settings: [],
+    };
+    const harness = connectorHarness({
+      handleRequest(instance, request) {
+        if (request.method === "session/new") {
+          instance.respond(request, {
+            sessionId: "connector-session",
+            modes: baseModes,
+            configOptions: baseOptions,
+          });
+          return true;
+        }
+        if (request.method === "session/set_config_option") {
+          const params = request.params as { configId: string; value: string };
+          if (params.configId === "model") currentModel = params.value;
+          const updated = baseOptions.map((option) => ({ ...option, currentValue: currentModel }));
+          instance.notify("session/update", {
+            sessionId: "connector-session",
+            update: { sessionUpdate: "config_option_update", configOptions: updated },
+          });
+          instance.notify("vendor/config", { config: stagedConfig });
+          instance.respond(request, { configOptions: updated });
+          return true;
+        }
+        if (request.method === "session/set_mode") {
+          const params = request.params as { modeId: string };
+          currentMode = params.modeId;
+          instance.notify("session/update", {
+            sessionId: "connector-session",
+            update: { sessionUpdate: "current_mode_update", currentModeId: currentMode },
+          });
+          instance.respond(request, {});
+          return true;
+        }
+        return false;
+      },
+    });
+    const registration = runAcpProvider({
+      id: "open-tx-acp",
+      label: "Open Tx ACP",
+      connector: harness.connector,
+      transformers: [
+        {
+          notification(notification) {
+            if (notification.method === "vendor/config") {
+              const params = notification.params as { config: typeof stagedConfig };
+              return { type: "config", config: params.config };
+            }
+            return undefined;
+          },
+        },
+      ],
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: ["prompt.message", "session.configure"],
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      const input = openInput();
+      input.config.model = "m2";
+      input.config.mode = "accept-edits";
+      await connection.send(input);
+      await waitForEvent(
+        events,
+        (event) => event.type === "session.ready" && event.requestId === "open-1",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const openedIndex = events.findIndex((event) => event.type === "session.opened");
+      const configIndices = events
+        .map((event, index) => (event.type === "session.config" ? index : -1))
+        .filter((index) => index !== -1);
+      expect(openedIndex).toBeGreaterThanOrEqual(0);
+      expect(configIndices).toHaveLength(1);
+      expect(configIndices[0]).toBeGreaterThan(openedIndex);
+      expect(events[configIndices[0]!]).toMatchObject({
+        type: "session.config",
+        config: stagedConfig,
+      });
+    } finally {
+      await connection.close();
+    }
+  });
 });

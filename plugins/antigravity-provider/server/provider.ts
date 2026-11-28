@@ -1,12 +1,14 @@
 import { runAcpProvider } from "@getpaseo/plugin/server/acp";
-import type {
-  ProviderConnection,
-  ProviderEvent,
-  ProviderInput,
-  ProviderLaunch,
-  ProviderPermissionAction,
-  ProviderPersistence,
-  ProviderRegistration,
+import {
+  ProviderInputSchema,
+  requireProviderCapabilities,
+  type ProviderConnection,
+  type ProviderEvent,
+  type ProviderInput,
+  type ProviderLaunch,
+  type ProviderPermissionAction,
+  type ProviderPersistence,
+  type ProviderRegistration,
 } from "@getpaseo/plugin/server/provider";
 import { z } from "zod";
 import {
@@ -50,7 +52,12 @@ function selectAutoAllowAction(
   if (allows.length === 0 || !allows.every((action) => /^allow(?:$|[_-])/.test(action.id))) {
     return null;
   }
-  return allows.find((action) => action.id === "allow" || action.id === "allow_once") ?? allows[0]!;
+  return (
+    allows.find(
+      (action) =>
+        action.id === "allow" || action.id === "allow_once" || action.id === "allow-once",
+    ) ?? allows[0]!
+  );
 }
 
 export function createAntigravityProvider(): ProviderRegistration {
@@ -96,24 +103,20 @@ export function createAntigravityProvider(): ProviderRegistration {
 
 function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): ProviderConnection {
   const listeners = new Set<(event: ProviderEvent) => void>();
+  const activeSessions = new Set<string>();
   const fullAccessSessions = new Set<string>();
   const closedSessions = new Set<string>();
-  const pendingOpens = new Map<string, string>();
-  const pendingModeChanges = new Map<string, { sessionId: string; previous: boolean }>();
+  const pendingOpens = new Map<string, { sessionId: string; wantsFullAccess: boolean }>();
+  const pendingConfigures = new Map<
+    string,
+    Array<{ requestId: string; wantsFullAccess: boolean | undefined }>
+  >();
   const autoApprovedPermissions = new Set<string>();
+  let closed = false;
 
   function emit(event: ProviderEvent): void {
+    if (closed) return;
     for (const listener of listeners) listener(event);
-  }
-
-  function hasPendingModeMutation(sessionId: string): boolean {
-    for (const openedSession of pendingOpens.values()) {
-      if (openedSession === sessionId) return true;
-    }
-    for (const change of pendingModeChanges.values()) {
-      if (change.sessionId === sessionId) return true;
-    }
-    return false;
   }
 
   function clearSessionPermissions(sessionId: string): void {
@@ -123,33 +126,65 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
     }
   }
 
+  function clearPendingSessionState(sessionId: string): void {
+    for (const [requestId, pending] of pendingOpens) {
+      if (pending.sessionId === sessionId) pendingOpens.delete(requestId);
+    }
+    pendingConfigures.delete(sessionId);
+  }
+
+  function removePendingConfigure(requestId: string): void {
+    for (const [sessionId, queue] of pendingConfigures) {
+      const index = queue.findIndex((entry) => entry.requestId === requestId);
+      if (index === -1) continue;
+      queue.splice(index, 1);
+      if (queue.length === 0) pendingConfigures.delete(sessionId);
+      return;
+    }
+  }
+
+  function applyCommittedConfigure(sessionId: string): void {
+    const queue = pendingConfigures.get(sessionId);
+    if (!queue || queue.length === 0) return;
+    const head = queue.shift()!;
+    if (queue.length === 0) pendingConfigures.delete(sessionId);
+    if (head.wantsFullAccess === true) fullAccessSessions.add(sessionId);
+    else if (head.wantsFullAccess === false) fullAccessSessions.delete(sessionId);
+  }
+
   function settleRequestState(event: ProviderEvent): void {
+    if (event.type === "session.opened") {
+      activeSessions.add(event.sessionId);
+      closedSessions.delete(event.sessionId);
+      if (event.requestId) {
+        const pending = pendingOpens.get(event.requestId);
+        if (pending) {
+          pendingOpens.delete(event.requestId);
+          if (pending.wantsFullAccess) fullAccessSessions.add(event.sessionId);
+          else fullAccessSessions.delete(event.sessionId);
+        }
+      }
+      return;
+    }
     if (event.type === "session.ready" && event.requestId) {
       pendingOpens.delete(event.requestId);
       return;
     }
     if (event.type === "request.completed") {
-      pendingModeChanges.delete(event.requestId);
+      removePendingConfigure(event.requestId);
       return;
     }
     if (event.type === "session.closed" || event.type === "session.runtime_failed") {
+      activeSessions.delete(event.sessionId);
       closedSessions.add(event.sessionId);
       fullAccessSessions.delete(event.sessionId);
       clearSessionPermissions(event.sessionId);
+      clearPendingSessionState(event.sessionId);
       return;
     }
     if (event.type !== "request.failed") return;
-    const openedSession = pendingOpens.get(event.requestId);
-    if (openedSession) {
-      pendingOpens.delete(event.requestId);
-      fullAccessSessions.delete(openedSession);
-    }
-    const modeChange = pendingModeChanges.get(event.requestId);
-    if (modeChange) {
-      pendingModeChanges.delete(event.requestId);
-      if (modeChange.previous) fullAccessSessions.add(modeChange.sessionId);
-      else fullAccessSessions.delete(modeChange.sessionId);
-    }
+    pendingOpens.delete(event.requestId);
+    removePendingConfigure(event.requestId);
   }
 
   function resolveSessionMode(
@@ -157,11 +192,7 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
     nativeMode: string | undefined,
   ): string | undefined {
     if (!fullAccessSessions.has(sessionId)) return nativeMode;
-    if (
-      nativeMode === NATIVE_FULL_ACCESS_BASE_MODE ||
-      nativeMode === undefined ||
-      hasPendingModeMutation(sessionId)
-    ) {
+    if (nativeMode === NATIVE_FULL_ACCESS_BASE_MODE || nativeMode === undefined) {
       return FULL_ACCESS_MODE_ID;
     }
     fullAccessSessions.delete(sessionId);
@@ -178,18 +209,12 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
     if (!allow) return false;
     const key = `${event.sessionId}:${event.request.id}`;
     autoApprovedPermissions.add(key);
-    void Promise.resolve()
-      .then(() => {
-        if (closedSessions.has(event.sessionId)) {
-          autoApprovedPermissions.delete(key);
-          return undefined;
-        }
-        return inner.send({
-          type: "session.permission",
-          sessionId: event.sessionId,
-          permissionId: event.request.id,
-          response: { behavior: "allow", selectedActionId: allow.id },
-        });
+    void inner
+      .send({
+        type: "session.permission",
+        sessionId: event.sessionId,
+        permissionId: event.request.id,
+        response: { behavior: "allow", selectedActionId: allow.id },
       })
       .catch(() => {
         autoApprovedPermissions.delete(key);
@@ -213,6 +238,7 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
       return;
     }
     if (event.type === "session.config") {
+      applyCommittedConfigure(event.sessionId);
       const variants = cachedModelVariants(launch);
       emit({
         ...event,
@@ -245,64 +271,75 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
     version: inner.version,
     capabilities: inner.capabilities,
     async send(input: ProviderInput) {
+      if (closed) throw new Error("ACP provider connection is closed");
       if (input.type === "catalog") {
         await refreshModelVariants(launch, input.cwd);
         await inner.send(input);
         return;
       }
       if (input.type === "session.open") {
+        const parsed = ProviderInputSchema.parse(input);
+        if (parsed.type !== "session.open") {
+          await inner.send(parsed);
+          return;
+        }
+        requireProviderCapabilities(inner.capabilities, parsed);
+        if (activeSessions.has(parsed.sessionId)) {
+          await inner.send(parsed);
+          return;
+        }
         let persistence: ProviderPersistence | undefined;
         try {
-          persistence = normalizePersistence(input.persistence);
+          persistence = normalizePersistence(parsed.persistence);
         } catch (error) {
           emit({
             type: "request.failed",
-            requestId: input.requestId,
+            requestId: parsed.requestId,
             error: { message: error instanceof Error ? error.message : String(error) },
           });
           return;
         }
-        closedSessions.delete(input.sessionId);
-        const wantsFullAccess = input.config.mode === FULL_ACCESS_MODE_ID;
-        if (wantsFullAccess) {
-          fullAccessSessions.add(input.sessionId);
-          pendingOpens.set(input.requestId, input.sessionId);
-        }
-        try {
-          await inner.send({
-            ...input,
-            persistence,
-            config: wantsFullAccess
-              ? { ...input.config, mode: NATIVE_FULL_ACCESS_BASE_MODE }
-              : input.config,
-          });
-        } catch (error) {
-          if (wantsFullAccess) {
-            pendingOpens.delete(input.requestId);
-            fullAccessSessions.delete(input.sessionId);
-          }
-          throw error;
-        }
+        const wantsFullAccess = parsed.config.mode === FULL_ACCESS_MODE_ID;
+        await inner.send({
+          ...parsed,
+          persistence,
+          config: wantsFullAccess
+            ? { ...parsed.config, mode: NATIVE_FULL_ACCESS_BASE_MODE }
+            : parsed.config,
+        });
+        pendingOpens.set(parsed.requestId, {
+          sessionId: parsed.sessionId,
+          wantsFullAccess,
+        });
         return;
       }
-      if (input.type === "session.configure" && input.changes.mode !== undefined) {
-        const previous = fullAccessSessions.has(input.sessionId);
-        pendingModeChanges.set(input.requestId, { sessionId: input.sessionId, previous });
-        const wantsFullAccess = input.changes.mode === FULL_ACCESS_MODE_ID;
-        if (wantsFullAccess) fullAccessSessions.add(input.sessionId);
-        else fullAccessSessions.delete(input.sessionId);
+      if (input.type === "session.configure") {
+        const modeChange = input.changes?.mode;
+        const wantsFullAccess =
+          modeChange === undefined ? undefined : modeChange === FULL_ACCESS_MODE_ID;
+        await inner.send(
+          wantsFullAccess
+            ? { ...input, changes: { ...input.changes, mode: NATIVE_FULL_ACCESS_BASE_MODE } }
+            : input,
+        );
+        const queue = pendingConfigures.get(input.sessionId) ?? [];
+        queue.push({ requestId: input.requestId, wantsFullAccess });
+        pendingConfigures.set(input.sessionId, queue);
+        return;
+      }
+      if (input.type === "session.close") {
+        const wasClosed = closedSessions.has(input.sessionId);
+        closedSessions.add(input.sessionId);
         try {
-          await inner.send(
-            wantsFullAccess
-              ? { ...input, changes: { ...input.changes, mode: NATIVE_FULL_ACCESS_BASE_MODE } }
-              : input,
-          );
+          await inner.send(input);
         } catch (error) {
-          pendingModeChanges.delete(input.requestId);
-          if (previous) fullAccessSessions.add(input.sessionId);
-          else fullAccessSessions.delete(input.sessionId);
+          if (!wasClosed) closedSessions.delete(input.sessionId);
           throw error;
         }
+        activeSessions.delete(input.sessionId);
+        fullAccessSessions.delete(input.sessionId);
+        clearSessionPermissions(input.sessionId);
+        clearPendingSessionState(input.sessionId);
         return;
       }
       await inner.send(input);
@@ -312,11 +349,13 @@ function wrapConnection(inner: ProviderConnection, launch: ProviderLaunch): Prov
       return () => listeners.delete(listener);
     },
     async close() {
+      closed = true;
       await inner.close();
+      activeSessions.clear();
       fullAccessSessions.clear();
       closedSessions.clear();
       pendingOpens.clear();
-      pendingModeChanges.clear();
+      pendingConfigures.clear();
       autoApprovedPermissions.clear();
       listeners.clear();
     },

@@ -190,12 +190,34 @@ function emitToolSuite(sessionId) {
     },
     {
       sessionUpdate: "tool_call",
+      toolCallId: "tool-read-loc",
+      name: "read_file",
+      kind: "read",
+      title: "File LOC.md",
+      status: "completed",
+      locations: [{ path: "/repo/LOC.md" }],
+      rawInput: {},
+      rawOutput: "loc",
+    },
+    {
+      sessionUpdate: "tool_call",
       toolCallId: "tool-write",
       name: "write_to_file",
-      kind: "other",
+      kind: "edit",
       title: "Write notes.md",
       status: "completed",
+      locations: [{ path: "/repo/notes.md" }],
       rawInput: { TargetFile: "/repo/notes.md", CodeContent: "notes" },
+    },
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-write-empty",
+      name: "write_file",
+      kind: "edit",
+      title: "Write empty.txt",
+      status: "completed",
+      locations: [{ path: "/repo/empty.txt" }],
+      rawInput: { Content: "" },
     },
     {
       sessionUpdate: "tool_call",
@@ -207,7 +229,10 @@ function emitToolSuite(sessionId) {
       locations: [{ path: "/repo/src/app.ts" }],
       rawInput: {
         TargetFile: "/repo/src/app.ts",
-        ReplacementChunks: [{ TargetContent: "oldCode", ReplacementContent: "newCode" }],
+        ReplacementChunks: [
+          { TargetContent: "removedLine", ReplacementContent: "" },
+          { TargetContent: "oldCode", ReplacementContent: "newCode" },
+        ],
       },
     },
     {
@@ -235,6 +260,23 @@ function emitToolSuite(sessionId) {
             ConversationId: "b6f02329-7415-49a7-a9a9-1cd09e898d26",
           },
         ],
+      },
+    },
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-subagent-live",
+      name: "invoke_subagent",
+      kind: "other",
+      title: "Subagent live",
+      status: "completed",
+      rawInput: {
+        TypeName: "research",
+        Role: "Codebase Researcher",
+        Prompt: "Check live output",
+      },
+      rawOutput: {
+        conversationId: "c7f02329-7415-49a7-a9a9-1cd09e898d99",
+        logUri: "file:///tmp/subagent.log",
       },
     },
     {
@@ -321,6 +363,32 @@ async function handlePrompt(id, params) {
     sendUpdate(sessionId, {
       sessionUpdate: "agent_message_chunk",
       content: { type: "text", text: allowed ? "APPROVED" : "DENIED" },
+    });
+    send({ id, result: { stopReason: "end_turn" } });
+    return;
+  }
+  if (text === "PERMISSION_HYPHEN") {
+    pendingPromptRequestId = id;
+    const perm = await askClientPermission({
+      sessionId,
+      toolCall: {
+        toolCallId: "perm-shell-hyphen",
+        name: "run_command",
+        kind: "execute",
+        title: "echo HYPHEN_CHECK",
+        rawInput: { CommandLine: "echo HYPHEN_CHECK" },
+      },
+      options: [
+        { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
+        { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+        { optionId: "reject-once", name: "Deny", kind: "reject_once" },
+      ],
+    });
+    pendingPromptRequestId = null;
+    const selected = perm?.outcome?.outcome === "selected" ? perm.outcome.optionId : "cancelled";
+    sendUpdate(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: `SELECTED:${selected}` },
     });
     send({ id, result: { stopReason: "end_turn" } });
     return;

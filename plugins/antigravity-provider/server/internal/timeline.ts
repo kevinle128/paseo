@@ -22,18 +22,30 @@ function pickString(
   return undefined;
 }
 
+function pickText(
+  record: Record<string, unknown> | null,
+  keys: readonly string[],
+): string | undefined {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
 function extractReplacementPair(input: Record<string, unknown> | null): {
   oldString: string | null;
   newString: string | null;
 } {
-  const directOld = pickString(input, [
+  const directOld = pickText(input, [
     "oldString",
     "Target",
     "target",
     "TargetContent",
     "targetContent",
   ]);
-  const directNew = pickString(input, [
+  const directNew = pickText(input, [
     "newString",
     "Replacement",
     "replacement",
@@ -51,10 +63,12 @@ function extractReplacementPair(input: Record<string, unknown> | null): {
   const newParts: string[] = [];
   for (const entry of chunks) {
     const chunk = asRecord(entry);
-    const oldPart = pickString(chunk, ["TargetContent", "targetContent"]);
-    const newPart = pickString(chunk, ["ReplacementContent", "replacementContent"]);
-    if (oldPart !== undefined) oldParts.push(oldPart);
-    if (newPart !== undefined) newParts.push(newPart);
+    const oldPart = pickText(chunk, ["TargetContent", "targetContent"]);
+    const newPart = pickText(chunk, ["ReplacementContent", "replacementContent"]);
+    if (oldPart !== undefined || newPart !== undefined) {
+      oldParts.push(oldPart ?? "");
+      newParts.push(newPart ?? "");
+    }
   }
   return {
     oldString: oldParts.length > 0 ? oldParts.join("\n...\n") : null,
@@ -94,6 +108,19 @@ export const antigravityAcpTransformer: AcpTransformer = {
         input: { filePath, oldString, newString },
       };
     }
+    if (toolCall.name === "write_file" || toolCall.name === "write_to_file") {
+      return {
+        ...toolCall,
+        kind: "other",
+        input: { ...(input ?? {}), filePath },
+      };
+    }
+    if (toolCall.name === "read_file" || toolCall.name === "view_file") {
+      return {
+        ...toolCall,
+        input: { ...(input ?? {}), filePath },
+      };
+    }
     return toolCall;
   },
 };
@@ -113,20 +140,49 @@ function extractShellOutput(
   return undefined;
 }
 
-function mapSubagentDetail(input: Record<string, unknown> | null): ProviderToolCallDetail {
-  const list = input?.Subagents ?? input?.subagents;
-  const first = Array.isArray(list) && list.length > 0 ? asRecord(list[0]) : input;
-  const subAgentType = pickString(first, ["TypeName", "typeName", "type_name"]);
-  const description = pickString(first, [
-    "Prompt",
-    "prompt",
-    "InitialPrompt",
-    "initial_prompt",
-    "Role",
-    "role",
-  ]);
-  const childSessionId = pickString(first, ["ConversationId", "conversation_id"]);
-  return { type: "sub_agent", subAgentType, description, childSessionId, log: "" };
+function firstSubagentRecord(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const list = record?.Subagents ?? record?.subagents;
+  return Array.isArray(list) && list.length > 0 ? asRecord(list[0]) : record;
+}
+
+function mapSubagentDetail(
+  input: Record<string, unknown> | null,
+  outputRecord: Record<string, unknown> | null,
+): ProviderToolCallDetail {
+  const firstInput = firstSubagentRecord(input);
+  const firstOutput = firstSubagentRecord(outputRecord);
+  const subAgentType =
+    pickString(firstInput, ["TypeName", "typeName", "type_name"]) ??
+    pickString(firstOutput, ["TypeName", "typeName", "type_name"]);
+  const description =
+    pickString(firstInput, [
+      "Prompt",
+      "prompt",
+      "InitialPrompt",
+      "initial_prompt",
+      "Role",
+      "role",
+    ]) ??
+    pickString(firstOutput, [
+      "Prompt",
+      "prompt",
+      "InitialPrompt",
+      "initial_prompt",
+      "Role",
+      "role",
+    ]);
+  const childSessionId =
+    pickString(firstOutput, ["ConversationId", "conversationId", "conversation_id"]) ??
+    pickString(outputRecord, ["ConversationId", "conversationId", "conversation_id"]) ??
+    pickString(firstInput, ["ConversationId", "conversationId", "conversation_id"]);
+  const log =
+    pickString(firstOutput, ["log_uri", "logUri", "log"]) ??
+    pickString(outputRecord, ["log_uri", "logUri", "log"]) ??
+    pickString(firstInput, ["log_uri", "logUri", "log"]) ??
+    "";
+  return { type: "sub_agent", subAgentType, description, childSessionId, log };
 }
 
 function mapUnknownToolDetail(
@@ -153,11 +209,11 @@ function mapUnknownToolDetail(
   if (name === "write_file" || name === "write_to_file") {
     const filePath = pickString(input, FILE_PATH_KEYS);
     if (!filePath) return null;
-    const content = pickString(input, ["Content", "content", "CodeContent", "codeContent"]);
+    const content = pickText(input, ["Content", "content", "CodeContent", "codeContent"]);
     return { type: "write", filePath, content };
   }
   if (name === "invoke_subagent") {
-    return mapSubagentDetail(input);
+    return mapSubagentDetail(input, outputRecord);
   }
   return null;
 }
